@@ -197,22 +197,7 @@ export const SignIn: React.FC = () => {
                 Sign In
               </Button>
 
-              {/* Quick Fill Credentials Helper */}
-              <div className="pt-2 text-center">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const emailInput = document.getElementById('email') as HTMLInputElement;
-                    const passInput = document.getElementById('password') as HTMLInputElement;
-                    if (emailInput) emailInput.value = 'prorsethchun2014@gmail.com';
-                    if (passInput) passInput.value = 'password123';
-                    setError(null);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50/80 hover:bg-indigo-100/90 text-indigo-700 text-xs font-medium transition-colors border border-indigo-100"
-                >
-                  <span>Quick Fill: prorsethchun2014@gmail.com</span>
-                </button>
-              </div>
+
             </form>
 
             {/* Divider */}
