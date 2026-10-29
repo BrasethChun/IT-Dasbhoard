@@ -1,11 +1,16 @@
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '.env'), override: true });
 dotenv.config({ override: true });
+
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
 import crypto from 'crypto';
@@ -20,6 +25,17 @@ import {
 } from './telegramAlertService';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
+
+// Primary GoDaddy MySQL Database Configuration
+const GODADDY_CONFIG = {
+  host: '118.139.180.163',
+  port: 3306,
+  user: 'khema_dbuser',
+  password: 'Y+k,C=JAEA4nR+0*',
+  database: 'khema_ainotes',
+  ssl: false
+};
+
 const LOCAL_CONFIG = {
   host: '127.0.0.1',
   port: 3306,
@@ -43,12 +59,12 @@ function createDirectPool(config?: {
   database?: string;
   ssl?: boolean;
 }): mysql.Pool {
-  const host = config?.host || process.env.MYSQL_HOST || LOCAL_CONFIG.host;
-  const port = Number(config?.port || process.env.MYSQL_PORT) || LOCAL_CONFIG.port;
-  const user = config?.user || process.env.MYSQL_USER || LOCAL_CONFIG.user;
-  const password = config?.password !== undefined ? config.password : (process.env.MYSQL_PASSWORD ?? LOCAL_CONFIG.password);
-  const database = config?.database || process.env.MYSQL_DATABASE || LOCAL_CONFIG.database;
-  const isSsl = config?.ssl !== undefined ? config.ssl : process.env.MYSQL_SSL === 'true';
+  const host = config?.host || process.env.MYSQL_HOST || GODADDY_CONFIG.host;
+  const port = Number(config?.port || process.env.MYSQL_PORT) || GODADDY_CONFIG.port;
+  const user = config?.user || process.env.MYSQL_USER || GODADDY_CONFIG.user;
+  const password = config?.password !== undefined ? config.password : (process.env.MYSQL_PASSWORD ?? GODADDY_CONFIG.password);
+  const database = config?.database || process.env.MYSQL_DATABASE || GODADDY_CONFIG.database;
+  const isSsl = config?.ssl !== undefined ? config.ssl : (process.env.MYSQL_SSL === 'true' || GODADDY_CONFIG.ssl);
 
   return mysql.createPool({
     host,
@@ -122,6 +138,13 @@ function explicitlySwitchToLocalDb(): mysql.Pool {
 function getDb(): mysql.Pool {
   if (!primaryPool) {
     primaryPool = createDirectPool();
+  }
+
+  const isLockedToGoDaddy = (process.env.PRIMARY_LOCKED === 'true' || process.env.PRIMARY_DB === 'godaddy' || !process.env.MYSQL_HOST || process.env.MYSQL_HOST === '118.139.180.163');
+
+  // When GoDaddy is locked as primary, connect directly to GoDaddy without falling back to 127.0.0.1
+  if (isLockedToGoDaddy) {
+    return primaryPool;
   }
 
   const isRemoteConfigured = (process.env.MYSQL_HOST && process.env.MYSQL_HOST !== '127.0.0.1' && process.env.MYSQL_HOST !== 'localhost');
