@@ -1,0 +1,20 @@
+{
+  "id": "backup_20261027035321_manual",
+  "filename": "ainotes_backup_20261027035321_manual.sql",
+  "createdAt": "2026-10-27T03:53:21.574Z",
+  "sizeBytes": 286851,
+  "formattedSize": "280.1 KB",
+  "trigger": "manual",
+  "database": "ainotes_db",
+  "host": "127.0.0.1",
+  "tableCount": 22,
+  "recordCounts": {
+    "notes": 9,
+    "subscriptions": 10,
+    "assets": 220,
+    "users": 18,
+    "tickets": 17,
+    "mailAccounts": 1
+  },
+  "status": "success"
+}

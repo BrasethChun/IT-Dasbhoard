@@ -1,0 +1,146 @@
+2026-10-27  2:39:29 0 [Warning] Could not increase number of max_open_files to more than 25000 (request: 32188)
+2026-10-27  2:39:29 0 [Note] Starting MariaDB 10.11.19-MariaDB-0+deb12u1 source revision 5843d8475120241667a7ce0f8a1abb6c9b43a273 server_uid 4ZN5lDaTmoD+Zp2aPD4wD1fNsaY= as process 1470
+2026-10-27  2:39:29 0 [Note] InnoDB: Compressed tables use zlib 1.2.13
+2026-10-27  2:39:29 0 [Note] InnoDB: Number of transaction pools: 1
+2026-10-27  2:39:29 0 [Note] InnoDB: Using crc32 + pclmulqdq instructions
+2026-10-27  2:39:29 0 [Note] mariadbd: O_TMPFILE is not supported on /tmp (disabling future attempts)
+2026-10-27  2:39:29 0 [Note] InnoDB: Using io_uring
+2026-10-27  2:39:29 0 [Note] InnoDB: innodb_buffer_pool_size_max=8388608m, innodb_buffer_pool_size=128m
+2026-10-27  2:39:29 0 [Note] InnoDB: Completed initialization of buffer pool
+2026-10-27  2:39:29 0 [Note] InnoDB: Buffered log writes (block size=512 bytes)
+2026-10-27  2:39:29 0 [Note] InnoDB: End of log at LSN=44404
+2026-10-27  2:39:29 0 [Note] InnoDB: 128 rollback segments are active.
+2026-10-27  2:39:29 0 [Note] InnoDB: Setting file './ibtmp1' size to 12.000MiB. Physically writing the file full; Please wait ...
+2026-10-27  2:39:29 0 [Note] InnoDB: File './ibtmp1' size is now 12.000MiB.
+2026-10-27  2:39:29 0 [Note] InnoDB: log sequence number 44404; transaction id 14
+2026-10-27  2:39:29 0 [Note] Plugin 'FEEDBACK' is disabled.
+2026-10-27  2:39:29 0 [Note] InnoDB: Loading buffer pool(s) from /var/lib/mysql/ib_buffer_pool
+2026-10-27  2:39:29 0 [Warning] You need to use --log-bin to make --expire-logs-days or --binlog-expire-logs-seconds work.
+2026-10-27  2:39:29 0 [Note] InnoDB: Buffer pool(s) load completed at 261027  2:39:29
+2026-10-27  2:39:29 0 [Note] Server socket created on IP: '127.0.0.1', port: '3306'.
+2026-10-27  2:39:29 0 [Note] /usr/sbin/mariadbd: ready for connections.
+Version: '10.11.19-MariaDB-0+deb12u1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Debian 12
+2026-10-27  2:56:15 0 [Warning] Could not increase number of max_open_files to more than 25000 (request: 32188)
+2026-10-27  2:56:15 0 [Note] Starting MariaDB 10.11.19-MariaDB-0+deb12u1 source revision 5843d8475120241667a7ce0f8a1abb6c9b43a273 server_uid 4ZN5lDaTmoD+Zp2aPD4wD1fNsaY= as process 1579
+2026-10-27  2:56:15 0 [Note] mariadbd: Aria engine: starting recovery
+recovered pages: 0% 16% 26% 41% 51% 64% 76% 88% 100% (0.0 seconds); tables to flush: 1 0
+ (0.0 seconds); 
+2026-10-27  2:56:15 0 [Note] mariadbd: Aria engine: recovery done
+2026-10-27  2:56:15 0 [Note] InnoDB: Compressed tables use zlib 1.2.13
+2026-10-27  2:56:15 0 [Note] InnoDB: Number of transaction pools: 1
+2026-10-27  2:56:15 0 [Note] InnoDB: Using crc32 + pclmulqdq instructions
+2026-10-27  2:56:15 0 [Note] mariadbd: O_TMPFILE is not supported on /tmp (disabling future attempts)
+2026-10-27  2:56:15 0 [Note] InnoDB: Using io_uring
+2026-10-27  2:56:15 0 [Note] InnoDB: innodb_buffer_pool_size_max=8388608m, innodb_buffer_pool_size=128m
+2026-10-27  2:56:15 0 [Note] InnoDB: Completed initialization of buffer pool
+2026-10-27  2:56:15 0 [Note] InnoDB: Buffered log writes (block size=512 bytes)
+2026-10-27  2:56:15 0 [Note] InnoDB: Starting crash recovery from checkpoint LSN=44404
+2026-10-27  2:56:15 0 [Note] InnoDB: End of log at LSN=821372
+2026-10-27  2:56:15 0 [Note] InnoDB: To recover: 331 pages
+2026-10-27  2:56:15 0 [Note] InnoDB: 128 rollback segments are active.
+2026-10-27  2:56:15 0 [Note] InnoDB: Removed temporary tablespace data file: "./ibtmp1"
+2026-10-27  2:56:15 0 [Note] InnoDB: Setting file './ibtmp1' size to 12.000MiB. Physically writing the file full; Please wait ...
+2026-10-27  2:56:15 0 [Note] InnoDB: File './ibtmp1' size is now 12.000MiB.
+2026-10-27  2:56:15 0 [Note] InnoDB: log sequence number 821372; transaction id 311
+2026-10-27  2:56:15 0 [Note] InnoDB: Loading buffer pool(s) from /var/lib/mysql/ib_buffer_pool
+2026-10-27  2:56:15 0 [Note] Plugin 'FEEDBACK' is disabled.
+2026-10-27  2:56:15 0 [Warning] You need to use --log-bin to make --expire-logs-days or --binlog-expire-logs-seconds work.
+2026-10-27  2:56:15 0 [Note] InnoDB: Buffer pool(s) load completed at 261027  2:56:15
+2026-10-27  2:56:15 0 [Note] Server socket created on IP: '127.0.0.1', port: '3306'.
+2026-10-27  2:56:15 0 [Note] /usr/sbin/mariadbd: ready for connections.
+Version: '10.11.19-MariaDB-0+deb12u1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Debian 12
+2026-10-27  2:57:03 0 [Warning] Could not increase number of max_open_files to more than 25000 (request: 32188)
+2026-10-27  2:57:03 0 [Note] Starting MariaDB 10.11.19-MariaDB-0+deb12u1 source revision 5843d8475120241667a7ce0f8a1abb6c9b43a273 server_uid 4ZN5lDaTmoD+Zp2aPD4wD1fNsaY= as process 1669
+2026-10-27  2:57:03 0 [Note] mariadbd: Aria engine: starting recovery
+recovered pages: 0% 28% 47% 66% 77% 89% 100% (0.0 seconds); tables to flush: 1 0
+ (0.0 seconds); 
+2026-10-27  2:57:03 0 [Note] mariadbd: Aria engine: recovery done
+2026-10-27  2:57:03 0 [Note] InnoDB: Compressed tables use zlib 1.2.13
+2026-10-27  2:57:03 0 [Note] InnoDB: Number of transaction pools: 1
+2026-10-27  2:57:03 0 [Note] InnoDB: Using crc32 + pclmulqdq instructions
+2026-10-27  2:57:03 0 [Note] mariadbd: O_TMPFILE is not supported on /tmp (disabling future attempts)
+2026-10-27  2:57:03 0 [Note] InnoDB: Using io_uring
+2026-10-27  2:57:03 0 [Note] InnoDB: innodb_buffer_pool_size_max=8388608m, innodb_buffer_pool_size=128m
+2026-10-27  2:57:03 0 [Note] InnoDB: Completed initialization of buffer pool
+2026-10-27  2:57:03 0 [Note] InnoDB: Buffered log writes (block size=512 bytes)
+2026-10-27  2:57:03 0 [Note] InnoDB: Starting crash recovery from checkpoint LSN=44404
+2026-10-27  2:57:03 0 [Note] InnoDB: End of log at LSN=821372
+2026-10-27  2:57:03 0 [Note] InnoDB: To recover: 331 pages
+2026-10-27  2:57:03 0 [Note] InnoDB: 128 rollback segments are active.
+2026-10-27  2:57:03 0 [Note] InnoDB: Removed temporary tablespace data file: "./ibtmp1"
+2026-10-27  2:57:03 0 [Note] InnoDB: Setting file './ibtmp1' size to 12.000MiB. Physically writing the file full; Please wait ...
+2026-10-27  2:57:03 0 [Note] InnoDB: File './ibtmp1' size is now 12.000MiB.
+2026-10-27  2:57:03 0 [Note] InnoDB: log sequence number 821372; transaction id 311
+2026-10-27  2:57:03 0 [Note] InnoDB: Loading buffer pool(s) from /var/lib/mysql/ib_buffer_pool
+2026-10-27  2:57:03 0 [Note] InnoDB: Buffer pool(s) load completed at 261027  2:57:03
+2026-10-27  2:57:03 0 [Note] Plugin 'FEEDBACK' is disabled.
+2026-10-27  2:57:03 0 [Warning] You need to use --log-bin to make --expire-logs-days or --binlog-expire-logs-seconds work.
+2026-10-27  2:57:03 0 [Note] Server socket created on IP: '127.0.0.1', port: '3306'.
+2026-10-27  2:57:03 0 [Note] /usr/sbin/mariadbd: ready for connections.
+Version: '10.11.19-MariaDB-0+deb12u1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Debian 12
+2026-10-27  2:58:51 0 [Warning] Could not increase number of max_open_files to more than 25000 (request: 32188)
+2026-10-27  2:58:51 0 [Note] Starting MariaDB 10.11.19-MariaDB-0+deb12u1 source revision 5843d8475120241667a7ce0f8a1abb6c9b43a273 server_uid 4ZN5lDaTmoD+Zp2aPD4wD1fNsaY= as process 1759
+2026-10-27  2:58:51 0 [Note] mariadbd: Aria engine: starting recovery
+recovered pages: 0% 28% 47% 66% 78% 89% 100% (0.0 seconds); tables to flush: 1 0
+ (0.0 seconds); 
+2026-10-27  2:58:51 0 [Note] mariadbd: Aria engine: recovery done
+2026-10-27  2:58:51 0 [Note] InnoDB: Compressed tables use zlib 1.2.13
+2026-10-27  2:58:51 0 [Note] InnoDB: Number of transaction pools: 1
+2026-10-27  2:58:51 0 [Note] InnoDB: Using crc32 + pclmulqdq instructions
+2026-10-27  2:58:51 0 [Note] mariadbd: O_TMPFILE is not supported on /tmp (disabling future attempts)
+2026-10-27  2:58:51 0 [Note] InnoDB: Using io_uring
+2026-10-27  2:58:51 0 [Note] InnoDB: innodb_buffer_pool_size_max=8388608m, innodb_buffer_pool_size=128m
+2026-10-27  2:58:51 0 [Note] InnoDB: Completed initialization of buffer pool
+2026-10-27  2:58:51 0 [Note] InnoDB: Buffered log writes (block size=512 bytes)
+2026-10-27  2:58:51 0 [Note] InnoDB: Starting crash recovery from checkpoint LSN=44404
+2026-10-27  2:58:51 0 [Note] InnoDB: End of log at LSN=821372
+2026-10-27  2:58:51 0 [Note] InnoDB: To recover: 331 pages
+2026-10-27  2:58:51 0 [Note] InnoDB: 128 rollback segments are active.
+2026-10-27  2:58:51 0 [Note] InnoDB: Removed temporary tablespace data file: "./ibtmp1"
+2026-10-27  2:58:51 0 [Note] InnoDB: Setting file './ibtmp1' size to 12.000MiB. Physically writing the file full; Please wait ...
+2026-10-27  2:58:51 0 [Note] InnoDB: File './ibtmp1' size is now 12.000MiB.
+2026-10-27  2:58:51 0 [Note] InnoDB: log sequence number 821372; transaction id 311
+2026-10-27  2:58:51 0 [Note] InnoDB: Loading buffer pool(s) from /var/lib/mysql/ib_buffer_pool
+2026-10-27  2:58:51 0 [Note] Plugin 'FEEDBACK' is disabled.
+2026-10-27  2:58:51 0 [Note] InnoDB: Buffer pool(s) load completed at 261027  2:58:51
+2026-10-27  2:58:51 0 [Warning] You need to use --log-bin to make --expire-logs-days or --binlog-expire-logs-seconds work.
+2026-10-27  2:58:51 0 [Note] Server socket created on IP: '127.0.0.1', port: '3306'.
+2026-10-27  2:58:51 0 [Note] /usr/sbin/mariadbd: ready for connections.
+Version: '10.11.19-MariaDB-0+deb12u1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Debian 12
+2026-10-27  3:05:56 0 [Warning] Could not increase number of max_open_files to more than 25000 (request: 32188)
+2026-10-27  3:05:56 0 [Note] Starting MariaDB 10.11.19-MariaDB-0+deb12u1 source revision 5843d8475120241667a7ce0f8a1abb6c9b43a273 server_uid 4ZN5lDaTmoD+Zp2aPD4wD1fNsaY= as process 1868
+2026-10-27  3:05:56 0 [Note] mariadbd: Aria engine: starting recovery
+recovered pages: 0% 28% 47% 66% 78% 89% 100% (0.0 seconds); tables to flush: 1 0
+ (0.0 seconds); 
+2026-10-27  3:05:56 0 [Note] mariadbd: Aria engine: recovery done
+2026-10-27  3:05:56 0 [Note] InnoDB: Compressed tables use zlib 1.2.13
+2026-10-27  3:05:56 0 [Note] InnoDB: Number of transaction pools: 1
+2026-10-27  3:05:56 0 [Note] InnoDB: Using crc32 + pclmulqdq instructions
+2026-10-27  3:05:56 0 [Note] mariadbd: O_TMPFILE is not supported on /tmp (disabling future attempts)
+2026-10-27  3:05:56 0 [Note] InnoDB: Using io_uring
+2026-10-27  3:05:56 0 [Note] InnoDB: innodb_buffer_pool_size_max=8388614m, innodb_buffer_pool_size=128m
+2026-10-27  3:05:56 0 [Note] InnoDB: Completed initialization of buffer pool
+2026-10-27  3:05:56 0 [Note] InnoDB: Buffered log writes (block size=512 bytes)
+2026-10-27  3:05:56 0 [Note] InnoDB: Starting crash recovery from checkpoint LSN=44404
+2026-10-27  3:05:56 0 [Note] InnoDB: End of log at LSN=821372
+2026-10-27  3:05:56 0 [Note] InnoDB: To recover: 331 pages
+2026-10-27  3:05:56 0 [Note] InnoDB: 128 rollback segments are active.
+2026-10-27  3:05:56 0 [Note] InnoDB: Removed temporary tablespace data file: "./ibtmp1"
+2026-10-27  3:05:56 0 [Note] InnoDB: Setting file './ibtmp1' size to 12.000MiB. Physically writing the file full; Please wait ...
+2026-10-27  3:05:56 0 [Note] InnoDB: File './ibtmp1' size is now 12.000MiB.
+2026-10-27  3:05:56 0 [Note] InnoDB: log sequence number 821372; transaction id 311
+2026-10-27  3:05:56 0 [Note] InnoDB: Loading buffer pool(s) from /var/lib/mysql/ib_buffer_pool
+2026-10-27  3:05:56 0 [Note] Plugin 'FEEDBACK' is disabled.
+2026-10-27  3:05:56 0 [Note] InnoDB: Buffer pool(s) load completed at 261027  3:05:56
+2026-10-27  3:05:56 0 [Warning] You need to use --log-bin to make --expire-logs-days or --binlog-expire-logs-seconds work.
+2026-10-27  3:05:56 0 [Note] Server socket created on IP: '127.0.0.1', port: '3306'.
+2026-10-27  3:05:56 0 [Note] /usr/sbin/mariadbd: ready for connections.
+Version: '10.11.19-MariaDB-0+deb12u1'  socket: '/run/mysqld/mysqld.sock'  port: 3306  Debian 12
+2026-10-27  3:08:00 36 [Warning] Aborted connection 36 to db: 'ainotes_db' user: 'ainotes_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-27  3:29:11 50 [Warning] Aborted connection 50 to db: 'ainotes_db' user: 'ainotes_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-27  3:29:11 51 [Warning] Aborted connection 51 to db: 'ainotes_db' user: 'ainotes_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-27  3:29:11 49 [Warning] Aborted connection 49 to db: 'ainotes_db' user: 'ainotes_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-27  3:29:11 52 [Warning] Aborted connection 52 to db: 'ainotes_db' user: 'ainotes_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-27  3:29:11 48 [Warning] Aborted connection 48 to db: 'ainotes_db' user: 'ainotes_user' host: 'localhost' (Got an error reading communication packets)
+2026-10-27  3:32:54 94 [Warning] Access denied for user 'root'@'localhost'
+2026-10-27  3:34:39 101 [Warning] Access denied for user 'root'@'localhost'
