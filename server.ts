@@ -46,6 +46,9 @@ const LOCAL_CONFIG = {
 };
 
 let primaryPool: mysql.Pool | null = null;
+let alternatePool: mysql.Pool | null = null;
+let currentWorkingHost: string = process.env.MYSQL_HOST || '118.139.180.163';
+let isProbingComplete = false;
 let fallbackPool: mysql.Pool | null = null;
 let isFailoverActive = false;
 let failoverReason = '';
@@ -58,8 +61,9 @@ function createDirectPool(config?: {
   password?: string;
   database?: string;
   ssl?: boolean;
+  connectTimeout?: number;
 }): mysql.Pool {
-  const host = config?.host || process.env.MYSQL_HOST || GODADDY_CONFIG.host;
+  const host = config?.host || process.env.MYSQL_HOST || currentWorkingHost || GODADDY_CONFIG.host;
   const port = Number(config?.port || process.env.MYSQL_PORT) || GODADDY_CONFIG.port;
   const user = config?.user || process.env.MYSQL_USER || GODADDY_CONFIG.user;
   const password = config?.password !== undefined ? config.password : (process.env.MYSQL_PASSWORD ?? GODADDY_CONFIG.password);
@@ -75,11 +79,53 @@ function createDirectPool(config?: {
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-    connectTimeout: 8000,
+    connectTimeout: config?.connectTimeout ?? 4000,
     enableKeepAlive: true,
     keepAliveInitialDelay: 5000,
     ssl: isSsl ? { rejectUnauthorized: false } : undefined
   });
+}
+
+export async function probeAndSetBestDatabaseHost() {
+  if (isProbingComplete) return;
+
+  // If user explicitly configured MYSQL_HOST in .env, honor it directly
+  if (process.env.MYSQL_HOST) {
+    console.log(`[Database Init] Using explicit MYSQL_HOST from environment: ${process.env.MYSQL_HOST}`);
+    currentWorkingHost = process.env.MYSQL_HOST;
+    isProbingComplete = true;
+    return;
+  }
+
+  // Probe 1: Try remote GoDaddy IP (118.139.180.163) with 2.5s quick timeout
+  const remoteTest = createDirectPool({ host: '118.139.180.163', connectTimeout: 2500 });
+  try {
+    await remoteTest.query('SELECT 1');
+    console.log('[Database Init] Successfully connected via remote GoDaddy IP (118.139.180.163).');
+    primaryPool = remoteTest;
+    currentWorkingHost = '118.139.180.163';
+    isProbingComplete = true;
+    return;
+  } catch (err: any) {
+    console.warn(`[Database Init] Remote IP 118.139.180.163 unreachable from this environment (${err.code}). Probing local cPanel socket (localhost)...`);
+    try { await remoteTest.end(); } catch {}
+  }
+
+  // Probe 2: Try local socket ('localhost') for when hosted directly on GoDaddy cPanel
+  const localTest = createDirectPool({ host: 'localhost', connectTimeout: 2500 });
+  try {
+    await localTest.query('SELECT 1');
+    console.log('[Database Init] Successfully connected via local cPanel socket (localhost)!');
+    primaryPool = localTest;
+    currentWorkingHost = 'localhost';
+    isProbingComplete = true;
+    return;
+  } catch (localErr: any) {
+    console.warn(`[Database Init] Local socket connection failed (${localErr.code}). Defaulting to remote IP.`);
+    try { await localTest.end(); } catch {}
+  }
+
+  isProbingComplete = true;
 }
 
 function getFallbackPool(): mysql.Pool {
@@ -137,34 +183,17 @@ function explicitlySwitchToLocalDb(): mysql.Pool {
 
 function getDb(): mysql.Pool {
   if (!primaryPool) {
-    primaryPool = createDirectPool();
+    primaryPool = createDirectPool({
+      host: process.env.MYSQL_HOST || currentWorkingHost,
+      connectTimeout: 3500
+    });
   }
 
-  const isLockedToGoDaddy = (process.env.PRIMARY_LOCKED === 'true' || process.env.PRIMARY_DB === 'godaddy' || !process.env.MYSQL_HOST || process.env.MYSQL_HOST === '118.139.180.163');
-
-  // When GoDaddy is locked as primary, connect directly to GoDaddy without falling back to 127.0.0.1
-  if (isLockedToGoDaddy) {
-    return primaryPool;
-  }
-
-  const isRemoteConfigured = (process.env.MYSQL_HOST && process.env.MYSQL_HOST !== '127.0.0.1' && process.env.MYSQL_HOST !== 'localhost');
-
-  // If local standalone mode, return primary pool directly
-  if (!isRemoteConfigured) {
-    return primaryPool;
-  }
-
-  // Resilient Proxy for Remote GoDaddy with In-Memory Local MariaDB Fallback
+  // Resilient Proxy that auto-recovers between GoDaddy Remote IP (118.139.180.163) and Localhost Socket
   return new Proxy(primaryPool, {
     get(target, prop, receiver) {
       if (prop === 'query' || prop === 'execute') {
         return async (...args: any[]) => {
-          // If in-memory failover is already active, direct immediately to local MariaDB replica buffer
-          if (isFailoverActive) {
-            const fallback = getFallbackPool();
-            return await (fallback as any)[prop](...args);
-          }
-
           try {
             return await (target as any)[prop](...args);
           } catch (err: any) {
@@ -178,30 +207,34 @@ function getDb(): mysql.Pool {
               err?.code === 'PROTOCOL_CONNECTION_LOST';
 
             if (isConnectionLoss) {
-              console.warn(`[GoDaddy MySQL Connection Drop] (${err.code}: ${err.message}). Retrying once after 500ms...`);
-              await new Promise(res => setTimeout(res, 500));
+              const activeHost = currentWorkingHost;
+              // Toggle between remote GoDaddy IP and local cPanel socket
+              const alternateHost = (activeHost === 'localhost' || activeHost === '127.0.0.1')
+                ? '118.139.180.163'
+                : 'localhost';
+
+              console.warn(`[GoDaddy DB Auto-Detect] '${activeHost}' returned ${err.code}. Attempting alternate GoDaddy host '${alternateHost}'...`);
+
+              if (!alternatePool) {
+                alternatePool = createDirectPool({
+                  host: alternateHost,
+                  connectTimeout: 4000
+                });
+              }
+
               try {
-                return await (target as any)[prop](...args);
-              } catch (retryErr: any) {
-                // Secondary check failed: GoDaddy is temporarily unreachable
-                console.warn(`[GoDaddy In-Memory Failover Activated] Primary host ${process.env.MYSQL_HOST} unreachable (${retryErr.code}). Buffering in local MariaDB without modifying .env configuration.`);
-                isFailoverActive = true;
-                failoverReason = `${retryErr.code}: ${retryErr.message}`;
-                lastFailoverAt = new Date().toISOString();
-
-                // Dispatch Telegram alert asynchronously without blocking query execution
-                notifyGoDaddyDisconnection({
-                  host: process.env.MYSQL_HOST,
-                  database: process.env.MYSQL_DATABASE,
-                  errorCode: retryErr.code,
-                  errorMessage: retryErr.message,
-                  actionTaken: 'GoDaddy configuration remains locked as Primary. Application temporarily buffering queries in local MariaDB replica to maintain 100% uptime with zero data loss. Auto-reconnection will resume GoDaddy traffic automatically once reachable.'
-                }).catch(e => console.warn('Telegram alert notice:', e.message));
-
-                const fallback = getFallbackPool();
-                return await (fallback as any)[prop](...args);
+                const res = await (alternatePool as any)[prop](...args);
+                console.log(`[GoDaddy DB Auto-Detect] Successfully connected via '${alternateHost}'! Promoting to active primary pool.`);
+                primaryPool = alternatePool;
+                currentWorkingHost = alternateHost;
+                alternatePool = null;
+                return res;
+              } catch (altErr: any) {
+                console.error(`[GoDaddy DB Auto-Detect] Alternate host '${alternateHost}' also failed (${altErr.code}: ${altErr.message}).`);
+                throw err;
               }
             }
+
             throw err;
           }
         };
@@ -262,6 +295,9 @@ async function startServer() {
   // Bind to dynamic hosting environment PORT (GoDaddy, Cloud Run, Passenger) or default to 3000
   const PORT = process.env.PORT || 3000;
 
+  // Non-blocking probe to auto-select remote IP vs local cPanel socket
+  probeAndSetBestDatabaseHost().catch(e => console.warn('[DB Probe notice]:', e.message));
+
   app.use(express.json());
   
   // Serve uploaded files statically
@@ -281,7 +317,7 @@ async function startServer() {
   };
 
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', dbConfigured: !!process.env.MYSQL_HOST });
+    res.json({ status: 'ok', dbConfigured: true, currentWorkingHost });
   });
 
   // --- DATABASE MIGRATION & GODADDY MYSQL ENDPOINTS ---

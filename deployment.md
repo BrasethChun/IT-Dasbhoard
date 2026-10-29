@@ -87,7 +87,7 @@ In the same **Setup Node.js App** page, scroll down to the **Environment variabl
 | `PORT` | `3000` | Application internal port |
 | `PRIMARY_DB` | `godaddy` | Locks GoDaddy as permanent primary DB |
 | `PRIMARY_LOCKED` | `true` | Prevents fallback overwrite |
-| `MYSQL_HOST` | `118.139.180.163` | GoDaddy MySQL IP address |
+| `MYSQL_HOST` | `localhost` (or `118.139.180.163`) | `localhost` when hosted on GoDaddy; `118.139.180.163` from external hosts |
 | `MYSQL_PORT` | `3306` | Default MySQL port |
 | `MYSQL_USER` | `khema_dbuser` | MySQL database user |
 | `MYSQL_PASSWORD` | `<your-password>` | GoDaddy MySQL password |
@@ -304,6 +304,10 @@ Go to **Your GitHub Repository > Settings > Secrets and variables > Actions** an
 
 ### Common Issues & Quick Fixes:
 
+- **Error: `connect ETIMEDOUT` on login (GoDaddy Hosting):**
+  - **Cause:** When your Node.js application is hosted on the **same GoDaddy cPanel account** as your database, GoDaddy's server firewall blocks network loopback (NAT hairpinning) to its own external IP `118.139.180.163:3306`, causing the connection to time out.
+  - **Fix 1 (Automatic):** The application now includes automatic fallback: if `118.139.180.163` times out, it automatically connects through the internal local socket (`localhost`).
+  - **Fix 2 (Recommended in .env):** In your GoDaddy `.env` file, set `MYSQL_HOST=localhost`. According to GoDaddy's official cPanel documentation, internal scripts on the same server should always use `localhost` as the database host.
 - **Error: `./start-db.sh: line 23: apt-get: command not found` (or start crash loop):**
   - **Cause:** Earlier versions of `package.json` had `"start": "bash ./start-db.sh && node server.ts"`. GoDaddy cPanel/CloudLinux hosting is not Debian/Ubuntu and does not have `apt-get`. Furthermore, your primary database is the remote GoDaddy MySQL (`118.139.180.163:3306`), so local MariaDB installation must be bypassed.
   - **Fix:** Run `git pull origin main` on your GoDaddy server to get the updated `package.json` and `app.js`. The start script is now `"start": "node app.js"`, which boots directly with zero apt-get dependencies.
