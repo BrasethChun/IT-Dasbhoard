@@ -23,6 +23,8 @@ import {
   startRemoteDatabaseHeartbeat, 
   setupTelegramAlertRoutes 
 } from './telegramAlertService';
+import { setupItBudgetRoutes } from './itBudgetServer';
+import { setupItExpenseRoutes } from './itExpenseServer';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
 
@@ -2370,6 +2372,12 @@ async function startServer() {
       const [pCount]: any = await db.query('SELECT COUNT(*) as c FROM it_cloud_providers');
       if (pCount[0].c === 0) {
         const defaultProviders = [
+          ['RadiAnt Dicom Viewer', 'RadiAnt Dicom Viewer', 'https://www.radiantviewer.com', 'Medical PACS DICOM image viewer and radiological software.'],
+          ['VCLOUDIA', 'Cloud Infrastructure', 'https://vcloudia.com', 'Cloud infrastructure, hosting, and virtualization platform.'],
+          ['Idrive', 'Database & Storage', 'https://www.idrive.com', 'Cloud backup, storage, and server disaster recovery.'],
+          ['Cyfuture', 'Cloud Infrastructure', 'https://cyfuture.com', 'Cloud data center, enterprise hosting, and infrastructure solutions.'],
+          ['Godaddy', 'Cloud Infrastructure', 'https://godaddy.com', 'Domain registration, cPanel web hosting, VPS, and DNS management.'],
+          ['BlueHost', 'Cloud Infrastructure', 'https://bluehost.com', 'Enterprise web hosting, email servers, and WordPress cloud infrastructure.'],
           ['Amazon Web Services', 'Cloud Infrastructure', 'https://aws.amazon.com', 'Compute (EC2), Databases (RDS), Object Storage (S3), and VPC cloud infrastructure.'],
           ['Microsoft', 'SaaS & Productivity', 'https://microsoft.com', 'Microsoft 365, Azure Cloud, Entra ID, Defender, and Windows enterprise.'],
           ['Google Cloud', 'Cloud Infrastructure', 'https://cloud.google.com', 'GCP compute, BigQuery data warehouse, Vertex AI, and Workspace.'],
@@ -2401,13 +2409,14 @@ async function startServer() {
       if (cCount[0].c === 0) {
         const defaultCats = [
           ['Cloud Infrastructure', 'Compute (VMs), VPC networks, containers, and bare metal hosting', 'blue'],
+          ['Database & Storage', 'Managed relational & NoSQL databases, object storage, and backups', 'teal'],
+          ['RadiAnt Dicom Viewer', 'DICOM imaging, radiology PACS, and medical imaging software', 'cyan'],
           ['SaaS & Productivity', 'Office suites, collaboration tools, document editors, and business apps', 'indigo'],
           ['DevOps & CI/CD', 'Source control repositories, build pipelines, test runners, deployment tools', 'emerald'],
           ['Security & Compliance', 'WAF, firewalls, identity management (IAM), antivirus, and audit tools', 'rose'],
           ['Monitoring & Observability', 'APM tracing, log aggregation, uptime checks, and error metrics', 'amber'],
           ['Communication', 'Video conferencing, VoIP telephony, SMS gateways, and team chats', 'cyan'],
           ['AI & Machine Learning', 'LLM APIs, model training, speech recognition, and computer vision', 'purple'],
-          ['Database & Storage', 'Managed relational & NoSQL databases, object storage, and backups', 'teal'],
           ['Marketing & CRM', 'Customer relationship management, email automation, analytics pipelines', 'orange'],
           ['Other', 'Miscellaneous unclassified cloud services and software toolings', 'slate']
         ];
@@ -2415,6 +2424,27 @@ async function startServer() {
           await db.query('INSERT IGNORE INTO it_cloud_categories (id, name, description, color, is_default) VALUES (?, ?, ?, ?, 1)',
             [crypto.randomUUID(), name, desc, color]);
         }
+      }
+
+      // Auto-sync any existing distinct providers/categories in subscriptions to Field Settings
+      try {
+        const [subRows]: any = await db.query('SELECT DISTINCT provider, category FROM it_cloud_subscriptions');
+        for (const row of subRows) {
+          if (row.provider && row.provider.trim()) {
+            await db.query(
+              'INSERT IGNORE INTO it_cloud_providers (id, name, default_category, is_default) VALUES (?, ?, ?, 1)',
+              [crypto.randomUUID(), row.provider.trim(), row.category || 'Other']
+            );
+          }
+          if (row.category && row.category.trim()) {
+            await db.query(
+              'INSERT IGNORE INTO it_cloud_categories (id, name, description, color, is_default) VALUES (?, ?, ?, "indigo", 1)',
+              [crypto.randomUUID(), row.category.trim(), `${row.category.trim()} subscription category`]
+            );
+          }
+        }
+      } catch (syncErr: any) {
+        console.warn('[Field Settings Auto-Sync warning]:', syncErr.message);
       }
 
       const [providers] = await db.query('SELECT * FROM it_cloud_providers ORDER BY name ASC');
@@ -2543,7 +2573,58 @@ async function startServer() {
       const db = getDb();
       await db.query('DELETE FROM it_cloud_providers');
       await db.query('DELETE FROM it_cloud_categories');
-      res.json({ success: true, message: 'Settings reset successfully' });
+
+      const defaultProviders = [
+        ['RadiAnt Dicom Viewer', 'RadiAnt Dicom Viewer', 'https://www.radiantviewer.com', 'Medical PACS DICOM image viewer and radiological software.'],
+        ['VCLOUDIA', 'Cloud Infrastructure', 'https://vcloudia.com', 'Cloud infrastructure, hosting, and virtualization platform.'],
+        ['Idrive', 'Database & Storage', 'https://www.idrive.com', 'Cloud backup, storage, and server disaster recovery.'],
+        ['Cyfuture', 'Cloud Infrastructure', 'https://cyfuture.com', 'Cloud data center, enterprise hosting, and infrastructure solutions.'],
+        ['Godaddy', 'Cloud Infrastructure', 'https://godaddy.com', 'Domain registration, cPanel web hosting, VPS, and DNS management.'],
+        ['BlueHost', 'Cloud Infrastructure', 'https://bluehost.com', 'Enterprise web hosting, email servers, and WordPress cloud infrastructure.'],
+        ['Amazon Web Services', 'Cloud Infrastructure', 'https://aws.amazon.com', 'Compute (EC2), Databases (RDS), Object Storage (S3), and VPC cloud infrastructure.'],
+        ['Microsoft', 'SaaS & Productivity', 'https://microsoft.com', 'Microsoft 365, Azure Cloud, Entra ID, Defender, and Windows enterprise.'],
+        ['Google Cloud', 'Cloud Infrastructure', 'https://cloud.google.com', 'GCP compute, BigQuery data warehouse, Vertex AI, and Workspace.'],
+        ['GitHub', 'DevOps & CI/CD', 'https://github.com', 'Git source control, GitHub Actions CI/CD runners, and code security.'],
+        ['Cloudflare', 'Security & Compliance', 'https://cloudflare.com', 'WAF security, DDoS mitigation, DNS management, and CDN caching.'],
+        ['Datadog', 'Monitoring & Observability', 'https://datadoghq.com', 'Infrastructure monitoring, APM tracing, logs, and synthetic alerting.'],
+        ['Zoom', 'Communication', 'https://zoom.us', 'Video conferencing, webinars, and telehealth communication.'],
+        ['Atlassian', 'DevOps & CI/CD', 'https://atlassian.com', 'Jira issue tracking, Confluence documentation, and Trello.'],
+        ['Salesforce', 'Marketing & CRM', 'https://salesforce.com', 'CRM, sales pipeline, service cloud, and customer support.'],
+        ['Slack', 'Communication', 'https://slack.com', 'Internal team collaboration, channels, and incident bridges.'],
+        ['Docker', 'DevOps & CI/CD', 'https://docker.com', 'Container runtime, Docker Hub repository, and image builds.'],
+        ['Figma', 'SaaS & Productivity', 'https://figma.com', 'UI/UX interface design, prototyping, and design systems.'],
+        ['MongoDB Atlas', 'Database & Storage', 'https://mongodb.com', 'Fully managed cloud NoSQL database cluster.'],
+        ['OpenAI', 'AI & Machine Learning', 'https://openai.com', 'LLM generative AI APIs, ChatGPT team licenses, and embeddings.'],
+        ['Twilio', 'Communication', 'https://twilio.com', 'SMS notifications, WhatsApp business API, and telephony.'],
+        ['Stripe', 'SaaS & Productivity', 'https://stripe.com', 'Payment processing gateway and subscription billing platform.'],
+        ['Oracle Cloud', 'Cloud Infrastructure', 'https://oracle.com/cloud', 'Oracle Cloud Infrastructure (OCI) and enterprise databases.'],
+        ['Supabase', 'Database & Storage', 'https://supabase.com', 'Postgres backend, authentication, and realtime database.'],
+        ['Other', 'Other', '', 'Custom or unlisted cloud vendor / provider.']
+      ];
+      for (const [name, cat, web, desc] of defaultProviders) {
+        await db.query('INSERT IGNORE INTO it_cloud_providers (id, name, default_category, website, description, is_default) VALUES (?, ?, ?, ?, ?, 1)', 
+          [crypto.randomUUID(), name, cat, web, desc]);
+      }
+
+      const defaultCats = [
+        ['Cloud Infrastructure', 'Compute (VMs), VPC networks, containers, and bare metal hosting', 'blue'],
+        ['Database & Storage', 'Managed relational & NoSQL databases, object storage, and backups', 'teal'],
+        ['RadiAnt Dicom Viewer', 'DICOM imaging, radiology PACS, and medical imaging software', 'cyan'],
+        ['SaaS & Productivity', 'Office suites, collaboration tools, document editors, and business apps', 'indigo'],
+        ['DevOps & CI/CD', 'Source control repositories, build pipelines, test runners, deployment tools', 'emerald'],
+        ['Security & Compliance', 'WAF, firewalls, identity management (IAM), antivirus, and audit tools', 'rose'],
+        ['Monitoring & Observability', 'APM tracing, log aggregation, uptime checks, and error metrics', 'amber'],
+        ['Communication', 'Video conferencing, VoIP telephony, SMS gateways, and team chats', 'cyan'],
+        ['AI & Machine Learning', 'LLM APIs, model training, speech recognition, and computer vision', 'purple'],
+        ['Marketing & CRM', 'Customer relationship management, email automation, analytics pipelines', 'orange'],
+        ['Other', 'Miscellaneous unclassified cloud services and software toolings', 'slate']
+      ];
+      for (const [name, desc, color] of defaultCats) {
+        await db.query('INSERT IGNORE INTO it_cloud_categories (id, name, description, color, is_default) VALUES (?, ?, ?, ?, 1)',
+          [crypto.randomUUID(), name, desc, color]);
+      }
+
+      res.json({ success: true, message: 'Settings reset to comprehensive defaults successfully' });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -2620,6 +2701,12 @@ async function startServer() {
 
   // Initialize 12-Hour Automated Database Backups & 1-Click Disaster Recovery
   setupBackupRoutes(app, getDb, authenticateToken);
+
+  // Initialize IT CapEx & OpEx Planning & Fiscal Control routes
+  setupItBudgetRoutes(app, authenticateToken, getDb);
+
+  // Initialize IT Expense & Transaction Tracking linked with CapEx & OpEx
+  setupItExpenseRoutes(app, authenticateToken, getDb);
 
   // Initialize Telegram GoDaddy MySQL Disconnection Alert routes & Heartbeat Monitor
   setupTelegramAlertRoutes(app, authenticateToken);

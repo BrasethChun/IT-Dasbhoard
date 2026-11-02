@@ -17,7 +17,9 @@ import { AssetsModule } from './AssetsModule';
 import { SettingsModule } from './SettingsModule';
 import { CloudSubscriptionsModule } from './CloudSubscriptionsModule';
 import { ExecutiveSummaryModule } from './ExecutiveSummaryModule';
-import { Cloud } from 'lucide-react';
+import { CapExOpExModule } from './CapExOpExModule';
+import { ITExpensesModule } from './ITExpensesModule';
+import { Cloud, Receipt } from 'lucide-react';
 
 // --- MOCK DATA ---
 const KPI_DATA = {
@@ -74,6 +76,8 @@ export const ITDashboard: React.FC = () => {
   const navigate = useNavigate();
   const itTabs = [
     { id: 'executive', label: 'Executive Summary', icon: BarChart3 },
+    { id: 'capex-opex', label: 'IT CapEx & S-Operation Tracking & Planning', icon: DollarSign },
+    { id: 'expenses', label: 'IT Expenses & Tracking', icon: Receipt },
     { id: 'subscriptions', label: 'Cloud & HIS Subscriptions', icon: Cloud },
     { id: 'assets', label: 'Assets Management', icon: Monitor },
     { id: 'helpdesk', label: 'Helpdesk Tickets', icon: Wrench },
@@ -257,6 +261,8 @@ export const ITDashboard: React.FC = () => {
             onNavigateTab={handleTabChange}
           />
         )}
+        {activeTab === 'capex-opex' && <CapExOpExModule sites={sites} />}
+        {activeTab === 'expenses' && <ITExpensesModule sites={sites} />}
         {(activeTab === 'subscriptions' || activeTab === 'cloud-subscriptions') && <CloudSubscriptionsModule sites={sites} />}
         {activeTab === 'staffing' && <StaffingReport sites={sites} />}
         {activeTab === 'helpdesk' && <HelpDeskReport sites={sites} />}

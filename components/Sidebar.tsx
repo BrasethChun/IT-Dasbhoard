@@ -101,6 +101,8 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
         },
         subItems: [
           { label: 'Executive Summary', id: 'executive', path: `${RoutePath.IT_DASHBOARD}?tab=executive` },
+          { label: 'IT CapEx & S-Operation Tracking & Planning', id: 'capex-opex', path: `${RoutePath.IT_DASHBOARD}?tab=capex-opex` },
+          { label: 'IT Expenses & Tracking', id: 'expenses', path: `${RoutePath.IT_DASHBOARD}?tab=expenses` },
           { label: 'Staffing', id: 'staffing', path: `${RoutePath.IT_DASHBOARD}?tab=staffing` },
           { label: 'Helpdesk', id: 'helpdesk', path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk` },
           { label: 'Assets Management', id: 'assets', path: `${RoutePath.IT_DASHBOARD}?tab=assets` },

@@ -85,6 +85,8 @@ const PROVIDER_OPTIONS = [
   'OpenAI',
   'Twilio',
   'Stripe',
+  'Oracle Cloud',
+  'Supabase',
   'Other'
 ];
 
