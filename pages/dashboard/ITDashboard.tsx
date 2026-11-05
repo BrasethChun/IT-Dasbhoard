@@ -74,15 +74,22 @@ export const ITDashboard: React.FC = () => {
   const [sites, setSites] = useState<any[]>([{ id: '1', site_name: 'Main Hospital' }, { id: '2', site_name: 'North Clinic' }, { id: '3', site_name: 'South Clinic' }]);
 
   const navigate = useNavigate();
-  const itTabs = [
+  const isToolsView = activeTab === 'helpdesk' || activeTab === 'staffing';
+
+  const itDashboardTabs = [
     { id: 'executive', label: 'Executive Summary', icon: BarChart3 },
     { id: 'capex-opex', label: 'IT CapEx & S-Operation Tracking & Planning', icon: DollarSign },
     { id: 'expenses', label: 'IT Expenses & Tracking', icon: Receipt },
     { id: 'subscriptions', label: 'Cloud & HIS Subscriptions', icon: Cloud },
-    { id: 'assets', label: 'Assets Management', icon: Monitor },
+    { id: 'assets', label: 'IT Assets Management', icon: Monitor },
+  ];
+
+  const itToolsTabs = [
     { id: 'helpdesk', label: 'Helpdesk Tickets', icon: Wrench },
     { id: 'staffing', label: 'Staffing & Shifts', icon: Users },
   ];
+
+  const currentTabs = isToolsView ? itToolsTabs : itDashboardTabs;
 
   const handleTabChange = (tabId: string) => {
     if (tabId === 'notes') {
@@ -215,9 +222,36 @@ export const ITDashboard: React.FC = () => {
 
   return (
     <div className="w-full pb-12 animate-in fade-in duration-500">
+      {/* Header for IT Tools or Executive Tab */}
+      {isToolsView ? (
+        <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-indigo-800 to-slate-900 tracking-tight flex items-center gap-2.5">
+              <Wrench size={22} className="text-indigo-600" />
+              <span>IT Tools & Operations</span>
+            </h1>
+            <p className="text-slate-500 mt-1 text-xs font-medium">Manage support tickets, SLAs, technician assignments, and hospital staffing coverage</p>
+          </div>
+          <button
+            onClick={() => handleTabChange('executive')}
+            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl transition-colors border border-indigo-200/50 self-start sm:self-auto flex items-center gap-1.5"
+          >
+            <span>&larr;</span>
+            <span>Back to IT Dashboard</span>
+          </button>
+        </div>
+      ) : activeTab === 'executive' && (
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-indigo-800 to-slate-900 tracking-tight">
+            IT Operations Dashboard
+          </h1>
+          <p className="text-slate-500 mt-2 font-medium">Consolidated multi-module reporting framework across {siteFilter}</p>
+        </div>
+      )}
+
       {/* Module Navigation Tabs */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-6 border-b border-slate-200/60 hide-scrollbar">
-        {itTabs.map(tab => {
+        {currentTabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id || (tab.id === 'subscriptions' && activeTab === 'cloud-subscriptions');
           return (
@@ -237,16 +271,6 @@ export const ITDashboard: React.FC = () => {
           );
         })}
       </div>
-
-      {/* Header for Executive Tab */}
-      {activeTab === 'executive' && (
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-indigo-800 to-slate-900 tracking-tight">
-            IT Operations Dashboard
-          </h1>
-          <p className="text-slate-500 mt-2 font-medium">Consolidated multi-module reporting framework across {siteFilter}</p>
-        </div>
-      )}
 
       {/* Content Area */}
       <div className="bg-white/80 backdrop-blur-2xl rounded-2xl border border-white p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)] min-h-[600px] overflow-x-auto">

@@ -32,18 +32,23 @@ export async function getTelegramRecipients(): Promise<TelegramRecipient[]> {
   const recipients: TelegramRecipient[] = [];
 
   try {
-    // Query users directly from local MariaDB
-    const localConn = await mysql.createConnection({
-      host: '127.0.0.1',
-      port: 3306,
-      user: 'ainotes_user',
-      password: 'x!gmx^-hQhkn5JEw',
-      database: 'ainotes_db',
+    const dbHost = process.env.MYSQL_HOST || '118.139.180.163';
+    const dbPort = Number(process.env.MYSQL_PORT) || 3306;
+    const dbUser = process.env.MYSQL_USER || 'khema_dbuser';
+    const dbPassword = process.env.MYSQL_PASSWORD || 'Y+k,C=JAEA4nR+0*';
+    const dbName = process.env.MYSQL_DATABASE || 'khema_ainotes';
+
+    const conn = await mysql.createConnection({
+      host: dbHost,
+      port: dbPort,
+      user: dbUser,
+      password: dbPassword,
+      database: dbName,
       connectTimeout: 4000
     });
 
     try {
-      const [rows]: any = await localConn.query(
+      const [rows]: any = await conn.query(
         'SELECT full_name, display_name, telegram_chat_id, telegram_bot_token, telegram_enabled FROM users WHERE telegram_enabled = 1 AND telegram_chat_id IS NOT NULL AND telegram_chat_id != ""'
       );
 
@@ -58,7 +63,7 @@ export async function getTelegramRecipients(): Promise<TelegramRecipient[]> {
         }
       }
     } finally {
-      await localConn.end().catch(() => {});
+      await conn.end().catch(() => {});
     }
   } catch (err: any) {
     console.warn('[Telegram Alert Service] Could not fetch users from database:', err.message);

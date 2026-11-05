@@ -25,6 +25,8 @@ import {
 } from './telegramAlertService';
 import { setupItBudgetRoutes } from './itBudgetServer';
 import { setupItExpenseRoutes } from './itExpenseServer';
+import { setupAssetRoutes } from './assetServer';
+import { setupItAssetRoutes } from './itAssetServer';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
 
@@ -65,11 +67,18 @@ function createDirectPool(config?: {
   ssl?: boolean;
   connectTimeout?: number;
 }): mysql.Pool {
-  const host = config?.host || process.env.MYSQL_HOST || currentWorkingHost || GODADDY_CONFIG.host;
-  const port = Number(config?.port || process.env.MYSQL_PORT) || GODADDY_CONFIG.port;
-  const user = config?.user || process.env.MYSQL_USER || GODADDY_CONFIG.user;
-  const password = config?.password !== undefined ? config.password : (process.env.MYSQL_PASSWORD ?? GODADDY_CONFIG.password);
-  const database = config?.database || process.env.MYSQL_DATABASE || GODADDY_CONFIG.database;
+  const host = config?.host || process.env.MYSQL_HOST || process.env.DB_HOST || currentWorkingHost || GODADDY_CONFIG.host;
+  
+  // Guard against invalid/corrupted ports (e.g. 3386) and default strictly to standard MySQL 3306
+  let rawPort = Number(config?.port || process.env.MYSQL_PORT || process.env.DB_PORT);
+  if (!rawPort || isNaN(rawPort) || rawPort <= 0 || rawPort > 65535 || rawPort === 3386) {
+    rawPort = GODADDY_CONFIG.port || 3306;
+  }
+  const port = rawPort;
+
+  const user = config?.user || process.env.MYSQL_USER || process.env.DB_USER || GODADDY_CONFIG.user;
+  const password = config?.password !== undefined ? config.password : (process.env.MYSQL_PASSWORD ?? process.env.DB_PASSWORD ?? GODADDY_CONFIG.password);
+  const database = config?.database || process.env.MYSQL_DATABASE || process.env.DB_NAME || GODADDY_CONFIG.database;
   const isSsl = config?.ssl !== undefined ? config.ssl : (process.env.MYSQL_SSL === 'true' || GODADDY_CONFIG.ssl);
 
   return mysql.createPool({
@@ -81,7 +90,7 @@ function createDirectPool(config?: {
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-    connectTimeout: config?.connectTimeout ?? 4000,
+    connectTimeout: config?.connectTimeout ?? 5000,
     enableKeepAlive: true,
     keepAliveInitialDelay: 5000,
     ssl: isSsl ? { rejectUnauthorized: false } : undefined
@@ -187,11 +196,11 @@ function getDb(): mysql.Pool {
   if (!primaryPool) {
     primaryPool = createDirectPool({
       host: process.env.MYSQL_HOST || currentWorkingHost,
-      connectTimeout: 3500
+      connectTimeout: 5000
     });
   }
 
-  // Resilient Proxy that auto-recovers between GoDaddy Remote IP (118.139.180.163) and Localhost Socket
+  // Resilient Proxy that auto-recovers GoDaddy Remote IP (118.139.180.163) or local cPanel socket
   return new Proxy(primaryPool, {
     get(target, prop, receiver) {
       if (prop === 'query' || prop === 'execute') {
@@ -210,16 +219,41 @@ function getDb(): mysql.Pool {
 
             if (isConnectionLoss) {
               const activeHost = currentWorkingHost;
-              // Toggle between remote GoDaddy IP and local cPanel socket
+              const isLockedToGoDaddy = process.env.PRIMARY_LOCKED === 'true' || process.env.PRIMARY_DB === 'godaddy' || activeHost === '118.139.180.163';
+
+              // If configured for GoDaddy, re-create the pool to GoDaddy remote host rather than attempting non-existent local daemon
+              if (isLockedToGoDaddy) {
+                console.warn(`[GoDaddy DB Connection] Remote host '${activeHost}' reported ${err.code}. Re-establishing pool to GoDaddy MySQL (118.139.180.163:3306)...`);
+                try {
+                  if (primaryPool) {
+                    await primaryPool.end().catch(() => {});
+                  }
+                } catch {}
+                primaryPool = createDirectPool({
+                  host: '118.139.180.163',
+                  port: 3306,
+                  connectTimeout: 5000
+                });
+                currentWorkingHost = '118.139.180.163';
+                try {
+                  return await (primaryPool as any)[prop](...args);
+                } catch (retryErr: any) {
+                  console.error(`[GoDaddy DB Connection] Retry on 118.139.180.163 failed (${retryErr.code}: ${retryErr.message}).`);
+                  throw err;
+                }
+              }
+
+              // Toggle between remote GoDaddy IP and local cPanel socket for local deployments
               const alternateHost = (activeHost === 'localhost' || activeHost === '127.0.0.1')
                 ? '118.139.180.163'
                 : 'localhost';
 
-              console.warn(`[GoDaddy DB Auto-Detect] '${activeHost}' returned ${err.code}. Attempting alternate GoDaddy host '${alternateHost}'...`);
+              console.warn(`[GoDaddy DB Auto-Detect] '${activeHost}' returned ${err.code}. Attempting alternate host '${alternateHost}'...`);
 
               if (!alternatePool) {
                 alternatePool = createDirectPool({
                   host: alternateHost,
+                  port: 3306,
                   connectTimeout: 4000
                 });
               }
@@ -232,7 +266,7 @@ function getDb(): mysql.Pool {
                 alternatePool = null;
                 return res;
               } catch (altErr: any) {
-                console.error(`[GoDaddy DB Auto-Detect] Alternate host '${alternateHost}' also failed (${altErr.code}: ${altErr.message}).`);
+                console.warn(`[GoDaddy DB Auto-Detect] Alternate host '${alternateHost}' also failed (${altErr.code}: ${altErr.message}).`);
                 throw err;
               }
             }
@@ -1912,81 +1946,9 @@ async function startServer() {
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // --- IT ASSETS API ---
-  app.get('/api/assets', authenticateToken, async (req: any, res) => {
-    try {
-      const db = getDb();
-      const [rows] = await db.query('SELECT * FROM it_assets ORDER BY created_at DESC');
-      res.json(rows);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.post('/api/assets', authenticateToken, async (req: any, res) => {
-    try {
-      const db = getDb();
-      const { asset_tag, category, site_name, asset_location, brand, model, specification, status, purchase_price, purchase_date, warranty_expiry, assign_to, serial_number, notes } = req.body;
-      
-      // Check for duplicate asset tag
-      const [existing]: any = await db.query('SELECT id FROM it_assets WHERE asset_tag = ?', [asset_tag]);
-      if (existing.length > 0) return res.status(400).json({ error: 'Asset code already exists' });
-
-      const id = crypto.randomUUID();
-      await db.query(
-        'INSERT INTO it_assets (id, asset_tag, category, site_name, asset_location, brand, model, specification, status, purchase_price, purchase_date, warranty_expiry, assign_to, serial_number, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, asset_tag, category, site_name, asset_location || '', brand || '', model, specification || '', status, purchase_price || null, purchase_date || null, warranty_expiry || null, assign_to || '', serial_number || '', notes || '']
-      );
-
-      // Audit trail
-      await db.query('INSERT INTO it_asset_history (id, asset_id, action, performed_by, new_assignee, new_status, new_site, new_location, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), id, 'Created Asset', req.user.name || req.user.email, assign_to || '', status, site_name, asset_location || '', 'Initial registration']);
-
-      res.json({ id });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.put('/api/assets/:id', authenticateToken, async (req: any, res) => {
-    try {
-      const db = getDb();
-      const { asset_tag, category, site_name, asset_location, brand, model, specification, status, purchase_price, purchase_date, warranty_expiry, assign_to, serial_number, notes, transfer_notes } = req.body;
-      
-      const [oldRecord]: any = await db.query('SELECT * FROM it_assets WHERE id = ?', [req.params.id]);
-      if (oldRecord.length === 0) return res.status(404).json({ error: 'Asset not found' });
-      const old = oldRecord[0];
-
-      await db.query(
-        'UPDATE it_assets SET asset_tag=?, category=?, site_name=?, asset_location=?, brand=?, model=?, specification=?, status=?, purchase_price=?, purchase_date=?, warranty_expiry=?, assign_to=?, serial_number=?, notes=? WHERE id=?',
-        [asset_tag, category, site_name, asset_location || '', brand || '', model, specification || '', status, purchase_price || null, purchase_date || null, warranty_expiry || null, assign_to || '', serial_number || '', notes || '', req.params.id]
-      );
-
-      // Audit trail if assignee, status, site, or location changed
-      if (old.assign_to !== assign_to || old.status !== status || old.site_name !== site_name || old.asset_location !== asset_location) {
-         let action = 'Updated Asset';
-         if (old.site_name !== site_name || old.asset_location !== asset_location) action = 'Transferred Asset';
-         else if (old.assign_to !== assign_to) action = 'Reassigned Asset';
-         else if (old.status !== status) action = 'Status Changed';
-
-         await db.query('INSERT INTO it_asset_history (id, asset_id, action, performed_by, old_assignee, new_assignee, old_status, new_status, old_site, new_site, old_location, new_location, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.params.id, action, req.user.name || req.user.email, old.assign_to, assign_to, old.status, status, old.site_name, site_name, old.asset_location, asset_location, transfer_notes || '']);
-      }
-
-      res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.delete('/api/assets/:id', authenticateToken, async (req: any, res) => {
-    try {
-      const db = getDb();
-      await db.query('DELETE FROM it_assets WHERE id = ?', [req.params.id]);
-      await db.query('DELETE FROM it_asset_history WHERE asset_id = ?', [req.params.id]);
-      res.json({ success: true });
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
-
-  app.get('/api/assets/:id/history', authenticateToken, async (req: any, res) => {
-    try {
-      const db = getDb();
-      const [rows] = await db.query('SELECT * FROM it_asset_history WHERE asset_id = ? ORDER BY created_at DESC', [req.params.id]);
-      res.json(rows);
-    } catch (e: any) { res.status(500).json({ error: e.message }); }
-  });
+  // --- IT & FIXED ASSET MANAGEMENT (ASSET CONTROL) API ---
+  setupAssetRoutes(app, authenticateToken, getDb);
+  setupItAssetRoutes(app, authenticateToken, getDb);
 
   // --- IT CLOUD SUBSCRIPTIONS API ---
   app.get('/api/cloud-subscriptions', authenticateToken, async (req: any, res) => {

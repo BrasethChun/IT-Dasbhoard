@@ -13,14 +13,37 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
   const searchParams = new URLSearchParams(search);
   const currentTab = searchParams.get('tab') || 'executive';
 
-  const [itDashboardOpen, setItDashboardOpen] = useState(pathname === RoutePath.IT_DASHBOARD || pathname === RoutePath.VENDORS);
+  const isToolsTab = pathname === RoutePath.IT_DASHBOARD && (currentTab === 'staffing' || currentTab === 'helpdesk');
+  const isDashboardTab = (pathname === RoutePath.IT_DASHBOARD && currentTab !== 'staffing' && currentTab !== 'helpdesk') || pathname === RoutePath.VENDORS;
+
+  const [itDashboardOpen, setItDashboardOpen] = useState(isDashboardTab);
   const [itToolsOpen, setItToolsOpen] = useState(
     pathname === RoutePath.NOTES || 
     pathname === RoutePath.MAIL_ASSISTANT ||
     pathname.startsWith('/mail') ||
     pathname.startsWith(RoutePath.INVOICES) || 
-    (pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE)
+    (pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE) ||
+    isToolsTab
   );
+
+  useEffect(() => {
+    if (pathname === RoutePath.IT_DASHBOARD) {
+      if (currentTab === 'staffing' || currentTab === 'helpdesk') {
+        setItToolsOpen(true);
+      } else {
+        setItDashboardOpen(true);
+      }
+    } else if (pathname === RoutePath.VENDORS) {
+      setItDashboardOpen(true);
+    } else if (
+      pathname === RoutePath.NOTES || 
+      pathname === RoutePath.MAIL_ASSISTANT ||
+      pathname.startsWith('/mail') ||
+      pathname.startsWith(RoutePath.INVOICES)
+    ) {
+      setItToolsOpen(true);
+    }
+  }, [pathname, currentTab]);
 
   const isOwner = user?.role === 'owner';
 
@@ -103,9 +126,7 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
           { label: 'Executive Summary', id: 'executive', path: `${RoutePath.IT_DASHBOARD}?tab=executive` },
           { label: 'IT CapEx & S-Operation Tracking & Planning', id: 'capex-opex', path: `${RoutePath.IT_DASHBOARD}?tab=capex-opex` },
           { label: 'IT Expenses & Tracking', id: 'expenses', path: `${RoutePath.IT_DASHBOARD}?tab=expenses` },
-          { label: 'Staffing', id: 'staffing', path: `${RoutePath.IT_DASHBOARD}?tab=staffing` },
-          { label: 'Helpdesk', id: 'helpdesk', path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk` },
-          { label: 'Assets Management', id: 'assets', path: `${RoutePath.IT_DASHBOARD}?tab=assets` },
+          { label: 'IT Assets Management', id: 'assets', path: `${RoutePath.IT_DASHBOARD}?tab=assets` },
           { label: 'Cloud & HIS Subscription', id: 'subscriptions', path: `${RoutePath.IT_DASHBOARD}?tab=subscriptions` },
           { label: 'Vendor Management', id: 'vendors', path: RoutePath.VENDORS }
         ]
@@ -113,17 +134,19 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
       {
         icon: Wrench,
         label: 'IT Tools',
-        path: RoutePath.MAIL_ASSISTANT,
+        path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk`,
         isOpen: itToolsOpen,
         toggleOpen: () => {
           if (!getIsActive(RoutePath.MAIL_ASSISTANT, 'IT Tools')) {
-            navigate(RoutePath.MAIL_ASSISTANT);
+            navigate(`${RoutePath.IT_DASHBOARD}?tab=helpdesk`);
             setItToolsOpen(true);
           } else {
             setItToolsOpen(!itToolsOpen);
           }
         },
         subItems: [
+          { label: 'Helpdesk', id: 'helpdesk', path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk` },
+          { label: 'Staffing', id: 'staffing', path: `${RoutePath.IT_DASHBOARD}?tab=staffing` },
           { label: 'Mail Assistant', id: 'mail', path: RoutePath.MAIL_ASSISTANT },
           { label: 'IT Notes & Meetings', id: 'notes', path: RoutePath.NOTES },
           { label: 'Invoices', id: 'invoices', path: RoutePath.INVOICES }
@@ -138,7 +161,8 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
     if (itemLabel === 'IT Tools') {
       return (pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE) || 
              pathname.startsWith(RoutePath.INVOICES) ||
-             pathname.startsWith(RoutePath.MAIL_ASSISTANT);
+             pathname.startsWith(RoutePath.MAIL_ASSISTANT) ||
+             (pathname === RoutePath.IT_DASHBOARD && (currentTab === 'staffing' || currentTab === 'helpdesk'));
     }
     if (path === RoutePath.HOME) {
       return pathname === RoutePath.HOME;
@@ -150,6 +174,9 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
       return pathname === RoutePath.CREATE_NOTE;
     }
     if (path === RoutePath.IT_DASHBOARD) {
+      if (pathname === RoutePath.IT_DASHBOARD && (currentTab === 'staffing' || currentTab === 'helpdesk')) {
+        return false;
+      }
       return pathname === RoutePath.IT_DASHBOARD || pathname === RoutePath.VENDORS;
     }
     return pathname.startsWith(path);
