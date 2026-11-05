@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "^1.50.1",
+    "@google/genai": "^2.32.0",
     "axios": "^1.15.2",
     "bcrypt": "^6.0.0",
     "clsx": "^2.1.1",
