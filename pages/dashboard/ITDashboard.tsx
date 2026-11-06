@@ -131,21 +131,27 @@ export const ITDashboard: React.FC = () => {
       const siteParam = siteFilter !== 'All Sites' ? `?site=${encodeURIComponent(siteFilter)}` : '';
 
       // Fetch all module datasets for consolidated PDF
-      const [cloudSumRes, assetsRes, helpdeskRes, staffRes] = await Promise.all([
+      const [cloudSumRes, fixedRes, controlRes, budgetRes, helpdeskRes, staffRes] = await Promise.all([
         fetch(`/api/cloud-subscriptions/summary${siteParam}`, { headers }).catch(() => null),
-        fetch('/api/assets', { headers }).catch(() => null),
+        fetch(`/api/fixed-assets`, { headers }).catch(() => null),
+        fetch(`/api/assets-control`, { headers }).catch(() => null),
+        fetch(`/api/it-budget/summary?fiscal_year=2026${siteParam}`, { headers }).catch(() => null),
         fetch('/api/helpdesk', { headers }).catch(() => null),
         fetch('/api/staffing', { headers }).catch(() => null)
       ]);
 
       const cloudSummary = cloudSumRes && cloudSumRes.ok ? await cloudSumRes.json() : null;
-      const allAssets = assetsRes && assetsRes.ok ? await assetsRes.json() : [];
+      const allFixed = fixedRes && fixedRes.ok ? await fixedRes.json() : [];
+      const allControl = controlRes && controlRes.ok ? await controlRes.json() : [];
+      const budgetSummary = budgetRes && budgetRes.ok ? await budgetRes.json() : null;
       const allTickets = helpdeskRes && helpdeskRes.ok ? await helpdeskRes.json() : [];
       const allStaff = staffRes && staffRes.ok ? await staffRes.json() : [];
 
-      const filteredAssets = Array.isArray(allAssets) 
-        ? (siteFilter === 'All Sites' ? allAssets : allAssets.filter(a => a.site_name === siteFilter))
-        : [];
+      const totalAssetCount = (Array.isArray(allFixed) ? allFixed.length : 0) + (Array.isArray(allControl) ? allControl.length : 0);
+      const totalAssetValue = Array.isArray(allFixed) ? allFixed.reduce((sum: number, a: any) => sum + (parseFloat(a.grand_total) || 0), 0) : 0;
+      const plannedBudget = (budgetSummary?.totals?.planned_capex || 0) + (budgetSummary?.totals?.planned_opex || 0);
+      const actualBudget = (budgetSummary?.totals?.actual_capex || 0) + (budgetSummary?.totals?.actual_opex || 0);
+
       const filteredTickets = Array.isArray(allTickets)
         ? (siteFilter === 'All Sites' ? allTickets : allTickets.filter(t => t.site_name === siteFilter))
         : [];
@@ -173,7 +179,6 @@ export const ITDashboard: React.FC = () => {
       const totalTicketCount = filteredTickets.reduce((sum: number, t: any) => 
         sum + (t.in_progress_count || 0) + (t.testing_count || 0) + (t.not_started_count || 0) + (t.completed_count || 0), 0);
       const completedTicketCount = filteredTickets.reduce((sum: number, t: any) => sum + (t.completed_count || 0), 0);
-      const totalAssetValue = filteredAssets.reduce((sum: number, a: any) => sum + (parseFloat(a.purchase_price) || 0), 0);
 
       autoTable(doc, {
         startY: 38,
@@ -181,8 +186,9 @@ export const ITDashboard: React.FC = () => {
         headStyles: { fillColor: [79, 70, 229] },
         head: [['IT Module', 'Consolidated Scope', 'Metrics / Totals', 'Operational Status']],
         body: [
+          ['IT CapEx & OpEx Budget', 'Annual Strategic Planning (FY 2026)', `$${Math.round(actualBudget).toLocaleString()} Executed of $${Math.round(plannedBudget).toLocaleString()} Planned`, `${plannedBudget > 0 ? ((actualBudget / plannedBudget) * 100).toFixed(1) : '100'}% Executed`],
           ['Khema Cloud Subscriptions', 'Monthly & Annual SaaS Run-Rate', `$${(cloudSummary?.totalMonthlySpend || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/mo ($${(cloudSummary?.annualRunRate || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/yr)`, `${cloudSummary?.activeCount || 0} Subscriptions Active`],
-          ['IT Assets & Hardware Fleet', 'Inventory & Equipment Rollout', `${filteredAssets.length} Units ($${Math.round(totalAssetValue).toLocaleString()} Total Value)`, 'Fleet In-Service'],
+          ['IT Assets & Hardware Fleet', 'Fixed Assets & Asset Control Fleet', `${totalAssetCount} Fleet Units ($${Math.round(totalAssetValue).toLocaleString()} Fixed Asset Val)`, 'Fleet In-Service'],
           ['Helpdesk & Support SLAs', 'Ticket Funnel & Resolution', `${totalTicketCount} Total Reported (${completedTicketCount} Resolved)`, `${totalTicketCount > 0 ? ((completedTicketCount / totalTicketCount) * 100).toFixed(1) : '100'}% Resolution Rate`],
           ['IT Staffing & Shift Coverage', 'Engineers & Standby Duty', `${filteredStaff.length} IT Personnel on Roster`, '100% Standby Coverage Active'],
           ['Multi-Site Facilities', 'Connected Branches & Clinics', `${sites.length} Active Connected Facilities`, 'SD-WAN & Network Online']

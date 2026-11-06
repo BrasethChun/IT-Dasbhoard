@@ -6,7 +6,7 @@ import {
   ExternalLink, ChevronDown, ChevronRight, X, AlertTriangle, Building2,
   PieChart as PieChartIcon, BarChart3, CheckSquare, Sparkles, FileText,
   Printer, Monitor, Laptop, Video, Server, Network, Copy, ArrowRightLeft,
-  SlidersHorizontal, Check, Info
+  SlidersHorizontal, Check, Info, RotateCcw
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
@@ -122,7 +122,7 @@ interface ExecutiveSummaryData {
 const MONTH_KEYS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'] as const;
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-const ASSET_TYPES = ['Printer', 'Computer', 'Laptop', 'CCTV', 'Network', 'Server', 'Storage', 'Software / System', 'Other'];
+const DEFAULT_ASSET_TYPES = ['Printer', 'Computer', 'Laptop', 'CCTV', 'Network', 'Server', 'Storage', 'Software / System', 'Other'];
 const SITES = ['All Sites', 'K1', 'K2', 'KG', 'Sakal'];
 const CAPEX_STATUSES = ['Planned', 'Pending Approval', 'Approved', 'In Progress', 'Completed', 'Cancelled'];
 const OPEX_ACCOUNT_CODES = [
@@ -133,16 +133,42 @@ const OPEX_ACCOUNT_CODES = [
   { code: 'Custom', name: 'Other Outside Service / Custom' }
 ];
 
+export interface OpexAccountCode {
+  id?: string;
+  code: string;
+  name: string;
+  description?: string;
+  category?: string;
+  is_active?: boolean | number;
+  sort_order?: number;
+}
+
 export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
-  // Navigation & Sub-tabs
-  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'capex' | 'opex' | 'sync'>('overview');
+  // Navigation & Sub-tabs (Persisted across refreshes)
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'capex' | 'opex' | 'sync'>(() => {
+    return (localStorage.getItem('khema_capex_subtab') as any) || 'overview';
+  });
   
-  // Primary Annual Fiscal Year state (Starts from 2026)
-  const [selectedFiscalYear, setSelectedFiscalYear] = useState<number>(2026);
+  // Primary Annual Fiscal Year state (Starts from 2026, persisted across refreshes)
+  const [selectedFiscalYear, setSelectedFiscalYear] = useState<number>(() => {
+    const saved = localStorage.getItem('khema_capex_fiscal_year');
+    return saved ? parseInt(saved, 10) || 2026 : 2026;
+  });
   const [availableYears, setAvailableYears] = useState<number[]>([2026, 2027, 2028, 2029, 2030]);
   const [showCloneYearModal, setShowCloneYearModal] = useState(false);
   const [cloneTargetYear, setCloneTargetYear] = useState<number>(2027);
   const [cloneOverwrite, setCloneOverwrite] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('khema_capex_subtab', activeSubTab);
+  }, [activeSubTab]);
+
+  useEffect(() => {
+    localStorage.setItem('khema_capex_fiscal_year', String(selectedFiscalYear));
+  }, [selectedFiscalYear]);
+
+  // Dynamic asset categories synced from IT Asset Management
+  const [assetCategories, setAssetCategories] = useState<string[]>([]);
 
   // Global Site Filter & Search
   const [selectedSite, setSelectedSite] = useState<string>('All Sites');
@@ -170,7 +196,32 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
   const [editingCapexItem, setEditingCapexItem] = useState<CapExItem | null>(null);
   const [showOpexModal, setShowOpexModal] = useState<boolean>(false);
   const [editingOpexItem, setEditingOpexItem] = useState<OpExItem | null>(null);
+  const [accountCodes, setAccountCodes] = useState<OpexAccountCode[]>([]);
+  const [showAccountCodesModal, setShowAccountCodesModal] = useState<boolean>(false);
   const [isSyncingExpenses, setIsSyncingExpenses] = useState<boolean>(false);
+  const [deleteConfirmItem, setDeleteConfirmItem] = useState<{ id: string; name: string; type: 'capex' | 'opex' | 'restore-defaults' } | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
+
+  const effectiveAccountCodes = useMemo(() => {
+    return accountCodes.length > 0 ? accountCodes : OPEX_ACCOUNT_CODES;
+  }, [accountCodes]);
+
+  const fetchAccountCodes = async () => {
+    try {
+      const res = await fetch('/api/it-budget/account-codes', {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAccountCodes(data);
+      }
+    } catch (e: any) {
+      console.error('Error fetching account codes:', e);
+    }
+  };
 
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage({ text, type });
@@ -242,13 +293,53 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     }
   };
 
+  // Fetch asset categories synced from IT Asset Management
+  const fetchAssetCategories = async () => {
+    try {
+      const res = await fetch('/api/it-assets/config', {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const cats = (data.categories || [])
+          .map((c: any) => c.category_name || c.name)
+          .filter(Boolean);
+        if (cats.length > 0) {
+          setAssetCategories(cats);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch asset categories from /api/it-assets/config:', e);
+    }
+
+    try {
+      const res = await fetch('/api/asset-categories', {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const cats = (Array.isArray(data) ? data : [])
+          .map((c: any) => c.category_name || c.name)
+          .filter(Boolean);
+        if (cats.length > 0) {
+          setAssetCategories(cats);
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch fallback asset categories:', e);
+    }
+  };
+
   // Initial & Filter Load
   const loadAll = async () => {
     setLoading(true);
     await Promise.all([
       fetchSummary(selectedFiscalYear, selectedSite),
       fetchCapex(selectedFiscalYear, selectedSite, capexAssetFilter, capexStatusFilter, searchQuery),
-      fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery)
+      fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery),
+      fetchAssetCategories(),
+      fetchAccountCodes()
     ]);
     setLoading(false);
   };
@@ -313,30 +404,13 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     }
   };
 
-  // Restore Template Defaults
-  const handleRestoreDefaults = async () => {
-    if (!window.confirm(`Are you sure you want to reset all CapEx and S-Operation items for FY ${selectedFiscalYear} to the standard Khema Global template?`)) {
-      return;
-    }
-    try {
-      setLoading(true);
-      const res = await fetch('/api/it-budget/restore-defaults', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ fiscal_year: selectedFiscalYear })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        showToast(data.message, 'success');
-        await loadAll();
-      } else {
-        showToast(data.error || 'Failed to restore template defaults', 'error');
-      }
-    } catch (e: any) {
-      showToast('Error restoring defaults: ' + e.message, 'error');
-    } finally {
-      setLoading(false);
-    }
+  // Restore Template Defaults with in-app confirmation modal
+  const handleRestoreDefaults = () => {
+    setDeleteConfirmItem({
+      id: 'restore-all',
+      name: `All CapEx and S-Operation items for FY ${selectedFiscalYear}`,
+      type: 'restore-defaults'
+    });
   };
 
   // CapEx Inline Status Update
@@ -436,38 +510,63 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     }
   };
 
-  // Delete Handlers
-  const handleDeleteCapex = async (id: string, name: string) => {
-    if (!window.confirm(`Delete CapEx item "${name}"?`)) return;
-    try {
-      const res = await fetch(`/api/it-budget/capex/${id}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
-      });
-      if (res.ok) {
-        setCapexItems(prev => prev.filter(c => c.id !== id));
-        fetchSummary();
-        showToast('CapEx item deleted successfully');
-      }
-    } catch (e) {
-      showToast('Failed to delete item', 'error');
-    }
+  // Delete Handlers with safe in-app confirmation modal (eliminates blocked window.confirm in iframes)
+  const handleDeleteCapex = (id: string, name: string) => {
+    setDeleteConfirmItem({ id, name, type: 'capex' });
   };
 
-  const handleDeleteOpex = async (id: string, name: string) => {
-    if (!window.confirm(`Delete OpEx item "${name}"?`)) return;
+  const handleDeleteOpex = (id: string, name: string) => {
+    setDeleteConfirmItem({ id, name, type: 'opex' });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmItem) return;
+    setIsDeleting(true);
     try {
-      const res = await fetch(`/api/it-budget/opex/${id}`, {
+      if (deleteConfirmItem.type === 'restore-defaults') {
+        const res = await fetch('/api/it-budget/restore-defaults', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ fiscal_year: selectedFiscalYear })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(data.message || 'Template restored successfully', 'success');
+          await loadAll();
+          setDeleteConfirmItem(null);
+        } else {
+          showToast(data.error || 'Failed to restore template defaults', 'error');
+        }
+        return;
+      }
+
+      const endpoint = deleteConfirmItem.type === 'capex'
+        ? `/api/it-budget/capex/${deleteConfirmItem.id}`
+        : `/api/it-budget/opex/${deleteConfirmItem.id}`;
+
+      const res = await fetch(endpoint, {
         method: 'DELETE',
         headers: getAuthHeaders()
       });
+
       if (res.ok) {
-        setOpexItems(prev => prev.filter(o => o.id !== id));
-        fetchSummary();
-        showToast('OpEx item deleted successfully');
+        if (deleteConfirmItem.type === 'capex') {
+          setCapexItems(prev => prev.filter(c => c.id !== deleteConfirmItem.id));
+          showToast(`CapEx item "${deleteConfirmItem.name}" deleted successfully`);
+        } else {
+          setOpexItems(prev => prev.filter(o => o.id !== deleteConfirmItem.id));
+          showToast(`OpEx item "${deleteConfirmItem.name}" deleted successfully`);
+        }
+        await loadAll();
+        setDeleteConfirmItem(null);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.error || `Failed to delete ${deleteConfirmItem.type.toUpperCase()} item`, 'error');
       }
-    } catch (e) {
-      showToast('Failed to delete item', 'error');
+    } catch (e: any) {
+      showToast('Error deleting item: ' + e.message, 'error');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -772,12 +871,12 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
             </label>
 
             <button
-              onClick={handleRestoreDefaults}
-              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-xs font-medium text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
-              title="Reset current year to Khema standard template"
+              onClick={() => setActiveSubTab('sync')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-300 transition-all shadow-2xs group"
+              title="Configure Account Codes & Reset Template in Sync & Template"
             >
-              <Sparkles size={13} />
-              <span>Reset Template</span>
+              <SlidersHorizontal size={13} className="text-slate-500 group-hover:text-indigo-600 transition-colors" />
+              <span>Sync & Template Settings</span>
             </button>
           </div>
         </div>
@@ -871,14 +970,21 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
             </button>
             <button
               onClick={() => setActiveSubTab('sync')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
                 activeSubTab === 'sync'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white text-indigo-900 shadow-sm font-bold border-b-2 border-indigo-600 ring-1 ring-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
               }`}
             >
-              <FileSpreadsheet size={13} />
+              <FileSpreadsheet size={13} className={activeSubTab === 'sync' ? 'text-indigo-600' : 'text-slate-500'} />
               <span>Sync & Template</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold border transition-colors ${
+                activeSubTab === 'sync'
+                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                  : 'bg-slate-100 text-slate-500 border-slate-200'
+              }`}>
+                Config
+              </span>
             </button>
           </div>
         </div>
@@ -1144,13 +1250,30 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
                 />
               </div>
 
+              {/* Campus / Site Filter */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                <Building2 size={13} className="text-slate-400 shrink-0" />
+                <select
+                  value={selectedSite}
+                  onChange={(e) => setSelectedSite(e.target.value)}
+                  className="text-xs bg-transparent font-semibold text-slate-700 focus:outline-none cursor-pointer"
+                  title="Filter CapEx items by Campus (K1, K2, Sakal, KG)"
+                >
+                  <option value="All Sites">All Campuses</option>
+                  <option value="K1">K1</option>
+                  <option value="K2">K2</option>
+                  <option value="Sakal">Sakal</option>
+                  <option value="KG">KG</option>
+                </select>
+              </div>
+
               <select
                 value={capexAssetFilter}
                 onChange={(e) => setCapexAssetFilter(e.target.value)}
                 className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none"
               >
                 <option value="All Types">All Asset Types</option>
-                {ASSET_TYPES.map(t => (
+                {(assetCategories.length > 0 ? assetCategories : DEFAULT_ASSET_TYPES).map(t => (
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
@@ -1437,14 +1560,31 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
                 />
               </div>
 
+              {/* Campus / Site Filter */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                <Building2 size={13} className="text-slate-400 shrink-0" />
+                <select
+                  value={selectedSite}
+                  onChange={(e) => setSelectedSite(e.target.value)}
+                  className="text-xs bg-transparent font-semibold text-slate-700 focus:outline-none cursor-pointer"
+                  title="Filter OpEx & S-Operation by Campus (K1, K2, Sakal, KG)"
+                >
+                  <option value="All Sites">All Campuses</option>
+                  <option value="K1">K1</option>
+                  <option value="K2">K2</option>
+                  <option value="Sakal">Sakal</option>
+                  <option value="KG">KG</option>
+                </select>
+              </div>
+
               <select
                 value={opexAccountFilter}
                 onChange={(e) => setOpexAccountFilter(e.target.value)}
                 className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none"
               >
                 <option value="All Accounts">All Accounts</option>
-                {OPEX_ACCOUNT_CODES.map(a => (
-                  <option key={a.code} value={a.code}>{a.code}</option>
+                {effectiveAccountCodes.map(a => (
+                  <option key={a.id || a.code} value={a.code}>{a.code}</option>
                 ))}
               </select>
 
@@ -1485,9 +1625,9 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
                 setEditingOpexItem(null);
                 setShowOpexModal(true);
               }}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold py-2 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm hover:shadow transition-all"
             >
-              <Plus size={14} />
+              <Plus size={14} className="stroke-[2.5]" />
               <span>Add OpEx Service</span>
             </Button>
           </div>
@@ -1725,59 +1865,154 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
         </div>
       )}
 
-      {/* --- SUB-TAB 4: SYNC & TEMPLATE TOOLS --- */}
+      {/* --- SUB-TAB 4: SYNC & TEMPLATE TOOLS (RESET TEMPLATE & MASTER ACCOUNT CODES CONFIGURATION) --- */}
       {activeSubTab === 'sync' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-              <Download size={20} />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">Export Multi-Sheet Financial Workbook</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Download the complete FY {selectedFiscalYear} IT CapEx & S-Operation dataset formatted identically to our Finance template with side-by-side Planned, Actual, and Variance columns.
-              </p>
-            </div>
-            <Button
-              onClick={handleExportExcel}
-              className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold py-2.5"
-            >
-              <Download size={14} />
-              <span>Download Khema_IT_CapEx_and_S-Operation_FY{selectedFiscalYear}.xlsx</span>
-            </Button>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-              <Upload size={20} />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">Import & Sync External Spreadsheet</h3>
-              <p className="text-xs text-slate-500 mt-1">
-                Upload updated `.xlsx` files with CapEx and OpEx worksheets to synchronize budget and actuals into MySQL.
-              </p>
-            </div>
-            <label className="w-full inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold py-2.5 cursor-pointer">
-              <Upload size={14} />
-              <span>Choose .xlsx File to Synchronize</span>
-              <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
-            </label>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4 md:col-span-2">
-            <div className="flex items-center justify-between">
+        <div className="space-y-6">
+          {/* Top 2 Cards: Excel Spreadsheet Export & Sync */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <Download size={20} />
+              </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900">Pre-Seeded Khema Template Defaults</h3>
+                <h3 className="text-base font-bold text-slate-900">Export Multi-Sheet Financial Workbook</h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Restore standard Khema items (eHospital, Anzer, Vcloudia, Cyfuture, D365, RadiAnt View, Bluehost/GoDaddy, iDrive, MOS/BOS rentals, patient card printers, Dell AIO computers, laptops, CCTV systems).
+                  Download the complete FY {selectedFiscalYear} IT CapEx & S-Operation dataset formatted identically to our Finance template with side-by-side Planned, Actual, and Variance columns.
                 </p>
               </div>
               <Button
-                variant="outline"
-                onClick={handleRestoreDefaults}
-                className="text-xs font-semibold text-rose-600 hover:bg-rose-50 border-rose-200"
+                onClick={handleExportExcel}
+                className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold py-2.5"
               >
-                Restore FY {selectedFiscalYear} Defaults
+                <Download size={14} />
+                <span>Download Khema_IT_CapEx_and_S-Operation_FY{selectedFiscalYear}.xlsx</span>
+              </Button>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                <Upload size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Import & Sync External Spreadsheet</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Upload updated `.xlsx` files with CapEx and OpEx worksheets to synchronize budget and actuals into MySQL.
+                </p>
+              </div>
+              <label className="w-full inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold py-2.5 cursor-pointer">
+                <Upload size={14} />
+                <span>Choose .xlsx File to Synchronize</span>
+                <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
+              </label>
+            </div>
+          </div>
+
+          {/* Section 2: Master Account Code Configuration (OpEx Chart of Accounts) */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200/80">
+                  <SlidersHorizontal size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">Master Account Codes Configuration</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 text-teal-800 border border-teal-300">
+                      {effectiveAccountCodes.length} Codes Active
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Standardized chart of accounts for OpEx recurring services, maintenance SLAs, software licenses, and IT leases.
+                  </p>
+                </div>
+              </div>
+              <Button
+                onClick={() => setShowAccountCodesModal(true)}
+                className="bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold py-2 px-4 shadow-sm inline-flex items-center gap-1.5 shrink-0"
+              >
+                <Plus size={14} />
+                <span>Manage / Add Account Codes</span>
+              </Button>
+            </div>
+
+            {/* Quick Preview Table of Configured Master Account Codes */}
+            <div className="border border-slate-200/80 rounded-xl overflow-hidden shadow-2xs">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+                  <tr>
+                    <th className="py-2.5 px-3">Account Code</th>
+                    <th className="py-2.5 px-3">Account Name</th>
+                    <th className="py-2.5 px-3">Category</th>
+                    <th className="py-2.5 px-3">Scope / Description</th>
+                    <th className="py-2.5 px-3 text-center">Status</th>
+                    <th className="py-2.5 px-3 text-center w-20">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {effectiveAccountCodes.map((ac) => (
+                    <tr key={ac.id || ac.code} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="py-2 px-3 font-mono font-bold text-slate-900">
+                        {ac.code}
+                      </td>
+                      <td className="py-2 px-3 font-semibold text-slate-800">
+                        {ac.name}
+                      </td>
+                      <td className="py-2 px-3">
+                        <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+                          {ac.category || 'OpEx'}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-slate-500 text-[11px] max-w-xs truncate">
+                        {ac.description || 'Standard outside services and IT maintenance SLA'}
+                      </td>
+                      <td className="py-2 px-3 text-center">
+                        {ac.is_active === 0 || ac.is_active === false ? (
+                          <span className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">Inactive</span>
+                        ) : (
+                          <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">Active</span>
+                        )}
+                      </td>
+                      <td className="py-2 px-3 text-center">
+                        <button
+                          onClick={() => setShowAccountCodesModal(true)}
+                          className="p-1 text-slate-400 hover:text-teal-700 hover:bg-teal-50 rounded-md transition-colors"
+                          title="Edit in Master CRUD Modal"
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Section 3: Reset & Restore Standard Baseline Template */}
+          <div className="bg-gradient-to-r from-rose-50/50 via-white to-amber-50/30 rounded-2xl border-2 border-rose-200/80 p-6 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 border border-rose-200">
+                  <RotateCcw size={20} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">Reset & Restore Standard Template</h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+                      FY {selectedFiscalYear} Baseline
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                    Reset all CapEx and OpEx/S-Operation line items for <strong>FY {selectedFiscalYear}</strong> back to the official Khema Global baseline template. This will restore default core contracts (eHospital, Anzer, Vcloudia, Cyfuture, D365, RadiAnt View, Bluehost/GoDaddy, iDrive, printer rentals) and standard planned hardware acquisitions.
+                  </p>
+                </div>
+              </div>
+              <Button
+                onClick={handleRestoreDefaults}
+                className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold py-2.5 px-4 shadow-sm inline-flex items-center gap-2 shrink-0 transition-all hover:shadow"
+              >
+                <RotateCcw size={14} />
+                <span>Reset FY {selectedFiscalYear} Template</span>
               </Button>
             </div>
           </div>
@@ -1854,6 +2089,7 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
           fiscalYear={selectedFiscalYear}
           item={editingCapexItem}
           sites={SITES.filter(s => s !== 'All Sites')}
+          assetCategories={assetCategories}
           onClose={() => setShowCapexModal(false)}
           onSaved={() => {
             setShowCapexModal(false);
@@ -1869,6 +2105,8 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
           fiscalYear={selectedFiscalYear}
           item={editingOpexItem}
           sites={SITES.filter(s => s !== 'All Sites')}
+          accountCodes={effectiveAccountCodes}
+          onManageAccountCodes={() => setShowAccountCodesModal(true)}
           onClose={() => setShowOpexModal(false)}
           onSaved={() => {
             setShowOpexModal(false);
@@ -1876,6 +2114,80 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
             showToast('OpEx item saved successfully');
           }}
         />
+      )}
+
+      {/* --- MODAL: CONFIGURE MASTER ACCOUNT CODES --- */}
+      {showAccountCodesModal && (
+        <AccountCodesMasterModal
+          accountCodes={effectiveAccountCodes}
+          onClose={() => setShowAccountCodesModal(false)}
+          onRefresh={() => {
+            fetchAccountCodes();
+            fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery);
+          }}
+          showToast={showToast}
+        />
+      )}
+
+      {/* --- IN-APP DELETE / RESET CONFIRMATION MODAL --- */}
+      {deleteConfirmItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-100 dark:border-rose-900">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                  {deleteConfirmItem.type === 'restore-defaults' ? 'Reset to Standard Template?' : `Delete ${deleteConfirmItem.type.toUpperCase()} Item?`}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  {deleteConfirmItem.type === 'restore-defaults' 
+                    ? `Are you sure you want to reset all CapEx and S-Operation items for FY ${selectedFiscalYear} to the standard Khema Global template? Existing customizations will be overwritten.`
+                    : `Are you sure you want to delete this ${deleteConfirmItem.type === 'capex' ? 'CapEx' : 'OpEx & S-Operation'} line item? Budget summary actuals and planned totals will be automatically recalculated.`
+                  }
+                </p>
+                <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200 block truncate">
+                    {deleteConfirmItem.name}
+                  </span>
+                  <span className="text-[11px] text-slate-400 block mt-0.5">
+                    Fiscal Year: FY {selectedFiscalYear}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmItem(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm shadow-rose-600/20 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {isDeleting ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin" />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={13} />
+                    <span>{deleteConfirmItem.type === 'restore-defaults' ? 'Reset Template' : 'Confirm Delete'}</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1886,13 +2198,36 @@ interface CapexModalProps {
   fiscalYear: number;
   item: CapExItem | null;
   sites: string[];
+  assetCategories?: string[];
   onClose: () => void;
   onSaved: () => void;
 }
 
-const CapexEditModal: React.FC<CapexModalProps> = ({ fiscalYear, item, sites, onClose, onSaved }) => {
+const CapexEditModal: React.FC<CapexModalProps> = ({ fiscalYear, item, sites, assetCategories = [], onClose, onSaved }) => {
+  const availableAssetTypes = useMemo(() => {
+    const list: string[] = [];
+    const seen = new Set<string>();
+    const addType = (t: string) => {
+      const trimmed = (t || '').trim();
+      if (trimmed && !seen.has(trimmed.toLowerCase())) {
+        seen.add(trimmed.toLowerCase());
+        list.push(trimmed);
+      }
+    };
+    if (assetCategories && assetCategories.length > 0) {
+      assetCategories.forEach(addType);
+    }
+    if (item?.asset_type) {
+      addType(item.asset_type);
+    }
+    DEFAULT_ASSET_TYPES.forEach(addType);
+    return list;
+  }, [assetCategories, item]);
+
   const [description, setDescription] = useState(item?.description || '');
-  const [assetType, setAssetType] = useState(item?.asset_type || 'Computer');
+  const [assetType, setAssetType] = useState(
+    item?.asset_type || (assetCategories.length > 0 ? assetCategories[0] : (DEFAULT_ASSET_TYPES[0] || 'Computer'))
+  );
   const [site, setSite] = useState(item?.site || 'K1');
   const [pic, setPic] = useState(item?.pic || 'Braseth');
   const [costCenter, setCostCenter] = useState(item?.cost_center || 'IT');
@@ -1986,13 +2321,21 @@ const CapexEditModal: React.FC<CapexModalProps> = ({ fiscalYear, item, sites, on
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="font-semibold text-slate-700">Asset Type</label>
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-slate-700">Asset Type</label>
+                {assetCategories.length > 0 && (
+                  <span className="text-[10px] text-indigo-600 font-semibold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+                    Synced ({assetCategories.length})
+                  </span>
+                )}
+              </div>
               <select
                 value={assetType}
                 onChange={(e) => setAssetType(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
+                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800 font-medium"
               >
-                {ASSET_TYPES.map(t => (
+                {availableAssetTypes.map(t => (
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>
@@ -2129,16 +2472,419 @@ const CapexEditModal: React.FC<CapexModalProps> = ({ fiscalYear, item, sites, on
   );
 };
 
+// --- SUB-COMPONENT: MASTER CRUD CONFIGURE ACCOUNT CODES MODAL ---
+interface AccountCodesMasterModalProps {
+  accountCodes: OpexAccountCode[];
+  onClose: () => void;
+  onRefresh: () => void;
+  showToast: (text: string, type?: 'success' | 'error' | 'info') => void;
+}
+
+const AccountCodesMasterModal: React.FC<AccountCodesMasterModalProps> = ({
+  accountCodes,
+  onClose,
+  onRefresh,
+  showToast
+}) => {
+  const [code, setCode] = useState('');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [category, setCategory] = useState('OpEx');
+  const [editingItem, setEditingItem] = useState<OpexAccountCode | null>(null);
+  const [editCode, setEditCode] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editCategory, setEditCategory] = useState('OpEx');
+  const [editIsActive, setEditIsActive] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const filteredCodes = useMemo(() => {
+    if (!search.trim()) return accountCodes;
+    const q = search.toLowerCase();
+    return accountCodes.filter(c => 
+      c.code.toLowerCase().includes(q) || 
+      c.name.toLowerCase().includes(q) || 
+      (c.description && c.description.toLowerCase().includes(q))
+    );
+  }, [accountCodes, search]);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!code.trim() || !name.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch('/api/it-budget/account-codes', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          code: code.trim(),
+          name: name.trim(),
+          description: description.trim(),
+          category,
+          sort_order: accountCodes.length + 1,
+          is_active: 1
+        })
+      });
+      if (res.ok) {
+        setCode('');
+        setName('');
+        setDescription('');
+        showToast('Account code created successfully');
+        onRefresh();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to create account code');
+      }
+    } catch (err: any) {
+      alert('Error creating account code: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const startEdit = (item: OpexAccountCode) => {
+    setEditingItem(item);
+    setEditCode(item.code);
+    setEditName(item.name);
+    setEditDescription(item.description || '');
+    setEditCategory(item.category || 'OpEx');
+    setEditIsActive(item.is_active !== false && item.is_active !== 0);
+  };
+
+  const handleUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingItem || !editCode.trim() || !editName.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/it-budget/account-codes/${editingItem.id}`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          code: editCode.trim(),
+          name: editName.trim(),
+          description: editDescription.trim(),
+          category: editCategory,
+          is_active: editIsActive ? 1 : 0
+        })
+      });
+      if (res.ok) {
+        setEditingItem(null);
+        showToast('Account code updated successfully');
+        onRefresh();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to update account code');
+      }
+    } catch (err: any) {
+      alert('Error updating account code: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string, codeName: string) => {
+    if (!id) {
+      alert('Default static code cannot be deleted directly');
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to delete master account code "${codeName}"?`)) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/it-budget/account-codes/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
+      if (res.ok) {
+        showToast(`Account code "${codeName}" deleted`);
+        onRefresh();
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to delete account code');
+      }
+    } catch (err: any) {
+      alert('Error deleting: ' + err.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in duration-200">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 bg-slate-50/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-emerald-100/70 text-emerald-800 border border-emerald-200">
+              <SlidersHorizontal size={20} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-900">Configure Master Account Codes</h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                  {accountCodes.length} Codes
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Manage chart of accounts for IT operational expenses, SLA contracts, and recurring services
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5 overflow-y-auto flex-1">
+          {/* Quick Create Form */}
+          <div className="bg-gradient-to-br from-emerald-50/60 to-slate-50 p-4 rounded-2xl border border-emerald-200/80 shadow-xs">
+            <div className="text-xs font-bold text-emerald-950 mb-3 flex items-center gap-1.5">
+              <Plus size={14} className="text-emerald-600 stroke-[3]" />
+              <span>Add New Account Code</span>
+            </div>
+            <form onSubmit={handleCreate} className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-700">Account Code *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. 630108 - Cybersecurity SLA"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    className="w-full mt-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-700">Account Name *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Cybersecurity SLA"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="w-full mt-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] font-semibold text-slate-700">Description / Scope</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Penetration testing, SOC services, endpoint defense licenses"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    className="w-full mt-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-700">Category</label>
+                  <select
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    className="w-full mt-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="OpEx">OpEx Outside Services</option>
+                    <option value="Cloud/SaaS">Cloud & Software</option>
+                    <option value="Infrastructure">Infrastructure Maintenance</option>
+                    <option value="Telecom">Telecom & Data</option>
+                  </select>
+                </div>
+              </div>
+              <div className="flex justify-end pt-1">
+                <Button type="submit" disabled={saving || !code.trim() || !name.trim()} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-1.5 rounded-xl shadow-xs">
+                  {saving ? 'Adding...' : 'Save Account Code'}
+                </Button>
+              </div>
+            </form>
+          </div>
+
+          {/* List & Search */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <span className="text-xs font-bold text-slate-800">Existing Master Codes ({filteredCodes.length})</span>
+              <div className="relative w-64">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Filter codes..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 shadow-2xs">
+              {filteredCodes.map((item) => {
+                const isEditing = editingItem?.id === item.id;
+                return (
+                  <div key={item.id || item.code} className="p-3 bg-white hover:bg-slate-50/70 transition-colors">
+                    {isEditing ? (
+                      <form onSubmit={handleUpdate} className="space-y-2.5 bg-amber-50/60 p-3 rounded-xl border border-amber-200">
+                        <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                          <Edit2 size={13} />
+                          <span>Edit Account Code: {item.code}</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-700">Code *</label>
+                            <input
+                              type="text"
+                              required
+                              value={editCode}
+                              onChange={(e) => setEditCode(e.target.value)}
+                              className="w-full mt-0.5 px-2.5 py-1 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-700">Name *</label>
+                            <input
+                              type="text"
+                              required
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              className="w-full mt-0.5 px-2.5 py-1 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                          <div className="sm:col-span-2">
+                            <label className="text-[10px] font-bold text-slate-700">Description</label>
+                            <input
+                              type="text"
+                              value={editDescription}
+                              onChange={(e) => setEditDescription(e.target.value)}
+                              className="w-full mt-0.5 px-2.5 py-1 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[10px] font-bold text-slate-700">Category</label>
+                            <select
+                              value={editCategory}
+                              onChange={(e) => setEditCategory(e.target.value)}
+                              className="w-full mt-0.5 px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg focus:outline"
+                            >
+                              <option value="OpEx">OpEx Outside Services</option>
+                              <option value="Cloud/SaaS">Cloud & Software</option>
+                              <option value="Infrastructure">Infrastructure Maintenance</option>
+                              <option value="Telecom">Telecom & Data</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between pt-1">
+                          <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={editIsActive}
+                              onChange={(e) => setEditIsActive(e.target.checked)}
+                              className="rounded text-emerald-600 focus:ring-emerald-500"
+                            />
+                            <span className="text-[11px] font-medium">Active Code</span>
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <Button type="button" variant="outline" onClick={() => setEditingItem(null)} className="text-xs py-1 px-2.5">
+                              Cancel
+                            </Button>
+                            <Button type="submit" disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs py-1 px-3">
+                              {saving ? 'Saving...' : 'Update'}
+                            </Button>
+                          </div>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-bold text-slate-900 text-xs bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                              {item.code}
+                            </span>
+                            <span className="text-xs font-bold text-slate-800">{item.name}</span>
+                            <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-full">
+                              {item.category || 'OpEx'}
+                            </span>
+                            {item.is_active === 0 || item.is_active === false ? (
+                              <span className="text-[9px] font-semibold text-rose-600 bg-rose-50 px-1.5 rounded">Inactive</span>
+                            ) : (
+                              <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 rounded">Active</span>
+                            )}
+                          </div>
+                          {item.description && (
+                            <p className="text-[11px] text-slate-500 leading-normal pl-0.5">
+                              {item.description}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 pt-0.5">
+                          <button
+                            onClick={() => startEdit(item)}
+                            className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
+                            title="Edit Account Code"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          {item.id && (
+                            <button
+                              onClick={() => handleDelete(item.id!, item.code)}
+                              disabled={deletingId === item.id}
+                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                              title="Delete Account Code"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-slate-100 px-6 py-3 bg-slate-50/50 flex justify-end">
+          <Button variant="outline" onClick={onClose} className="text-xs font-semibold px-4 py-1.5">
+            Close
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // --- SUB-COMPONENT: OPEX EDIT MODAL ---
 interface OpexModalProps {
   fiscalYear: number;
   item: OpExItem | null;
   sites: string[];
+  accountCodes?: OpexAccountCode[];
+  onManageAccountCodes?: () => void;
   onClose: () => void;
   onSaved: () => void;
 }
 
-const OpexEditModal: React.FC<OpexModalProps> = ({ fiscalYear, item, sites, onClose, onSaved }) => {
+const OpexEditModal: React.FC<OpexModalProps> = ({ 
+  fiscalYear, 
+  item, 
+  sites, 
+  accountCodes = [], 
+  onManageAccountCodes = () => {}, 
+  onClose, 
+  onSaved 
+}) => {
   const [description, setDescription] = useState(item?.description || '');
   const [accountCode, setAccountCode] = useState(item?.account_code || '630104 - Other Outside Services');
   const [site, setSite] = useState(item?.site || 'K1');
@@ -2149,8 +2895,71 @@ const OpexEditModal: React.FC<OpexModalProps> = ({ fiscalYear, item, sites, onCl
   const [qty, setQty] = useState(item?.qty || 1);
   const [unitPrice, setUnitPrice] = useState(item?.unit_price || 0);
   const [justification, setJustification] = useState(item?.justification || '');
-  const [autoSmartSpread, setAutoSmartSpread] = useState(!item);
+  const [autoSmartSpread, setAutoSmartSpread] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Pure helper to compute 12-month Smart Spread in real time
+  const computeSmartSpread = (cycle: string, renDate: string, price: number, q: number) => {
+    const total = Number(price || 0) * Number(q || 1);
+    const spending: Record<string, { planned: number; actual: number }> = {};
+    MONTH_KEYS.forEach(m => {
+      spending[m] = { planned: 0, actual: 0 };
+    });
+
+    if (cycle === 'Monthly') {
+      const monthlyAmt = Number(price || 0) * Number(q || 1);
+      MONTH_KEYS.forEach(m => {
+        spending[m] = { planned: monthlyAmt, actual: 0 };
+      });
+    } else if (cycle === 'Quarterly') {
+      const qAmt = total / 4;
+      spending.mar = { planned: qAmt, actual: 0 };
+      spending.jun = { planned: qAmt, actual: 0 };
+      spending.sep = { planned: qAmt, actual: 0 };
+      spending.dec = { planned: qAmt, actual: 0 };
+    } else {
+      // Annual - Allocate full amount to renewal month (safely parsed from YYYY-MM-DD)
+      let targetIdx = 0; // Default Jan
+      if (renDate) {
+        const parts = renDate.slice(0, 10).split('-');
+        if (parts.length >= 2) {
+          const m = parseInt(parts[1], 10);
+          if (!isNaN(m) && m >= 1 && m <= 12) targetIdx = m - 1;
+        }
+      }
+      const mKey = MONTH_KEYS[targetIdx] || 'jan';
+      spending[mKey] = { planned: total, actual: 0 };
+    }
+    return spending;
+  };
+
+  const [monthlySpending, setMonthlySpending] = useState<Record<string, { planned: number; actual: number }>>(() => {
+    if (item?.monthly_spending && typeof item.monthly_spending === 'object' && Object.keys(item.monthly_spending).length > 0) {
+      return item.monthly_spending;
+    }
+    return computeSmartSpread(
+      item?.billing_cycle || 'Annual',
+      item?.renewal_date ? item.renewal_date.slice(0, 10) : '',
+      item?.unit_price || 0,
+      item?.qty || 1
+    );
+  });
+
+  // Automatically recalculate spread when core parameters change and autoSmartSpread is enabled
+  useEffect(() => {
+    if (autoSmartSpread) {
+      const newSpread = computeSmartSpread(billingCycle, renewalDate, unitPrice, qty);
+      setMonthlySpending(newSpread);
+    }
+  }, [billingCycle, renewalDate, unitPrice, qty, autoSmartSpread]);
+
+  const handleToggleSmartSpread = (checked: boolean) => {
+    setAutoSmartSpread(checked);
+    if (checked) {
+      const freshSpread = computeSmartSpread(billingCycle, renewalDate, unitPrice, qty);
+      setMonthlySpending(freshSpread);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -2181,7 +2990,8 @@ const OpexEditModal: React.FC<OpexModalProps> = ({ fiscalYear, item, sites, onCl
           qty: Number(qty),
           unit_price: Number(unitPrice),
           justification: justification.trim(),
-          autoSmartSpread
+          autoSmartSpread,
+          monthly_spending: monthlySpending
         })
       });
 
@@ -2226,15 +3036,37 @@ const OpexEditModal: React.FC<OpexModalProps> = ({ fiscalYear, item, sites, onCl
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="font-semibold text-slate-700">Account Code</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="font-semibold text-slate-700">Account Code</label>
+                <button
+                  type="button"
+                  onClick={onManageAccountCodes}
+                  className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1 hover:underline transition-colors"
+                  title="Configure Master Account Codes"
+                >
+                  <SlidersHorizontal size={11} />
+                  <span>Configure Codes</span>
+                </button>
+              </div>
               <select
                 value={accountCode}
-                onChange={(e) => setAccountCode(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
+                onChange={(e) => {
+                  if (e.target.value === '__MANAGE__') {
+                    onManageAccountCodes();
+                  } else {
+                    setAccountCode(e.target.value);
+                  }
+                }}
+                className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-200/90 rounded-xl focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 font-semibold text-xs text-slate-900 shadow-xs hover:border-emerald-400 transition-all cursor-pointer"
               >
-                {OPEX_ACCOUNT_CODES.map(a => (
-                  <option key={a.code} value={a.code}>{a.code}</option>
+                {accountCodes.map(a => (
+                  <option key={a.id || a.code} value={a.code} className="text-slate-900 font-medium py-1">
+                    {a.code}
+                  </option>
                 ))}
+                <option value="__MANAGE__" className="text-emerald-700 font-bold bg-emerald-50 py-1">
+                  ⚙️ + Manage / Configure Account Codes...
+                </option>
               </select>
             </div>
 
@@ -2290,15 +3122,84 @@ const OpexEditModal: React.FC<OpexModalProps> = ({ fiscalYear, item, sites, onCl
             </div>
           </div>
 
-          <label className="flex items-center gap-2 font-medium text-slate-700 cursor-pointer pt-1">
+          <label className="flex items-start gap-3 p-3 rounded-xl border border-emerald-300/80 bg-gradient-to-r from-emerald-50/90 via-teal-50/50 to-white shadow-xs cursor-pointer hover:border-emerald-500 hover:shadow-sm transition-all group">
             <input
               type="checkbox"
               checked={autoSmartSpread}
-              onChange={(e) => setAutoSmartSpread(e.target.checked)}
-              className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+              onChange={(e) => handleToggleSmartSpread(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer transition-colors"
             />
-            <span>Apply Smart Spread (12-mo even split for Monthly, renewal month for Annual)</span>
+            <span className="flex-1 flex flex-col gap-1 text-slate-800 text-xs">
+              <span className="flex items-center justify-between flex-wrap gap-2">
+                <span className="flex items-center gap-1.5 font-bold text-emerald-950 text-xs">
+                  <Sparkles size={14} className="text-emerald-600 shrink-0" />
+                  <span>Apply Smart Spread in OpEx Services</span>
+                </span>
+                {autoSmartSpread ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
+                    <Check size={11} className="text-emerald-700 stroke-[2.5]" />
+                    <span>Active ({billingCycle})</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
+                    Manual Phasing
+                  </span>
+                )}
+              </span>
+
+              <span className="text-[11px] text-slate-600 font-normal leading-relaxed">
+                {billingCycle === 'Monthly' && (
+                  <>
+                    Automatically distributes <strong className="text-emerald-700 font-semibold font-mono">${(unitPrice * qty).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>/month evenly across all 12 months (Annual Total: <strong className="text-slate-900 font-semibold font-mono">${(unitPrice * qty * 12).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>).
+                  </>
+                )}
+                {billingCycle === 'Annual' && (
+                  <>
+                    Allocates annual lump sum of <strong className="text-emerald-700 font-semibold font-mono">${(unitPrice * qty).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> directly into renewal month: <span className="font-semibold text-emerald-800 bg-emerald-100/70 px-1 py-0.5 rounded">{renewalDate ? (MONTH_LABELS[parseInt(renewalDate.split('-')[1] || '1', 10) - 1] || 'January') : 'January'}</span>.
+                  </>
+                )}
+                {billingCycle === 'Quarterly' && (
+                  <>
+                    Splits <strong className="text-emerald-700 font-semibold font-mono">${((unitPrice * qty) / 4).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> per quarter into Mar, Jun, Sep, and Dec (Annual Total: <strong className="text-slate-900 font-semibold font-mono">${(unitPrice * qty).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>).
+                  </>
+                )}
+              </span>
+            </span>
           </label>
+
+          {/* Live 12-Month Spread Visualization */}
+          <div className="bg-slate-50/90 rounded-xl border border-slate-200/90 p-2.5 space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-bold text-slate-700 flex items-center gap-1.5">
+                <Layers size={13} className="text-indigo-600" />
+                <span>12-Month Phasing Preview (FY {fiscalYear})</span>
+              </span>
+              <span className="font-mono font-bold text-emerald-700 text-xs">
+                Annual Planned: ${MONTH_KEYS.reduce((acc, m) => acc + (monthlySpending[m]?.planned || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className="grid grid-cols-6 sm:grid-cols-12 gap-1 text-center">
+              {MONTH_KEYS.map((m, mIdx) => {
+                const amt = monthlySpending[m]?.planned || 0;
+                const isNonZero = amt > 0;
+                return (
+                  <div 
+                    key={m} 
+                    className={`p-1 rounded-lg border text-[10px] transition-all ${
+                      isNonZero 
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold shadow-2xs' 
+                        : 'bg-white border-slate-200/80 text-slate-400'
+                    }`}
+                  >
+                    <div className="text-[9px] uppercase font-semibold text-slate-500">{MONTH_LABELS[mIdx]}</div>
+                    <div className="font-mono mt-0.5 truncate text-[10px]">
+                      ${amt >= 1000 ? `${(amt / 1000).toFixed(1)}k` : amt.toLocaleString()}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           <div>
             <label className="font-semibold text-slate-700">Business Justification</label>

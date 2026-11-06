@@ -93,9 +93,18 @@ export function applySmartSpread(
     // Annual: assign lump sum to renewal month
     let targetMonthIdx = 0; // default Jan
     if (renewalDate) {
-      const d = new Date(renewalDate);
-      if (!isNaN(d.getTime())) {
-        targetMonthIdx = d.getMonth();
+      const dateStr = String(renewalDate).trim();
+      const parts = dateStr.slice(0, 10).split('-');
+      if (parts.length >= 2) {
+        const m = parseInt(parts[1], 10);
+        if (!isNaN(m) && m >= 1 && m <= 12) {
+          targetMonthIdx = m - 1;
+        }
+      } else {
+        const d = new Date(dateStr);
+        if (!isNaN(d.getTime())) {
+          targetMonthIdx = d.getMonth();
+        }
       }
     }
     const monthKey = MONTH_KEYS[targetMonthIdx] || 'jan';
@@ -182,17 +191,74 @@ export async function initItBudgetTables(db: any) {
       console.warn('[IT Budget] Opex column check:', e.message);
     }
 
-    // Check if initial 2026 and 2027 seeds are needed
-    const [capexCount2026]: any = await db.query('SELECT COUNT(*) as c FROM it_capex_plan WHERE fiscal_year = 2026');
-    const [opexCount2026]: any = await db.query('SELECT COUNT(*) as c FROM it_opex_plan WHERE fiscal_year = 2026');
-    if (capexCount2026[0].c === 0 && opexCount2026[0].c === 0) {
-      await seedItBudgetDefaults(db, 2026);
+    // Master Account Codes Table for OpEx Services
+    await db.query(`CREATE TABLE IF NOT EXISTS it_account_codes (
+      id VARCHAR(36) PRIMARY KEY,
+      code VARCHAR(100) NOT NULL UNIQUE,
+      name VARCHAR(150) NOT NULL,
+      description TEXT,
+      category VARCHAR(50) DEFAULT 'OpEx',
+      is_active TINYINT(1) DEFAULT 1,
+      sort_order INT DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
+
+    // Seed master account codes if table is empty
+    try {
+      const [codeCount]: any = await db.query('SELECT COUNT(*) as c FROM it_account_codes');
+      if ((codeCount[0]?.c || 0) === 0) {
+        const defaultCodes = [
+          { code: '630104 - Other Outside Services', name: 'Other Outside Services', description: 'External vendor contracts, technical maintenance SLAs, IT service retainers', sort: 1 },
+          { code: '630103 - Rent - Non-Medical equipment', name: 'Rent - Non-Medical equipment', description: 'Printers, POS terminals, scanners, and hardware leases', sort: 2 },
+          { code: '630102 - Communication & Internet', name: 'Communication & Internet', description: 'Fiber internet lines, backup links, VoIP trunking, SIM cards', sort: 3 },
+          { code: '630105 - Cloud & SaaS Licenses', name: 'Cloud & SaaS Licenses', description: 'AWS/GCP/Azure hosting, Office 365, Antivirus, backup SaaS', sort: 4 },
+          { code: '630106 - Software Maintenance & Support', name: 'Software Maintenance & Support', description: 'HIS/LIS/PACS database maintenance and support agreements', sort: 5 },
+          { code: '630107 - Hardware Maintenance & Repairs', name: 'Hardware Maintenance & Repairs', description: 'UPS batteries replacement, spare parts, computer repair services', sort: 6 }
+        ];
+        for (const item of defaultCodes) {
+          await db.query(
+            `INSERT IGNORE INTO it_account_codes (id, code, name, description, category, sort_order)
+             VALUES (?, ?, ?, ?, 'OpEx', ?)`,
+            [crypto.randomUUID(), item.code, item.name, item.description, item.sort]
+          );
+        }
+      }
+    } catch (e: any) {
+      console.warn('[IT Budget] Account codes seed warning:', e.message);
     }
 
-    const [capexCount2027]: any = await db.query('SELECT COUNT(*) as c FROM it_capex_plan WHERE fiscal_year = 2027');
-    const [opexCount2027]: any = await db.query('SELECT COUNT(*) as c FROM it_opex_plan WHERE fiscal_year = 2027');
-    if (capexCount2027[0].c === 0 && opexCount2027[0].c === 0) {
+    // Persistent System Metadata Table to prevent auto-resetting deleted data on reboot/refresh
+    await db.query(`CREATE TABLE IF NOT EXISTS it_system_metadata (
+      meta_key VARCHAR(100) PRIMARY KEY,
+      meta_value VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
+
+    // Check if initial seeding was already completed in the past
+    const [metaRows]: any = await db.query(
+      "SELECT meta_value FROM it_system_metadata WHERE meta_key = 'it_budget_seed_completed'"
+    );
+
+    const [totalCapex]: any = await db.query('SELECT COUNT(*) as c FROM it_capex_plan');
+    const [totalOpex]: any = await db.query('SELECT COUNT(*) as c FROM it_opex_plan');
+    const hasExistingData = (totalCapex[0]?.c || 0) > 0 || (totalOpex[0]?.c || 0) > 0;
+
+    if (metaRows.length > 0 || hasExistingData) {
+      // System was already initialized. Preserve user deletions - never auto-reset!
+      if (metaRows.length === 0) {
+        await db.query(
+          "INSERT IGNORE INTO it_system_metadata (meta_key, meta_value) VALUES ('it_budget_seed_completed', 'true')"
+        );
+      }
+    } else {
+      // First-time fresh install: seed initial template once
+      await seedItBudgetDefaults(db, 2026);
       await seedItBudgetDefaults(db, 2027);
+      await db.query(
+        "INSERT INTO it_system_metadata (meta_key, meta_value) VALUES ('it_budget_seed_completed', 'true')"
+      );
     }
   } catch (err: any) {
     console.error('[IT Budget Tables Init Warning]:', err.message);
@@ -1012,6 +1078,19 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
       let spending = monthly_spending;
       if (autoSmartSpread) {
         spending = applySmartSpread(cycle, renewal_date, numPrice, numQty);
+      } else if (!spending) {
+        const [existing]: any = await db.query('SELECT monthly_spending FROM it_opex_plan WHERE id = ?', [id]);
+        if (existing.length > 0 && existing[0].monthly_spending) {
+          try {
+            spending = typeof existing[0].monthly_spending === 'string'
+              ? JSON.parse(existing[0].monthly_spending)
+              : existing[0].monthly_spending;
+          } catch {
+            spending = applySmartSpread(cycle, renewal_date, numPrice, numQty);
+          }
+        } else {
+          spending = applySmartSpread(cycle, renewal_date, numPrice, numQty);
+        }
       }
 
       let annual_cost = 0;
@@ -1047,6 +1126,133 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
       const { id } = req.params;
       await db.query('DELETE FROM it_opex_plan WHERE id = ?', [id]);
       res.json({ success: true, id });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- 3.5. MASTER CRUD: CONFIGURE OPEX ACCOUNT CODES ---
+  app.get('/api/it-budget/account-codes', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      let [rows]: any = await db.query('SELECT * FROM it_account_codes ORDER BY sort_order ASC, code ASC');
+      if (rows.length === 0) {
+        const defaultCodes = [
+          { code: '630104 - Other Outside Services', name: 'Other Outside Services', description: 'External vendor contracts, technical maintenance SLAs, IT service retainers', sort: 1 },
+          { code: '630103 - Rent - Non-Medical equipment', name: 'Rent - Non-Medical equipment', description: 'Printers, POS terminals, scanners, and hardware leases', sort: 2 },
+          { code: '630102 - Communication & Internet', name: 'Communication & Internet', description: 'Fiber internet lines, backup links, VoIP trunking, SIM cards', sort: 3 },
+          { code: '630105 - Cloud & SaaS Licenses', name: 'Cloud & SaaS Licenses', description: 'AWS/GCP/Azure hosting, Office 365, Antivirus, backup SaaS', sort: 4 },
+          { code: '630106 - Software Maintenance & Support', name: 'Software Maintenance & Support', description: 'HIS/LIS/PACS database maintenance and support agreements', sort: 5 },
+          { code: '630107 - Hardware Maintenance & Repairs', name: 'Hardware Maintenance & Repairs', description: 'UPS batteries replacement, spare parts, computer repair services', sort: 6 }
+        ];
+        for (const item of defaultCodes) {
+          await db.query(
+            `INSERT IGNORE INTO it_account_codes (id, code, name, description, category, sort_order)
+             VALUES (?, ?, ?, ?, 'OpEx', ?)`,
+            [crypto.randomUUID(), item.code, item.name, item.description, item.sort]
+          );
+        }
+        [rows] = await db.query('SELECT * FROM it_account_codes ORDER BY sort_order ASC, code ASC');
+      }
+      res.json(rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/it-budget/account-codes', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const { code, name, description, category, sort_order, is_active } = req.body;
+      if (!code?.trim() || !name?.trim()) {
+        return res.status(400).json({ error: 'Account code and name are required' });
+      }
+      const trimmedCode = code.trim();
+      const [existing]: any = await db.query('SELECT id FROM it_account_codes WHERE code = ?', [trimmedCode]);
+      if (existing.length > 0) {
+        return res.status(409).json({ error: `Account code "${trimmedCode}" already exists` });
+      }
+      const id = crypto.randomUUID();
+      await db.query(
+        `INSERT INTO it_account_codes (id, code, name, description, category, sort_order, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id, trimmedCode, name.trim(), description?.trim() || '',
+          category || 'OpEx', parseInt(sort_order, 10) || 0, is_active !== false ? 1 : 0
+        ]
+      );
+      const [created]: any = await db.query('SELECT * FROM it_account_codes WHERE id = ?', [id]);
+      res.status(201).json(created[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put('/api/it-budget/account-codes/:id', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const { code, name, description, category, sort_order, is_active } = req.body;
+      if (!code?.trim() || !name?.trim()) {
+        return res.status(400).json({ error: 'Account code and name are required' });
+      }
+      const [current]: any = await db.query('SELECT * FROM it_account_codes WHERE id = ?', [id]);
+      if (current.length === 0) {
+        return res.status(404).json({ error: 'Account code not found' });
+      }
+      const oldCode = current[0].code;
+      const newCode = code.trim();
+
+      if (oldCode !== newCode) {
+        const [dup]: any = await db.query('SELECT id FROM it_account_codes WHERE code = ? AND id != ?', [newCode, id]);
+        if (dup.length > 0) {
+          return res.status(409).json({ error: `Account code "${newCode}" already exists` });
+        }
+      }
+
+      await db.query(
+        `UPDATE it_account_codes SET
+         code = ?, name = ?, description = ?, category = ?, sort_order = ?, is_active = ?
+         WHERE id = ?`,
+        [
+          newCode, name.trim(), description?.trim() || '',
+          category || 'OpEx', parseInt(sort_order, 10) || 0, is_active !== false ? 1 : 0,
+          id
+        ]
+      );
+
+      // Cascade update to it_opex_plan if code changed
+      if (oldCode !== newCode) {
+        await db.query('UPDATE it_opex_plan SET account_code = ?, account_name = ? WHERE account_code = ?', [
+          newCode, name.trim(), oldCode
+        ]);
+      }
+
+      const [updated]: any = await db.query('SELECT * FROM it_account_codes WHERE id = ?', [id]);
+      res.json(updated[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete('/api/it-budget/account-codes/:id', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const [target]: any = await db.query('SELECT * FROM it_account_codes WHERE id = ?', [id]);
+      if (target.length === 0) {
+        return res.status(404).json({ error: 'Account code not found' });
+      }
+      const codeToDelete = target[0].code;
+      const [usage]: any = await db.query('SELECT COUNT(*) as c FROM it_opex_plan WHERE account_code = ?', [codeToDelete]);
+      const inUseCount = usage[0]?.c || 0;
+      if (inUseCount > 0) {
+        return res.status(400).json({ 
+          error: `Cannot delete "${codeToDelete}" because it is currently linked to ${inUseCount} OpEx service(s). Please reassign them first.` 
+        });
+      }
+      await db.query('DELETE FROM it_account_codes WHERE id = ?', [id]);
+      res.json({ success: true, message: 'Account code deleted', id });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

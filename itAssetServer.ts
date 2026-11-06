@@ -814,13 +814,17 @@ export function setupItAssetRoutes(app: Express, authenticateToken: any, getDb: 
   const db = getDb();
   initItAssetTables(db).catch(e => console.warn('[IT Asset Boot]:', e.message));
 
+  // Explicit column projections to eliminate wildcard SELECT * overhead
+  const FIXED_ASSET_COLS = `id, bu_name, asset_code, asset_date, category, item_name, brand, model, serial_num, key_specification, supplier, room_name, floor, \`current_user\`, admin_password, user_email, hostname, ip_lan, ip_address_lan_secondary, ip_address_wan, issue_date, purchase_date, invoice_ref, quantity, unit_price, before_dis_vat_price, grand_total, win_license, ms_license, ms_account_email, ms_account_password, remark, status`;
+  const CONTROL_ASSET_COLS = `id, bu_name, ac_code_cms, category, item_name, brand, model, serial_num, key_specification, supplier, room_name, floor, \`current_user\`, remark, status`;
+
   // --- 1. FIXED ASSETS REGISTER (FixAssets) ---
   app.get('/api/fixed-assets', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = getDb();
       const { bu_name, category, floor, status, search } = req.query as any;
 
-      let sql = 'SELECT * FROM it_fixed_assets WHERE 1=1';
+      let sql = `SELECT ${FIXED_ASSET_COLS} FROM it_fixed_assets WHERE 1=1`;
       const params: any[] = [];
 
       if (bu_name && bu_name !== 'All BUs' && bu_name !== 'All') {
@@ -997,7 +1001,7 @@ export function setupItAssetRoutes(app: Express, authenticateToken: any, getDb: 
       const db = getDb();
       const { bu_name, category, floor, status, search } = req.query as any;
 
-      let sql = 'SELECT * FROM it_assets_control WHERE 1=1';
+      let sql = `SELECT ${CONTROL_ASSET_COLS} FROM it_assets_control WHERE 1=1`;
       const params: any[] = [];
 
       if (bu_name && bu_name !== 'All BUs' && bu_name !== 'All') {

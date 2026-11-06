@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import { Button } from '../../components/ui/Button';
+import { useDebounce } from '../../src/hooks/useDebounce';
 
 export interface AssetCategoryConfig {
   id: string;
@@ -225,6 +226,7 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
 
   // Filters & Search
   const [searchTerm, setSearchTerm] = useState('');
+  const debouncedSearch = useDebounce(searchTerm, 250);
   const [filterFloor, setFilterFloor] = useState('All Locations');
   const [filterCategory, setFilterCategory] = useState('All Categories');
   const [filterStatus, setFilterStatus] = useState('All Statuses');
@@ -773,16 +775,16 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
   // --- FILTERED DATA SETS ---
   const filteredFixedAssets = useMemo(() => {
     return fixedAssets.filter(item => {
-      const matchSearch = searchTerm === '' || 
-        item.asset_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.brand.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (item.model && item.model.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.serial_num && item.serial_num.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.hostname && item.hostname.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.ip_lan && item.ip_lan.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        item.room_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (item.current_user && item.current_user.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchSearch = debouncedSearch === '' || 
+        item.asset_code.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        item.item_name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        item.brand.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        (item.model && item.model.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+        (item.serial_num && item.serial_num.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+        (item.hostname && item.hostname.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+        (item.ip_lan && item.ip_lan.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+        item.room_name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        (item.current_user && item.current_user.toLowerCase().includes(debouncedSearch.toLowerCase()));
 
       const matchLocation = filterFloor === 'All Locations' || 
         filterFloor === 'All Floors' || 
@@ -796,18 +798,18 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
 
       return matchSearch && matchLocation && matchCategory && matchStatus;
     });
-  }, [fixedAssets, searchTerm, filterFloor, filterCategory, filterStatus]);
+  }, [fixedAssets, debouncedSearch, filterFloor, filterCategory, filterStatus]);
 
   const filteredControlAssets = useMemo(() => {
     return controlAssets.filter(item => {
-      const matchSearch = searchTerm === '' || 
-        item.ac_code_cms.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.item_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        item.brand.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (item.model && item.model.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.serial_num && item.serial_num.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        item.room_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (item.current_user && item.current_user.toLowerCase().includes(searchTerm.toLowerCase()));
+      const matchSearch = debouncedSearch === '' || 
+        item.ac_code_cms.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        item.item_name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        item.brand.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        (item.model && item.model.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+        (item.serial_num && item.serial_num.toLowerCase().includes(debouncedSearch.toLowerCase())) ||
+        item.room_name.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
+        (item.current_user && item.current_user.toLowerCase().includes(debouncedSearch.toLowerCase()));
 
       const matchLocation = filterFloor === 'All Locations' || 
         filterFloor === 'All Floors' || 
@@ -821,7 +823,7 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
 
       return matchSearch && matchLocation && matchCategory && matchStatus;
     });
-  }, [controlAssets, searchTerm, filterFloor, filterCategory, filterStatus]);
+  }, [controlAssets, debouncedSearch, filterFloor, filterCategory, filterStatus]);
 
   // Grouped Fixed Assets by Category (Synced from Database, deduplicated, only active categories)
   const groupedFixedAssets = useMemo(() => {

@@ -45,11 +45,12 @@ export interface BudgetOption {
   budget_amount: number;
 }
 
-const SITES = ['All Sites', 'K1', 'K2', 'KG', 'Sakal'];
+export const DEFAULT_CAMPUSES = ['All Sites', 'K1', 'K2', 'KG', 'KB', 'Sakal'];
+export const SITES = DEFAULT_CAMPUSES;
 const BUDGET_TYPES = ['All Types', 'CapEx', 'OpEx'];
 const PAYMENT_STATUSES = ['All Statuses', 'Paid', 'Pending', 'Processing', 'Overdue'];
 const PAYMENT_METHODS = ['Bank Transfer', 'Credit Card', 'Cheque', 'Cash', 'Direct Debit'];
-const CATEGORIES = [
+const DEFAULT_EXPENSE_CATEGORIES = [
   'Hardware & Printers',
   'Computers & Terminals',
   'Laptops & Mobile',
@@ -63,9 +64,19 @@ const CATEGORIES = [
 ];
 
 export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
-  // Primary Annual Fiscal Year
-  const [selectedFiscalYear, setSelectedFiscalYear] = useState<number>(2026);
+  // Primary Annual Fiscal Year (Persisted across refreshes)
+  const [selectedFiscalYear, setSelectedFiscalYear] = useState<number>(() => {
+    const saved = localStorage.getItem('khema_it_expenses_fiscal_year');
+    return saved ? parseInt(saved, 10) || 2026 : 2026;
+  });
   const [availableYears, setAvailableYears] = useState<number[]>([2026, 2027, 2028, 2029, 2030]);
+
+  useEffect(() => {
+    localStorage.setItem('khema_it_expenses_fiscal_year', String(selectedFiscalYear));
+  }, [selectedFiscalYear]);
+
+  // Dynamic asset categories synced from IT Asset Management
+  const [assetCategories, setAssetCategories] = useState<string[]>([]);
 
   // Date Range Presets & Filter (Default: all expenses for that fiscal year)
   type DateRangePreset = 
@@ -191,8 +202,25 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
     setSearchParams(newParams, { replace: true });
   };
 
-  // Filters
+  // Filters & Dynamic Campus State
+  const [campusList, setCampusList] = useState<string[]>(() => {
+    const saved = localStorage.getItem('khema_custom_campuses');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return Array.from(new Set([...DEFAULT_CAMPUSES, ...parsed]));
+        }
+      } catch {}
+    }
+    return DEFAULT_CAMPUSES;
+  });
   const [selectedSite, setSelectedSite] = useState<string>('All Sites');
+  const [showAddCampusModal, setShowAddCampusModal] = useState<boolean>(false);
+  const [newCampusName, setNewCampusName] = useState<string>('');
+  const [newCampusCode, setNewCampusCode] = useState<string>('');
+  const [newCampusLocation, setNewCampusLocation] = useState<string>('');
+  const [isSavingCampus, setIsSavingCampus] = useState<boolean>(false);
   const [selectedBudgetType, setSelectedBudgetType] = useState<string>('All Types');
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState<string>('All Statuses');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -210,6 +238,8 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
   // Modal
   const [showModal, setShowModal] = useState<boolean>(false);
   const [editingTransaction, setEditingTransaction] = useState<ITExpenseTransaction | null>(null);
+  const [deleteModalItem, setDeleteModalItem] = useState<{ id: string; description: string; amount: number; vendor: string } | null>(null);
+  const [deleting, setDeleting] = useState<boolean>(false);
 
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage({ text, type });
@@ -349,6 +379,142 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
     }
   };
 
+  // Fetch asset categories synced from IT Asset Management
+  const fetchAssetCategories = async () => {
+    try {
+      const res = await fetch('/api/it-assets/config', {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const cats = (data.categories || [])
+          .map((c: any) => c.category_name || c.name)
+          .filter(Boolean);
+        if (cats.length > 0) {
+          setAssetCategories(cats);
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch asset categories from /api/it-assets/config:', e);
+    }
+
+    try {
+      const res = await fetch('/api/asset-categories', {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const cats = (Array.isArray(data) ? data : [])
+          .map((c: any) => c.category_name || c.name)
+          .filter(Boolean);
+        if (cats.length > 0) {
+          setAssetCategories(cats);
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch fallback asset categories:', e);
+    }
+  };
+
+  // Fetch dynamic campuses from /api/sites and /api/it-assets/config
+  const fetchSites = async () => {
+    try {
+      const res = await fetch('/api/sites', {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          const names = data.map((s: any) => s.site_name).filter(Boolean);
+          if (names.length > 0) {
+            setCampusList(prev => Array.from(new Set([...prev, ...names])));
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch sites from /api/sites:', e);
+    }
+
+    try {
+      const buRes = await fetch('/api/it-assets/config', {
+        headers: getAuthHeaders()
+      });
+      if (buRes.ok) {
+        const data = await buRes.json();
+        const bus = (data.businessUnits || []).map((b: any) => b.bu_name).filter(Boolean);
+        if (bus.length > 0) {
+          setCampusList(prev => Array.from(new Set([...prev, ...bus])));
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const handleSaveNewCampus = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const campusLabel = (newCampusCode.trim() || newCampusName.trim());
+    if (!campusLabel) {
+      alert('Please enter a campus name or short code');
+      return;
+    }
+
+    setIsSavingCampus(true);
+    try {
+      // 1. Save to /api/sites
+      await fetch('/api/sites', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          site_name: campusLabel,
+          location: newCampusLocation.trim(),
+          status: 'Active'
+        })
+      }).catch(err => console.warn('Could not POST to /api/sites:', err));
+
+      // 2. Also register in business units for assets
+      await fetch('/api/it-assets/config/bus', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          bu_name: newCampusName.trim() || campusLabel,
+          code_prefix_fixed: (newCampusCode.trim() || campusLabel).slice(0, 4).toUpperCase() + 'PH',
+          code_prefix_control: (newCampusCode.trim() || campusLabel).slice(0, 4).toUpperCase() + '-AC',
+          address: newCampusLocation.trim()
+        })
+      }).catch(err => console.warn('Could not POST to /api/it-assets/config/bus:', err));
+
+      // 3. Update campusList and localStorage
+      const updated = Array.from(new Set([...campusList, campusLabel]));
+      setCampusList(updated);
+
+      const savedCustom = localStorage.getItem('khema_custom_campuses');
+      let customList: string[] = [];
+      try {
+        if (savedCustom) customList = JSON.parse(savedCustom);
+      } catch {}
+      if (!customList.includes(campusLabel)) {
+        customList.push(campusLabel);
+        localStorage.setItem('khema_custom_campuses', JSON.stringify(customList));
+      }
+
+      // 4. Automatically select the newly created campus as the filter!
+      setSelectedSite(campusLabel);
+      showToast(`Campus "${campusLabel}" created and applied to filter!`, 'success');
+
+      // Reset and close
+      setNewCampusName('');
+      setNewCampusCode('');
+      setNewCampusLocation('');
+      setShowAddCampusModal(false);
+    } catch (err: any) {
+      alert('Error saving campus: ' + err.message);
+    } finally {
+      setIsSavingCampus(false);
+    }
+  };
+
   const loadAll = async () => {
     setLoading(true);
     const curFrom = activeSubView === 'analytics' ? execFromDate : fromDate;
@@ -356,7 +522,9 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
     await Promise.all([
       fetchTransactions(selectedFiscalYear, selectedSite, selectedBudgetType, selectedPaymentStatus, searchQuery, curFrom, curTo),
       fetchAnalytics(selectedFiscalYear, selectedSite, curFrom, curTo),
-      fetchBudgetOptions(selectedFiscalYear)
+      fetchBudgetOptions(selectedFiscalYear),
+      fetchAssetCategories(),
+      fetchSites()
     ]);
     setLoading(false);
   };
@@ -382,22 +550,36 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
     fetchAnalytics(selectedFiscalYear, selectedSite, curFrom, curTo);
   }, [activeSubView, selectedBudgetType, selectedPaymentStatus, searchQuery, fromDate, toDate, execFromDate, execToDate]);
 
-  // Delete transaction
-  const handleDelete = async (id: string, desc: string) => {
-    if (!window.confirm(`Delete expense record "${desc}"? Linked CapEx/OpEx actuals will be automatically adjusted.`)) return;
+  // Delete transaction with safe in-app confirmation modal (eliminates blocked window.confirm in iframes)
+  const handleDelete = (id: string, desc: string, amount?: number, vendor?: string) => {
+    setDeleteModalItem({
+      id,
+      description: desc,
+      amount: amount || 0,
+      vendor: vendor || ''
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteModalItem) return;
+    setDeleting(true);
     try {
-      const res = await fetch(`/api/it-expenses/${id}`, {
+      const res = await fetch(`/api/it-expenses/${deleteModalItem.id}`, {
         method: 'DELETE',
         headers: getAuthHeaders()
       });
       if (res.ok) {
         showToast('Expense transaction removed and budget actuals synced', 'success');
+        setDeleteModalItem(null);
         loadAll();
       } else {
-        showToast('Failed to delete expense', 'error');
+        const err = await res.json().catch(() => ({}));
+        showToast(err.error || 'Failed to delete expense transaction', 'error');
       }
     } catch (e: any) {
       showToast('Error deleting expense: ' + e.message, 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -563,15 +745,34 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
                 <Building2 size={13} /> Campus:
               </span>
-              <select
-                value={selectedSite}
-                onChange={(e) => setSelectedSite(e.target.value)}
-                className="bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              >
-                {SITES.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={selectedSite}
+                  onChange={(e) => {
+                    if (e.target.value === '__add_new__') {
+                      setShowAddCampusModal(true);
+                    } else {
+                      setSelectedSite(e.target.value);
+                    }
+                  }}
+                  className="bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                >
+                  {campusList.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                  <option disabled value="">──────────</option>
+                  <option value="__add_new__" className="text-emerald-700 font-bold">+ Add New Campus...</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setShowAddCampusModal(true)}
+                  title="Add New Campus Filter"
+                  className="p-1 px-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 text-xs font-semibold flex items-center gap-1 transition-colors shadow-2xs"
+                >
+                  <Plus size={12} />
+                  <span className="text-[11px]">Add</span>
+                </button>
+              </div>
             </div>
 
             {/* Budget Type Selector */}
@@ -1395,8 +1596,8 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                           <Edit2 size={13} />
                         </button>
                         <button
-                          onClick={() => handleDelete(tx.id, tx.description)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
+                          onClick={() => handleDelete(tx.id, tx.description, Number(tx.amount), tx.vendor_name)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors"
                           title="Delete Transaction"
                         >
                           <Trash2 size={13} />
@@ -1424,7 +1625,8 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
           fiscalYear={selectedFiscalYear}
           transaction={editingTransaction}
           budgetOptions={budgetOptions}
-          sites={SITES.filter(s => s !== 'All Sites')}
+          sites={campusList.filter(s => s !== 'All Sites')}
+          assetCategories={assetCategories}
           onClose={() => setShowModal(false)}
           onSaved={() => {
             setShowModal(false);
@@ -1432,6 +1634,180 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
             showToast('Expense transaction recorded and budget actuals synced!', 'success');
           }}
         />
+      )}
+
+      {/* --- IN-APP DELETE CONFIRMATION MODAL --- */}
+      {deleteModalItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-100 dark:border-rose-900">
+                <AlertTriangle size={24} />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                  Delete Expense Record?
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Are you sure you want to delete this expense transaction? Linked CapEx/OpEx actuals will be automatically recalculated.
+                </p>
+                <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs space-y-1">
+                  <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                    {deleteModalItem.description}
+                  </div>
+                  {deleteModalItem.vendor && (
+                    <div className="text-slate-500">
+                      Vendor: <span className="font-medium text-slate-700 dark:text-slate-300">{deleteModalItem.vendor}</span>
+                    </div>
+                  )}
+                  {deleteModalItem.amount > 0 && (
+                    <div className="text-slate-500">
+                      Amount: <span className="font-bold text-rose-600">${deleteModalItem.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setDeleteModalItem(null)}
+                disabled={deleting}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm shadow-rose-600/20 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {deleting ? (
+                  <>
+                    <RefreshCw size={13} className="animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={13} />
+                    <span>Confirm Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- ADD NEW CAMPUS MODAL --- */}
+      {showAddCampusModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
+            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-100 dark:border-emerald-900">
+                  <Building2 size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                    Add New Campus Filter
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Register a new Khema hospital campus or branch
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddCampusModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveNewCampus} className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                  Campus Name / Branch *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Khema Sen Sok Clinic, Khema BKK, Chbar Ampov"
+                  value={newCampusName}
+                  onChange={(e) => {
+                    setNewCampusName(e.target.value);
+                    if (!newCampusCode) {
+                      const words = e.target.value.trim().split(/\s+/);
+                      if (words.length >= 2) {
+                        setNewCampusCode(words.map(w => w[0]).join('').toUpperCase());
+                      }
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800 dark:text-slate-100 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                  Short Code / Filter Tag (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. KB, K3, SK, SS (used in compact filters)"
+                  value={newCampusCode}
+                  onChange={(e) => setNewCampusCode(e.target.value.toUpperCase())}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-mono text-slate-800 dark:text-slate-100 font-medium"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">If left blank, the full campus name will be used as the filter label.</p>
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                  Location / Address (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Street 1984, Phnom Penh"
+                  value={newCampusLocation}
+                  onChange={(e) => setNewCampusLocation(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800 dark:text-slate-100 font-medium"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCampusModal(false)}
+                  disabled={isSavingCampus}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingCampus || (!newCampusName.trim() && !newCampusCode.trim())}
+                  className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm shadow-emerald-600/20 disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  {isSavingCampus ? (
+                    <>
+                      <RefreshCw size={13} className="animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus size={13} />
+                      <span>Save & Apply Filter</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1443,6 +1819,7 @@ interface ExpenseModalProps {
   transaction: ITExpenseTransaction | null;
   budgetOptions: { capexOptions: BudgetOption[]; opexOptions: BudgetOption[] };
   sites: string[];
+  assetCategories?: string[];
   onClose: () => void;
   onSaved: () => void;
 }
@@ -1452,9 +1829,37 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({
   transaction,
   budgetOptions,
   sites,
+  assetCategories = [],
   onClose,
   onSaved
 }) => {
+  // Build deduplicated categories combining IT Asset Management categories and defaults
+  const availableCategories = useMemo(() => {
+    const list: string[] = [];
+    const seen = new Set<string>();
+
+    const addCat = (c: string) => {
+      const trimmed = (c || '').trim();
+      if (trimmed && !seen.has(trimmed.toLowerCase())) {
+        seen.add(trimmed.toLowerCase());
+        list.push(trimmed);
+      }
+    };
+
+    // 1. Primary: Synced categories from IT Asset Management
+    if (assetCategories && assetCategories.length > 0) {
+      assetCategories.forEach(addCat);
+    }
+    // 2. Existing transaction category if present
+    if (transaction?.category) {
+      addCat(transaction.category);
+    }
+    // 3. Fallback standard IT expense categories
+    DEFAULT_EXPENSE_CATEGORIES.forEach(addCat);
+
+    return list;
+  }, [assetCategories, transaction]);
+
   const [expenseDate, setExpenseDate] = useState(
     transaction?.expense_date ? transaction.expense_date.slice(0, 10) : new Date().toISOString().slice(0, 10)
   );
@@ -1466,7 +1871,9 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({
   const [linkedBudgetId, setLinkedBudgetId] = useState<string>(transaction?.linked_budget_id || '');
   const [linkedItemName, setLinkedItemName] = useState<string>(transaction?.linked_item_name || '');
   const [siteName, setSiteName] = useState(transaction?.site_name || 'K1');
-  const [category, setCategory] = useState(transaction?.category || 'Software Maintenance');
+  const [category, setCategory] = useState(
+    transaction?.category || (assetCategories.length > 0 ? assetCategories[0] : (DEFAULT_EXPENSE_CATEGORIES[0] || 'Software Maintenance'))
+  );
   const [amount, setAmount] = useState(transaction?.amount || 0);
   const [paymentStatus, setPaymentStatus] = useState<any>(transaction?.payment_status || 'Paid');
   const [paymentMethod, setPaymentMethod] = useState(transaction?.payment_method || 'Bank Transfer');
@@ -1719,15 +2126,38 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({
             </div>
 
             <div>
-              <label className="font-semibold text-slate-700">Category</label>
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-slate-700">Category</label>
+                {assetCategories.length > 0 && (
+                  <span className="text-[10px] text-emerald-600 font-semibold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    Synced from IT Assets ({assetCategories.length})
+                  </span>
+                )}
+              </div>
               <select
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
+                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800 font-medium"
               >
-                {CATEGORIES.map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
+                {assetCategories.length > 0 ? (
+                  <>
+                    <optgroup label="IT Asset Management Categories">
+                      {assetCategories.map(c => (
+                        <option key={`asset-${c}`} value={c}>{c}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="General IT & Expense Categories">
+                      {DEFAULT_EXPENSE_CATEGORIES.filter(c => !assetCategories.some(ac => ac.toLowerCase() === c.toLowerCase())).map(c => (
+                        <option key={`gen-${c}`} value={c}>{c}</option>
+                      ))}
+                    </optgroup>
+                  </>
+                ) : (
+                  availableCategories.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))
+                )}
               </select>
             </div>
           </div>

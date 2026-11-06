@@ -19,6 +19,7 @@ import { CreateInvoice } from './pages/dashboard/CreateInvoice';
 import { InvoicesList } from './pages/dashboard/InvoicesList';
 import { MailAssistant } from './pages/dashboard/MailAssistant';
 import { RoutePath } from './types';
+import { ErrorBoundary } from './components/ui/ErrorBoundary';
 
 function App() {
   return (
@@ -32,7 +33,7 @@ function App() {
           <Route path={RoutePath.RESET_PASSWORD} element={<ResetPassword />} />
 
           {/* Dashboard Layout (Shared by Guest and Auth users) */}
-          <Route element={<DashboardLayout />}>
+          <Route element={<ErrorBoundary><DashboardLayout /></ErrorBoundary>}>
             {/* Public Home Page (Handles both Guest and Auth states internally) */}
             <Route path={RoutePath.HOME} element={<Home />} />
             

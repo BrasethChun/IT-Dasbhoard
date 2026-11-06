@@ -7,7 +7,6 @@ import { noteService } from '../../services/noteService';
 import { storageService } from '../../services/storageService';
 import { RoutePath, NoteAttachment } from '../../types';
 import { StorageImage } from '../../components/ui/StorageImage';
-import { GoogleGenAI } from '@google/genai';
 import { useAuth } from '../../context/AuthContext';
 import { getDefaultCoverForNote, SAMPLE_IT_COVERS } from '../../src/utils/sampleCovers';
 
@@ -28,32 +27,52 @@ export const CreateNote: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isLimitReached, setIsLimitReached] = useState(false);
 
-  const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+  // In-flight request controller for clean cancellation on unmount
+  const abortControllerRef = React.useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const handleAiEnhance = async () => {
     if (!content || enhancing) return;
     setEnhancing(true);
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     try {
-      // Remove HTML tags for prompt
-      const textOnly = content.replace(/<[^>]*>?/gm, '');
-      
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Enhance the following note content. Improve clarity, grammar, and flow while keeping the original meaning. Respond ONLY with the enhanced text. Do not include any intros or explanations.
-        
-        Original Content:
-        ${textOnly}`,
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/gemini/enhance', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ content }),
+        signal: abortControllerRef.current.signal
       });
 
-      const enhancedText = response.text;
-      if (enhancedText) {
-        // Wrap in simple <p> for the editor
-        setContent(`<p>${enhancedText.replace(/\n/g, '</p><p>')}</p>`);
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to enhance note with AI.');
       }
-    } catch (err) {
+
+      const data = await response.json();
+      if (data.enhancedText) {
+        // Wrap in clean paragraph structure for rich editor
+        setContent(`<p>${data.enhancedText.replace(/\n\n/g, '</p><p>').replace(/\n/g, '<br/>')}</p>`);
+      }
+    } catch (err: any) {
+      if (err.name === 'AbortError') return;
       console.error("AI Enhancement failed", err);
-      alert("Failed to enhance note with AI.");
+      alert(err.message || "Failed to enhance note with AI.");
     } finally {
       setEnhancing(false);
     }
@@ -63,17 +82,21 @@ export const CreateNote: React.FC = () => {
     if (!content || title.trim()) return;
     
     try {
-      const textOnly = content.replace(/<[^>]*>?/gm, '');
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Generate a very short, catchy title (max 5 words) for this note content:
-        
-        ${textOnly}`,
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/gemini/title', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ content })
       });
 
-      const generatedTitle = response.text?.replace(/"/g, '').trim();
-      if (generatedTitle) {
-        setTitle(generatedTitle);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.title) {
+          setTitle(data.title);
+        }
       }
     } catch (err) {
       console.error("Auto-title generation failed", err);

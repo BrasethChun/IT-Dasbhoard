@@ -127,8 +127,7 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
           { label: 'IT CapEx & S-Operation Tracking & Planning', id: 'capex-opex', path: `${RoutePath.IT_DASHBOARD}?tab=capex-opex` },
           { label: 'IT Expenses & Tracking', id: 'expenses', path: `${RoutePath.IT_DASHBOARD}?tab=expenses` },
           { label: 'IT Assets Management', id: 'assets', path: `${RoutePath.IT_DASHBOARD}?tab=assets` },
-          { label: 'Cloud & HIS Subscription', id: 'subscriptions', path: `${RoutePath.IT_DASHBOARD}?tab=subscriptions` },
-          { label: 'Vendor Management', id: 'vendors', path: RoutePath.VENDORS }
+          { label: 'Cloud & HIS Subscription', id: 'subscriptions', path: `${RoutePath.IT_DASHBOARD}?tab=subscriptions` }
         ]
       },
       {

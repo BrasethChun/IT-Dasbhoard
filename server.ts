@@ -27,6 +27,8 @@ import { setupItBudgetRoutes } from './itBudgetServer';
 import { setupItExpenseRoutes } from './itExpenseServer';
 import { setupAssetRoutes } from './assetServer';
 import { setupItAssetRoutes } from './itAssetServer';
+import { GoogleGenAI } from '@google/genai';
+import { GEMINI_CONFIG } from './src/config/geminiConfig';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
 
@@ -57,6 +59,14 @@ let fallbackPool: mysql.Pool | null = null;
 let isFailoverActive = false;
 let failoverReason = '';
 let lastFailoverAt: string | null = null;
+
+let geminiAi: GoogleGenAI | null = null;
+function getGeminiClient(): GoogleGenAI {
+  if (!geminiAi) {
+    geminiAi = new GoogleGenAI();
+  }
+  return geminiAi;
+}
 
 function createDirectPool(config?: {
   host?: string;
@@ -1065,20 +1075,122 @@ async function startServer() {
     }
   });
 
-  // Notes Routes
+  // Schema helper to run table column checks only once on startup instead of every HTTP request
+  let isNotesSchemaReady = false;
+  async function ensureNotesSchema(db: mysql.Pool) {
+    if (isNotesSchemaReady) return;
+    try {
+      await db.query('ALTER TABLE notes ADD COLUMN meeting_date VARCHAR(100)').catch(() => {});
+      await db.query('ALTER TABLE notes ADD COLUMN meeting_venue VARCHAR(255)').catch(() => {});
+      await db.query('ALTER TABLE notes ADD COLUMN agenda TEXT').catch(() => {});
+      await db.query('ALTER TABLE notes ADD COLUMN meeting_priority VARCHAR(50)').catch(() => {});
+      await db.query('ALTER TABLE notes ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE').catch(() => {});
+      isNotesSchemaReady = true;
+    } catch {}
+  }
+
+  // --- GEMINI AI STUDIO INTEGRATION ENDPOINTS ---
+  app.post('/api/gemini/enhance', authenticateToken, async (req: any, res: any) => {
+    try {
+      const { content } = req.body;
+      if (!content || typeof content !== 'string') {
+        return res.status(400).json({ error: 'Note content is required for AI enhancement.' });
+      }
+
+      const textOnly = content.replace(/<[^>]*>?/gm, '').trim();
+      if (!textOnly) {
+        return res.status(400).json({ error: 'No readable text found to enhance.' });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(503).json({ 
+          error: 'Gemini API key is not configured on the server environment. Please configure GEMINI_API_KEY.' 
+        });
+      }
+
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
+        model: GEMINI_CONFIG.DEFAULT_TEXT_MODEL,
+        contents: `Enhance the following note content. Improve clarity, grammar, and professional flow while strictly keeping the original meaning and technical terms. Respond ONLY with the enhanced text. Do not include intros or conversational phrases.\n\nOriginal Content:\n${textOnly}`,
+        config: {
+          systemInstruction: GEMINI_CONFIG.SYSTEM_INSTRUCTIONS.ENHANCE_NOTE,
+          temperature: GEMINI_CONFIG.GENERATION_CONFIG.temperature,
+        }
+      });
+
+      const enhancedText = response.text || '';
+      res.json({ enhancedText });
+    } catch (err: any) {
+      console.error('[Gemini Enhance Error]:', err);
+      res.status(500).json({ error: err.message || 'Failed to enhance note with AI.' });
+    }
+  });
+
+  app.post('/api/gemini/title', authenticateToken, async (req: any, res: any) => {
+    try {
+      const { content } = req.body;
+      if (!content || typeof content !== 'string') {
+        return res.status(400).json({ error: 'Note content is required to generate a title.' });
+      }
+
+      const textOnly = content.replace(/<[^>]*>?/gm, '').trim();
+      if (!textOnly) {
+        return res.status(400).json({ error: 'No readable text found to generate a title.' });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return res.status(503).json({ 
+          error: 'Gemini API key is not configured on the server environment. Please configure GEMINI_API_KEY.' 
+        });
+      }
+
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
+        model: GEMINI_CONFIG.DEFAULT_TEXT_MODEL,
+        contents: `Generate a very short, catchy title (max 5 words) for this note content:\n\n${textOnly}`,
+        config: {
+          systemInstruction: GEMINI_CONFIG.SYSTEM_INSTRUCTIONS.GENERATE_TITLE,
+          temperature: 0.2,
+        }
+      });
+
+      const title = (response.text || '').replace(/["\n\r]/g, '').trim();
+      res.json({ title });
+    } catch (err: any) {
+      console.error('[Gemini Title Error]:', err);
+      res.status(500).json({ error: err.message || 'Failed to generate title.' });
+    }
+  });
+
+  // --- OPTIMIZED NOTES ROUTES (EXPLICIT PROJECTIONS & ZERO REPETITIVE DDL) ---
+  const NOTE_PROJECTION_COLS = `id, user_id, title, content, thumbnail_url, tags, attachments, 
+                               meeting_date, meeting_venue, agenda, meeting_priority, 
+                               telegram_alert_sent, created_at, updated_at`;
+
   app.get('/api/notes', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      await db.query('ALTER TABLE notes ADD COLUMN meeting_date VARCHAR(100)').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN meeting_venue VARCHAR(255)').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN agenda TEXT').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN meeting_priority VARCHAR(50)').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE').catch(e => {});
-      const [userRows]: any = await db.query('SELECT * FROM notes WHERE user_id = ? ORDER BY updated_at DESC', [req.user.id]);
-      const [userProfile]: any = await db.query('SELECT role FROM users WHERE id = ?', [req.user.id]);
+      await ensureNotesSchema(db);
+
+      // Execute role lookup and user notes in parallel to eliminate sequential waterfall
+      const [userProfileResult, userNotesResult] = await Promise.all([
+        db.query('SELECT role FROM users WHERE id = ?', [req.user.id]),
+        db.query(
+          `SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE user_id = ? ORDER BY updated_at DESC`,
+          [req.user.id]
+        )
+      ]);
+
+      const userProfile: any = userProfileResult[0];
+      const userRows: any = userNotesResult[0];
       const role = userProfile?.[0]?.role || req.user.role;
+
       if (role === 'owner' || role === 'admin' || userRows.length === 0) {
-        const [allRows]: any = await db.query('SELECT * FROM notes ORDER BY updated_at DESC');
+        const [allRows]: any = await db.query(
+          `SELECT ${NOTE_PROJECTION_COLS} FROM notes ORDER BY updated_at DESC`
+        );
         return res.json(allRows.map(mapDbToNote));
       }
       res.json(userRows.map(mapDbToNote));
@@ -1115,8 +1227,8 @@ async function startServer() {
       const isPrivileged = role === 'owner' || role === 'admin' || userProfile?.[0]?.can_access_it;
 
       const [rows]: any = isPrivileged
-        ? await db.query('SELECT * FROM notes WHERE id = ?', [req.params.id])
-        : await db.query('SELECT * FROM notes WHERE id = ? AND (user_id = ? OR user_id IS NULL)', [req.params.id, req.user.id]);
+        ? await db.query(`SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE id = ?`, [req.params.id])
+        : await db.query(`SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE id = ? AND (user_id = ? OR user_id IS NULL)`, [req.params.id, req.user.id]);
 
       if (rows.length === 0) return res.status(404).json({ error: 'Note not found' });
       res.json(mapDbToNote(rows[0]));
@@ -1128,8 +1240,8 @@ async function startServer() {
   app.get('/api/public/notes/:id', async (req: any, res: any) => {
     try {
       const db = getDb();
-      const [rows]: any = await db.query('SELECT * FROM notes WHERE id = ?', [req.params.id]);
-      if(rows.length === 0) return res.status(404).json({ error: 'Note not found' });
+      const [rows]: any = await db.query(`SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE id = ?`, [req.params.id]);
+      if (rows.length === 0) return res.status(404).json({ error: 'Note not found' });
       res.json(mapDbToNote(rows[0]));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1139,11 +1251,7 @@ async function startServer() {
   app.post('/api/notes', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      await db.query('ALTER TABLE notes ADD COLUMN meeting_date VARCHAR(100)').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN meeting_venue VARCHAR(255)').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN agenda TEXT').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN meeting_priority VARCHAR(50)').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE').catch(e => {});
+      await ensureNotesSchema(db);
       const { title, content, thumbnailUrl, tags, attachments, meetingDate, meetingVenue, agenda, meetingPriority, templateId } = req.body;
       const id = crypto.randomUUID();
       await db.query(
@@ -1199,7 +1307,7 @@ async function startServer() {
         }
       }
 
-      const [rows]: any = await db.query('SELECT * FROM notes WHERE id = ?', [id]);
+      const [rows]: any = await db.query(`SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE id = ?`, [id]);
       res.json(mapDbToNote(rows[0]));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1209,11 +1317,7 @@ async function startServer() {
   app.put('/api/notes/:id', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      await db.query('ALTER TABLE notes ADD COLUMN meeting_date VARCHAR(100)').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN meeting_venue VARCHAR(255)').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN agenda TEXT').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN meeting_priority VARCHAR(50)').catch(e => {});
-      await db.query('ALTER TABLE notes ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE').catch(e => {});
+      await ensureNotesSchema(db);
       const { title, content, thumbnailUrl, tags, attachments, meetingDate, meetingVenue, agenda, meetingPriority } = req.body;
       
       const [userProfile]: any = await db.query('SELECT role, can_access_it FROM users WHERE id = ?', [req.user.id]);
@@ -1231,7 +1335,7 @@ async function startServer() {
         [title, content, thumbnailUrl, JSON.stringify(tags||[]), JSON.stringify(attachments||[]), meetingDate || null, meetingVenue || null, agenda || null, meetingPriority || null, req.params.id]
       );
       
-      const [rows]: any = await db.query('SELECT * FROM notes WHERE id = ?', [req.params.id]);
+      const [rows]: any = await db.query(`SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE id = ?`, [req.params.id]);
       res.json(mapDbToNote(rows[0]));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1582,17 +1686,15 @@ async function startServer() {
     }
   }
 
-  // --- IT DASHBOARD API ---
-  app.get('/api/it-dashboard', authenticateToken, async (req: any, res) => {
+  // Schema helper to run IT Dashboard DDL migrations once instead of every request
+  let isItDashboardSchemaReady = false;
+  async function ensureItDashboardSchema(db: mysql.Pool) {
+    if (isItDashboardSchemaReady) return;
     try {
-      const db = getDb();
-      if (!db) throw new Error('DB not initialized');
-      
       const tables = [
         `CREATE TABLE IF NOT EXISTS it_sites (id VARCHAR(36) PRIMARY KEY, site_name VARCHAR(100) UNIQUE, location VARCHAR(150), status VARCHAR(50))`,
         `CREATE TABLE IF NOT EXISTS it_staffing (id VARCHAR(36) PRIMARY KEY, staff_id VARCHAR(50), site_name VARCHAR(100), employee_name VARCHAR(100), role VARCHAR(100), status VARCHAR(50), performance_score DECIMAL(3,2), monthly_schedule VARCHAR(255))`,
         `CREATE TABLE IF NOT EXISTS helpdesk (id VARCHAR(36) PRIMARY KEY, helpdesk_id VARCHAR(50), site_name VARCHAR(100), assignee VARCHAR(100), in_progress_count INT, completed_count INT, testing_count INT, not_started_count INT, create_date_time VARCHAR(100), period_from DATE, period_to DATE)`,
-        `CREATE TABLE IF NOT EXISTS helpesk (id VARCHAR(36) PRIMARY KEY, helpdesk_id VARCHAR(50), site_name VARCHAR(100), assignee VARCHAR(100), in_progress_count INT, completed_count INT, testing_count INT, not_started_count INT, create_date_time VARCHAR(100), period_from DATE, period_to DATE)`,
         `CREATE TABLE IF NOT EXISTS it_asset_categories (id VARCHAR(36) PRIMARY KEY, category_name VARCHAR(100) UNIQUE, description TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`,
         `CREATE TABLE IF NOT EXISTS it_assets (id VARCHAR(36) PRIMARY KEY, asset_tag VARCHAR(50), category VARCHAR(100), site_name VARCHAR(100), model VARCHAR(100), status VARCHAR(50), purchase_price DECIMAL(10,2), warranty_expiry DATE)`,
         `CREATE TABLE IF NOT EXISTS it_training (id VARCHAR(36) PRIMARY KEY, site_name VARCHAR(100), training_name VARCHAR(100), category VARCHAR(100), attendees_count INT, completion_rate DECIMAL(5,2), start_date DATE)`,
@@ -1638,51 +1740,39 @@ async function startServer() {
           color VARCHAR(50) DEFAULT 'indigo',
           is_default TINYINT(1) DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )`
+        )`,
+        `CREATE TABLE IF NOT EXISTS it_asset_history (id VARCHAR(36) PRIMARY KEY, asset_id VARCHAR(36), action VARCHAR(100), performed_by VARCHAR(100), old_assignee VARCHAR(100), new_assignee VARCHAR(100), old_status VARCHAR(50), new_status VARCHAR(50), old_site VARCHAR(100), new_site VARCHAR(100), old_location VARCHAR(100), new_location VARCHAR(100), notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`
       ];
+
       for (let query of tables) {
-        await db.query(query).catch(e => console.log('Init Table Error:', e.message));
+        await db.query(query).catch(() => {});
       }
 
-      // Handle table migrations
-      for (let query of tables) {
-        await db.query(query).catch(e => console.log('Init Table Error:', e.message));
-      }
-      await db.query('ALTER TABLE it_staffing ADD COLUMN staff_id VARCHAR(50)').catch(e => {});
-      await db.query('ALTER TABLE it_staffing ADD COLUMN monthly_schedule VARCHAR(255)').catch(e => {});
-      await db.query('ALTER TABLE helpdesk ADD COLUMN period_from DATE').catch(e => {});
-      await db.query('ALTER TABLE helpdesk ADD COLUMN period_to DATE').catch(e => {});
-      await db.query('ALTER TABLE helpesk ADD COLUMN period_from DATE').catch(e => {});
-      await db.query('ALTER TABLE helpesk ADD COLUMN period_to DATE').catch(e => {});
+      await db.query('ALTER TABLE it_staffing ADD COLUMN staff_id VARCHAR(50)').catch(() => {});
+      await db.query('ALTER TABLE it_staffing ADD COLUMN monthly_schedule VARCHAR(255)').catch(() => {});
+      await db.query('ALTER TABLE helpdesk ADD COLUMN period_from DATE').catch(() => {});
+      await db.query('ALTER TABLE helpdesk ADD COLUMN period_to DATE').catch(() => {});
+      await db.query('ALTER TABLE vendors ADD COLUMN vendor_type VARCHAR(100)').catch(() => {});
+      await db.query('ALTER TABLE vendors ADD COLUMN vendor VARCHAR(100)').catch(() => {});
+      await db.query('ALTER TABLE it_assets ADD COLUMN brand VARCHAR(100)').catch(() => {});
+      await db.query('ALTER TABLE it_assets ADD COLUMN specification TEXT').catch(() => {});
+      await db.query('ALTER TABLE it_assets ADD COLUMN asset_location VARCHAR(150)').catch(() => {});
+      await db.query('ALTER TABLE it_assets ADD COLUMN assign_to VARCHAR(100)').catch(() => {});
+      await db.query('ALTER TABLE it_assets ADD COLUMN purchase_date DATE').catch(() => {});
+      await db.query('ALTER TABLE it_assets ADD COLUMN serial_number VARCHAR(100)').catch(() => {});
+      await db.query('ALTER TABLE it_assets ADD COLUMN notes TEXT').catch(() => {});
+      await db.query('ALTER TABLE it_asset_history ADD COLUMN old_site VARCHAR(100)').catch(() => {});
+      await db.query('ALTER TABLE it_asset_history ADD COLUMN new_site VARCHAR(100)').catch(() => {});
+      await db.query('ALTER TABLE it_asset_history ADD COLUMN old_location VARCHAR(150)').catch(() => {});
+      await db.query('ALTER TABLE it_asset_history ADD COLUMN new_location VARCHAR(150)').catch(() => {});
 
-      await db.query('ALTER TABLE vendors ADD COLUMN vendor_type VARCHAR(100)').catch(e => {});
-      await db.query('ALTER TABLE vendors ADD COLUMN vendor VARCHAR(100)').catch(e => {});
-
-      await db.query('ALTER TABLE it_assets ADD COLUMN brand VARCHAR(100)').catch(e => {});
-      await db.query('ALTER TABLE it_assets ADD COLUMN specification TEXT').catch(e => {});
-      await db.query('ALTER TABLE it_assets ADD COLUMN asset_location VARCHAR(150)').catch(e => {});
-      await db.query('ALTER TABLE it_assets ADD COLUMN assign_to VARCHAR(100)').catch(e => {});
-      await db.query('ALTER TABLE it_assets ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP').catch(e => {});
-      await db.query('ALTER TABLE it_assets ADD COLUMN purchase_date DATE').catch(e => {});
-      await db.query('ALTER TABLE it_assets ADD COLUMN serial_number VARCHAR(100)').catch(e => {});
-      await db.query('ALTER TABLE it_assets ADD COLUMN notes TEXT').catch(e => {});
-
-      await db.query('CREATE TABLE IF NOT EXISTS it_asset_history (id VARCHAR(36) PRIMARY KEY, asset_id VARCHAR(36), action VARCHAR(100), performed_by VARCHAR(100), old_assignee VARCHAR(100), new_assignee VARCHAR(100), old_status VARCHAR(50), new_status VARCHAR(50), old_site VARCHAR(100), new_site VARCHAR(100), old_location VARCHAR(100), new_location VARCHAR(100), notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)').catch(e => {});
-
-      await db.query('ALTER TABLE it_asset_history ADD COLUMN old_site VARCHAR(100)').catch(e => {});
-      await db.query('ALTER TABLE it_asset_history ADD COLUMN new_site VARCHAR(100)').catch(e => {});
-      await db.query('ALTER TABLE it_asset_history ADD COLUMN old_location VARCHAR(150)').catch(e => {});
-      await db.query('ALTER TABLE it_asset_history ADD COLUMN new_location VARCHAR(150)').catch(e => {});
-
-      await db.query('ALTER TABLE it_staffing DROP COLUMN monthly_salary').catch(e => {});
-
-      // insert default sites if empty
+      // Insert default sites if empty
       const [sites]: any = await db.query('SELECT COUNT(*) as c FROM it_sites');
       if (sites[0].c === 0) {
         await db.query(`INSERT INTO it_sites (id, site_name, status) VALUES ('1', 'Main Hospital', 'Active'), ('2', 'North Clinic', 'Active'), ('3', 'South Clinic', 'Active')`);
       }
 
-      // insert default categories if empty
+      // Insert default categories if empty
       const [cats]: any = await db.query('SELECT COUNT(*) as c FROM it_asset_categories');
       if (cats[0].c === 0) {
         await db.query(`INSERT INTO it_asset_categories (id, category_name, description) VALUES 
@@ -1693,6 +1783,20 @@ async function startServer() {
           (?, 'Software', 'OS Licenses, Utility Software')
         `, [crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID(), crypto.randomUUID()]);
       }
+
+      isItDashboardSchemaReady = true;
+    } catch (e: any) {
+      console.warn('IT Dashboard schema check error:', e.message);
+    }
+  }
+
+  // --- IT DASHBOARD API ---
+  app.get('/api/it-dashboard', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      if (!db) throw new Error('DB not initialized');
+      
+      await ensureItDashboardSchema(db);
       // Compute metrics dynamically
       const { site, from, to } = req.query;
 

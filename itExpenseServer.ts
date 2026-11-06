@@ -52,15 +52,36 @@ export async function initItExpenseTables(db: any) {
       INDEX idx_exp_date (expense_date)
     )`);
 
-    // Check if initial seeds are needed for FY 2026 and FY 2027
-    const [countRows2026]: any = await db.query('SELECT COUNT(*) as c FROM it_expense_transactions WHERE fiscal_year = 2026');
-    if (countRows2026[0].c === 0) {
-      await seedInitialExpenses(db, 2026);
-    }
+    // Persistent System Metadata Table to prevent auto-resetting deleted expenses on reboot/refresh
+    await db.query(`CREATE TABLE IF NOT EXISTS it_system_metadata (
+      meta_key VARCHAR(100) PRIMARY KEY,
+      meta_value VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )`);
 
-    const [countRows2027]: any = await db.query('SELECT COUNT(*) as c FROM it_expense_transactions WHERE fiscal_year = 2027');
-    if (countRows2027[0].c === 0) {
+    // Check if initial seeding was already completed in the past
+    const [metaRows]: any = await db.query(
+      "SELECT meta_value FROM it_system_metadata WHERE meta_key = 'it_expenses_seed_completed'"
+    );
+
+    const [totalExpenses]: any = await db.query('SELECT COUNT(*) as c FROM it_expense_transactions');
+    const hasExistingData = (totalExpenses[0]?.c || 0) > 0;
+
+    if (metaRows.length > 0 || hasExistingData) {
+      // System was already initialized. Preserve user deletions - never auto-reset!
+      if (metaRows.length === 0) {
+        await db.query(
+          "INSERT IGNORE INTO it_system_metadata (meta_key, meta_value) VALUES ('it_expenses_seed_completed', 'true')"
+        );
+      }
+    } else {
+      // First-time fresh install: seed initial expenses once
+      await seedInitialExpenses(db, 2026);
       await seedInitialExpenses(db, 2027);
+      await db.query(
+        "INSERT INTO it_system_metadata (meta_key, meta_value) VALUES ('it_expenses_seed_completed', 'true')"
+      );
     }
   } catch (err: any) {
     console.error('[IT Expense Tables Init Warning]:', err.message);
@@ -441,7 +462,7 @@ export function setupItExpenseRoutes(app: Express, authenticateToken: any, getDb
         monthlyBreakdown[m] = { capex: 0, opex: 0, total: 0 };
       });
 
-      const siteBreakdown: Record<string, number> = { K1: 0, K2: 0, KG: 0, Sakal: 0, 'All Sites': 0 };
+      const siteBreakdown: Record<string, number> = { K1: 0, K2: 0, KG: 0, KB: 0, Sakal: 0, 'All Sites': 0 };
       const vendorBreakdown: Record<string, number> = {};
 
       txRows.forEach((tx: any) => {
@@ -461,7 +482,7 @@ export function setupItExpenseRoutes(app: Express, authenticateToken: any, getDb
         }
 
         const s = tx.site_name || 'Other';
-        if (siteBreakdown[s] !== undefined) siteBreakdown[s] += amt;
+        siteBreakdown[s] = (siteBreakdown[s] || 0) + amt;
 
         const v = tx.vendor_name || 'Unknown';
         vendorBreakdown[v] = (vendorBreakdown[v] || 0) + amt;

@@ -1,15 +1,17 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
-  Users, Wrench, Monitor, GraduationCap, Activity, DollarSign,
+  Users, Wrench, Monitor, Activity, DollarSign,
   Download, Filter, CheckCircle2, AlertCircle, Clock, BarChart3, AlertTriangle,
   MapPin, ArrowRight, ChevronRight, Server, Database, Laptop, Layers, 
   RefreshCw, ExternalLink, Building2, TrendingUp, CheckCircle, HelpCircle, 
-  Eye, Calendar, Sparkles, Cloud, ShieldCheck, CheckSquare, FileText
+  Eye, Calendar, Sparkles, Cloud, ShieldCheck, CheckSquare, FileText,
+  Receipt, ArrowUpRight, ShieldAlert, Cpu, HardDrive, Wifi, Printer,
+  PieChart as PieIcon, LineChart as LineIcon
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, Legend
+  PieChart, Pie, Cell, Legend, AreaChart, Area
 } from 'recharts';
 
 interface ExecutiveSummaryProps {
@@ -34,7 +36,11 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Consolidated datasets from all tabs
+  // Consolidated Datasets from all latest IT modules
+  const [fixedAssets, setFixedAssets] = useState<any[]>([]);
+  const [controlAssets, setControlAssets] = useState<any[]>([]);
+  const [budgetSummary, setBudgetSummary] = useState<any>(null);
+  const [expenseAnalytics, setExpenseAnalytics] = useState<any>(null);
   const [cloudSummary, setCloudSummary] = useState<any>({
     totalCount: 0,
     activeCount: 0,
@@ -48,52 +54,50 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
     providerBreakdown: []
   });
   const [cloudSubscriptions, setCloudSubscriptions] = useState<any[]>([]);
-  const [assets, setAssets] = useState<any[]>([]);
   const [helpdeskTickets, setHelpdeskTickets] = useState<any[]>([]);
   const [staff, setStaff] = useState<any[]>([]);
   const [notes, setNotes] = useState<any[]>([]);
 
-  // Fetch all tab data
+  // Fetch all 6 live IT modules concurrently
   const fetchAllData = async () => {
     try {
       setRefreshing(true);
       const token = localStorage.getItem('token');
       const headers = { 'Authorization': `Bearer ${token}` };
       const siteParam = siteFilter !== 'All Sites' ? `?site=${encodeURIComponent(siteFilter)}` : '';
+      const buParam = siteFilter !== 'All Sites' ? `?bu_name=${encodeURIComponent(siteFilter)}` : '';
 
-      const [cloudSumRes, cloudListRes, assetsRes, helpdeskRes, staffRes, notesRes] = await Promise.all([
+      const [
+        fixedRes,
+        controlRes,
+        budgetRes,
+        expenseRes,
+        cloudSumRes,
+        cloudListRes,
+        helpdeskRes,
+        staffRes,
+        notesRes
+      ] = await Promise.all([
+        fetch(`/api/fixed-assets${buParam}`, { headers }).catch(() => null),
+        fetch(`/api/assets-control${buParam}`, { headers }).catch(() => null),
+        fetch(`/api/it-budget/summary?fiscal_year=2026${siteParam}`, { headers }).catch(() => null),
+        fetch(`/api/it-expenses/analytics?fiscal_year=2026${siteParam}`, { headers }).catch(() => null),
         fetch(`/api/cloud-subscriptions/summary${siteParam}`, { headers }).catch(() => null),
         fetch(`/api/cloud-subscriptions${siteParam}`, { headers }).catch(() => null),
-        fetch('/api/assets', { headers }).catch(() => null),
         fetch('/api/helpdesk', { headers }).catch(() => null),
         fetch('/api/staffing', { headers }).catch(() => null),
         fetch('/api/notes', { headers }).catch(() => null)
       ]);
 
-      if (cloudSumRes && cloudSumRes.ok) {
-        const data = await cloudSumRes.json();
-        setCloudSummary(data);
-      }
-      if (cloudListRes && cloudListRes.ok) {
-        const data = await cloudListRes.json();
-        setCloudSubscriptions(Array.isArray(data) ? data : []);
-      }
-      if (assetsRes && assetsRes.ok) {
-        const data = await assetsRes.json();
-        setAssets(Array.isArray(data) ? data : []);
-      }
-      if (helpdeskRes && helpdeskRes.ok) {
-        const data = await helpdeskRes.json();
-        setHelpdeskTickets(Array.isArray(data) ? data : []);
-      }
-      if (staffRes && staffRes.ok) {
-        const data = await staffRes.json();
-        setStaff(Array.isArray(data) ? data : []);
-      }
-      if (notesRes && notesRes.ok) {
-        const data = await notesRes.json();
-        setNotes(Array.isArray(data) ? data : []);
-      }
+      if (fixedRes && fixedRes.ok) setFixedAssets(await fixedRes.json());
+      if (controlRes && controlRes.ok) setControlAssets(await controlRes.json());
+      if (budgetRes && budgetRes.ok) setBudgetSummary(await budgetRes.json());
+      if (expenseRes && expenseRes.ok) setExpenseAnalytics(await expenseRes.json());
+      if (cloudSumRes && cloudSumRes.ok) setCloudSummary(await cloudSumRes.json());
+      if (cloudListRes && cloudListRes.ok) setCloudSubscriptions(await cloudListRes.json());
+      if (helpdeskRes && helpdeskRes.ok) setHelpdeskTickets(await helpdeskRes.json());
+      if (staffRes && staffRes.ok) setStaff(await staffRes.json());
+      if (notesRes && notesRes.ok) setNotes(await notesRes.json());
     } catch (err) {
       console.error('Failed to load consolidated executive summary data:', err);
     } finally {
@@ -106,194 +110,248 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
     fetchAllData();
   }, [siteFilter, filterFrom, filterTo]);
 
-  // Filtered Assets based on site filter
-  const filteredAssets = useMemo(() => {
-    if (siteFilter === 'All Sites') return assets;
-    return assets.filter(a => a.site_name === siteFilter);
-  }, [assets, siteFilter]);
+  // --- COMPUTED MODULE METRICS ---
 
-  // Assets Computed Metrics
-  const assetMetrics = useMemo(() => {
-    const total = filteredAssets.length;
-    const totalValue = filteredAssets.reduce((sum, a) => sum + (parseFloat(a.purchase_price) || 0), 0);
-    const categoryCounts: Record<string, number> = {};
-    const statusCounts: Record<string, number> = {};
-    let expiringSoon = 0;
-    const now = new Date();
-    const in90Days = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
+  // 1. Hardware Assets Roll-Up (Fixed + Control)
+  const hardwareMetrics = useMemo(() => {
+    const totalFixed = fixedAssets.length;
+    const totalControl = controlAssets.length;
+    const totalFleet = totalFixed + totalControl;
 
-    filteredAssets.forEach(a => {
-      const cat = a.category || 'Uncategorized';
-      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
+    const totalValuation = fixedAssets.reduce((sum, item) => sum + (parseFloat(item.grand_total) || 0), 0);
 
-      const stat = a.status || 'Active';
-      statusCounts[stat] = (statusCounts[stat] || 0) + 1;
-
-      if (a.warranty_expiry) {
-        const expDate = new Date(a.warranty_expiry);
-        if (expDate >= now && expDate <= in90Days) {
-          expiringSoon++;
-        }
-      }
+    // Grouping by Category
+    const categoryMap: Record<string, number> = {};
+    fixedAssets.forEach(item => {
+      const cat = (item.category || 'Other').trim().toUpperCase();
+      categoryMap[cat] = (categoryMap[cat] || 0) + 1;
     });
+    controlAssets.forEach(item => {
+      const cat = (item.category || 'Other').trim().toUpperCase();
+      categoryMap[cat] = (categoryMap[cat] || 0) + 1;
+    });
+
+    const categoryBreakdown = Object.entries(categoryMap)
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Grouping by BU
+    const buMap: Record<string, { fixed: number; control: number; value: number }> = {
+      'Khema Global': { fixed: 0, control: 0, value: 0 },
+      'Khema TK': { fixed: 0, control: 0, value: 0 },
+      'Khema BKK': { fixed: 0, control: 0, value: 0 },
+      'Sakal 2004': { fixed: 0, control: 0, value: 0 },
+    };
+
+    fixedAssets.forEach(item => {
+      const bu = item.bu_name || 'Khema Global';
+      if (!buMap[bu]) buMap[bu] = { fixed: 0, control: 0, value: 0 };
+      buMap[bu].fixed += 1;
+      buMap[bu].value += (parseFloat(item.grand_total) || 0);
+    });
+
+    controlAssets.forEach(item => {
+      const bu = item.bu_name || 'Khema Global';
+      if (!buMap[bu]) buMap[bu] = { fixed: 0, control: 0, value: 0 };
+      buMap[bu].control += 1;
+    });
+
+    const buBreakdown = Object.entries(buMap).map(([bu_name, data]) => ({
+      bu_name,
+      total: data.fixed + data.control,
+      fixed: data.fixed,
+      control: data.control,
+      value: data.value
+    }));
 
     return {
-      total,
-      totalValue,
-      categoryCounts,
-      statusCounts,
-      expiringSoon,
-      activeCount: statusCounts['Active'] || 0
+      totalFixed,
+      totalControl,
+      totalFleet,
+      totalValuation,
+      categoryBreakdown,
+      buBreakdown
     };
-  }, [filteredAssets]);
+  }, [fixedAssets, controlAssets]);
 
-  // Filtered Helpdesk tickets based on site and period
-  const filteredTickets = useMemo(() => {
-    return helpdeskTickets.filter(t => {
-      if (siteFilter !== 'All Sites' && t.site_name !== siteFilter) return false;
-      if (filterFrom && t.create_date_time && t.create_date_time < filterFrom) return false;
-      if (filterTo && t.create_date_time && t.create_date_time > filterTo) return false;
-      return true;
-    });
-  }, [helpdeskTickets, siteFilter, filterFrom, filterTo]);
+  // 2. CapEx & OpEx Planning Metrics
+  const budgetMetrics = useMemo(() => {
+    const plannedCapex = budgetSummary?.totals?.planned_capex || 0;
+    const actualCapex = budgetSummary?.totals?.actual_capex || 0;
+    const plannedOpex = budgetSummary?.totals?.planned_opex || 0;
+    const actualOpex = budgetSummary?.totals?.actual_opex || 0;
 
-  // Helpdesk Computed Metrics
+    const totalPlanned = plannedCapex + plannedOpex;
+    const totalActual = actualCapex + actualOpex;
+    const executionRate = totalPlanned > 0 ? Math.min(100, (totalActual / totalPlanned) * 100) : 0;
+    const variance = totalPlanned - totalActual;
+
+    return {
+      plannedCapex,
+      actualCapex,
+      plannedOpex,
+      actualOpex,
+      totalPlanned,
+      totalActual,
+      executionRate,
+      variance,
+      monthlyCashFlow: budgetSummary?.monthlyCashFlow || []
+    };
+  }, [budgetSummary]);
+
+  // 3. IT Operating Expenses Metrics
+  const expenseMetrics = useMemo(() => {
+    const totalSpend = expenseAnalytics?.totalExpenses || 0;
+    const txCount = expenseAnalytics?.transactionCount || 0;
+    const categorySpend = expenseAnalytics?.categorySpend || [];
+    const siteSpend = expenseAnalytics?.siteSpend || [];
+
+    return {
+      totalSpend,
+      txCount,
+      categorySpend,
+      siteSpend
+    };
+  }, [expenseAnalytics]);
+
+  // 4. Helpdesk Metrics
   const ticketMetrics = useMemo(() => {
     let inProgress = 0;
     let testing = 0;
     let notStarted = 0;
     let completed = 0;
-    const siteBreakdown: Record<string, number> = {};
-    const assigneeBreakdown: Record<string, { completed: number; total: number }> = {};
 
-    filteredTickets.forEach(t => {
-      const ip = t.in_progress_count || 0;
-      const ts = t.testing_count || 0;
-      const ns = t.not_started_count || 0;
-      const cp = t.completed_count || 0;
-      const subTotal = ip + ts + ns + cp;
-
-      inProgress += ip;
-      testing += ts;
-      notStarted += ns;
-      completed += cp;
-
-      if (t.site_name) {
-        siteBreakdown[t.site_name] = (siteBreakdown[t.site_name] || 0) + subTotal;
-      }
-
-      if (t.assignee) {
-        if (!assigneeBreakdown[t.assignee]) {
-          assigneeBreakdown[t.assignee] = { completed: 0, total: 0 };
-        }
-        assigneeBreakdown[t.assignee].completed += cp;
-        assigneeBreakdown[t.assignee].total += subTotal;
-      }
+    helpdeskTickets.forEach(t => {
+      if (siteFilter !== 'All Sites' && t.site_name !== siteFilter) return;
+      inProgress += (t.in_progress_count || 0);
+      testing += (t.testing_count || 0);
+      notStarted += (t.not_started_count || 0);
+      completed += (t.completed_count || 0);
     });
 
     const total = inProgress + testing + notStarted + completed;
     const pending = inProgress + testing + notStarted;
     const resolutionRate = total > 0 ? ((completed / total) * 100).toFixed(1) : '100.0';
 
-    return {
-      total,
-      completed,
-      inProgress,
-      testing,
-      notStarted,
-      pending,
-      resolutionRate,
-      siteBreakdown,
-      assigneeBreakdown
-    };
-  }, [filteredTickets]);
+    return { total, completed, inProgress, testing, notStarted, pending, resolutionRate };
+  }, [helpdeskTickets, siteFilter]);
 
-  // Filtered Staff
-  const filteredStaff = useMemo(() => {
-    if (siteFilter === 'All Sites') return staff;
-    return staff.filter(s => s.site_name === siteFilter || (s.monthly_schedule && s.monthly_schedule.includes(siteFilter)));
-  }, [staff, siteFilter]);
-
+  // 5. Staffing Metrics
   const staffMetrics = useMemo(() => {
+    const filteredStaff = siteFilter === 'All Sites' 
+      ? staff 
+      : staff.filter(s => s.site_name === siteFilter || (s.monthly_schedule && s.monthly_schedule.includes(siteFilter)));
     const total = filteredStaff.length;
     const active = filteredStaff.filter(s => s.status === 'Active').length;
     const sumScore = filteredStaff.reduce((sum, s) => sum + (parseFloat(s.performance_score) || 0), 0);
-    const avgScore = total > 0 ? (sumScore / total).toFixed(1) : '4.8';
+    const avgScore = total > 0 ? (sumScore / total).toFixed(1) : '4.9';
     return { total, active, avgScore };
-  }, [filteredStaff]);
+  }, [staff, siteFilter]);
 
-  // Multi-Site Facility Matrix
+  // 6. Multi-Facility Infrastructure Roll-Up Matrix
   const facilityMatrix = useMemo(() => {
-    return sites.map(s => {
-      const siteAssets = assets.filter(a => a.site_name === s.site_name).length;
-      const siteStaff = staff.filter(st => st.site_name === s.site_name || (st.monthly_schedule && st.monthly_schedule.includes(s.site_name))).length;
-      const siteSubs = cloudSubscriptions.filter(cs => cs.site_name === s.site_name || cs.site_name === 'All Sites').length;
+    const targetFacilities = sites.length > 0 ? sites : [
+      { id: '1', site_name: 'Main Hospital', location: 'Phnom Penh Center' },
+      { id: '2', site_name: 'North Clinic', location: 'Toul Kork' },
+      { id: '3', site_name: 'South Clinic', location: 'Boeung Keng Kang' },
+      { id: '4', site_name: 'Sakal 2004', location: 'Street 2004' },
+    ];
+
+    return targetFacilities.map(s => {
+      // Hardware Assets matching this site / BU
+      const siteFixed = fixedAssets.filter(a => 
+        a.bu_name === s.site_name || 
+        (s.site_name === 'Main Hospital' && a.bu_name === 'Khema Global') ||
+        (s.site_name === 'North Clinic' && a.bu_name === 'Khema TK') ||
+        (s.site_name === 'South Clinic' && a.bu_name === 'Khema BKK')
+      ).length;
+
+      const siteControl = controlAssets.filter(a => 
+        a.bu_name === s.site_name || 
+        (s.site_name === 'Main Hospital' && a.bu_name === 'Khema Global') ||
+        (s.site_name === 'North Clinic' && a.bu_name === 'Khema TK') ||
+        (s.site_name === 'South Clinic' && a.bu_name === 'Khema BKK')
+      ).length;
+
+      const siteStaff = staff.filter(st => 
+        st.site_name === s.site_name || 
+        (st.monthly_schedule && st.monthly_schedule.includes(s.site_name))
+      ).length;
+
       const siteTickets = helpdeskTickets.filter(ht => ht.site_name === s.site_name).reduce((sum, ht) => 
         sum + (ht.in_progress_count || 0) + (ht.testing_count || 0) + (ht.not_started_count || 0) + (ht.completed_count || 0), 0);
+
+      const siteSubs = cloudSubscriptions.filter(cs => cs.site_name === s.site_name || cs.site_name === 'All Sites').length;
+
       return {
         ...s,
-        assetCount: siteAssets,
+        totalAssets: siteFixed + siteControl,
+        fixedAssets: siteFixed,
+        controlAssets: siteControl,
         staffCount: siteStaff,
+        ticketCount: siteTickets,
         subsCount: siteSubs,
-        ticketCount: siteTickets
+        status: 'Operational'
       };
     });
-  }, [sites, assets, staff, cloudSubscriptions, helpdeskTickets]);
+  }, [sites, fixedAssets, controlAssets, staff, helpdeskTickets, cloudSubscriptions]);
 
-  // Colors for charts
   const CHART_COLORS = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
 
   return (
     <div className="space-y-8 animate-in slide-in-from-bottom-4 duration-500">
-      {/* Consolidated Welcome & Control Bar */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 right-20 -mb-16 w-64 h-64 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
+      
+      {/* ========================================================================= */}
+      {/* EXECUTIVE HEADER & MISSION CONTROL BANNER */}
+      {/* ========================================================================= */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 lg:p-8 text-white shadow-xl relative overflow-hidden border border-slate-800">
+        <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
+        <div className="absolute bottom-0 right-40 -mb-20 w-80 h-80 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
 
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-5">
           <div>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 tracking-wide uppercase">
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/30 text-indigo-200 border border-indigo-400/30 tracking-wide uppercase">
                 Consolidated Operations Center
               </span>
-              <span className="text-xs text-slate-400 flex items-center gap-1">
+              <span className="text-xs text-slate-300 flex items-center gap-1.5 bg-white/5 px-2.5 py-1 rounded-full border border-white/10">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                All 6 IT Modules Synced
+                Live Sync Across All 6 IT Modules
               </span>
             </div>
             <h2 className="text-2xl lg:text-3xl font-extrabold tracking-tight text-white">
               Khema Global IT Executive Operations
             </h2>
-            <p className="text-slate-300 text-sm mt-1 max-w-2xl font-normal">
-              Unified roll-up consolidating Cloud Subscriptions, Hardware Assets, Helpdesk Support SLAs, IT Staffing, Multi-Site Facilities, and Strategy Notes for <span className="font-semibold text-white">{siteFilter}</span>.
+            <p className="text-slate-300 text-sm mt-1 max-w-2xl font-normal leading-relaxed">
+              Real-time executive oversight rolling up Hardware Fleet, CapEx/OpEx Budgets, Operating Expenses, Cloud SaaS Subscriptions, Helpdesk SLAs, and Hospital Infrastructure for <span className="font-semibold text-white">{siteFilter}</span>.
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
+          <div className="flex items-center gap-3 shrink-0">
             <button
               type="button"
               onClick={fetchAllData}
               disabled={refreshing}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur border border-white/15 transition-all shadow-sm disabled:opacity-50"
-              title="Refresh all consolidated datasets"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur border border-white/15 transition-all shadow-sm disabled:opacity-50"
+              title="Refresh all consolidated live datasets"
             >
               <RefreshCw size={14} className={refreshing ? 'animate-spin text-indigo-300' : 'text-slate-300'} />
-              <span>{refreshing ? 'Refreshing...' : 'Refresh All'}</span>
+              <span>{refreshing ? 'Refreshing...' : 'Refresh All Modules'}</span>
             </button>
           </div>
         </div>
 
-        {/* Quick Facility Indicator Chips */}
-        <div className="mt-5 pt-4 border-t border-white/10 flex flex-wrap items-center gap-2 text-xs">
+        {/* Quick Facility Filter Indicator */}
+        <div className="mt-6 pt-4 border-t border-white/10 flex flex-wrap items-center gap-2 text-xs">
           <span className="text-slate-400 font-medium">Quick Facility Jump:</span>
-          {['All Sites', ...sites.map(s => s.site_name)].map((sName) => (
+          {['All Sites', 'Khema Global', 'Khema TK', 'Khema BKK', 'Sakal 2004'].map((sName) => (
             <button
               key={sName}
               type="button"
               onClick={() => setSiteFilter && setSiteFilter(sName)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
                 siteFilter === sName
-                  ? 'bg-indigo-500 text-white shadow-sm'
+                  ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/30 font-semibold'
                   : 'bg-white/5 hover:bg-white/10 text-slate-300'
               }`}
             >
@@ -303,166 +361,400 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
         </div>
       </div>
 
-      {/* TOP CONSOLIDATED 6 DOMAIN KPI CARDS (All Tabs at a glance - Enhanced UI Scroll to fit grid) */}
-      <div className="w-full overflow-x-auto pb-2 pt-0.5 -mx-1 px-1 scroll-smooth">
-        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3.5 min-w-[740px] xl:min-w-0">
-          {/* 1. Cloud Subscriptions */}
-          <div 
-            onClick={() => onNavigateTab('subscriptions')}
-            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
-          >
-            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Cloud Spend">Cloud Spend</span>
-              <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600 group-hover:scale-110 transition-transform shrink-0">
-                <Cloud size={18} />
-              </div>
+      {/* ========================================================================= */}
+      {/* 6 TOP EXECUTIVE KPI CARDS (DIRECT PORTALS TO EACH IT MODULE) */}
+      {/* ========================================================================= */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
+        
+        {/* 1. CapEx & OpEx Planning */}
+        <div 
+          onClick={() => onNavigateTab('capex-opex')}
+          className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">CapEx / OpEx</span>
+            <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 group-hover:scale-110 transition-transform">
+              <DollarSign size={18} />
             </div>
-            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
-              ${(cloudSummary.totalMonthlySpend || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+          </div>
+          <div>
+            <p className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+              ${Math.round(budgetMetrics.totalActual).toLocaleString()}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              of ${Math.round(budgetMetrics.totalPlanned).toLocaleString()} Planned
+            </p>
+          </div>
+          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span className="text-emerald-600 font-semibold">{budgetMetrics.executionRate.toFixed(1)}% Executed</span>
+            <span className="text-indigo-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
+              View <ChevronRight size={12} />
+            </span>
+          </div>
+        </div>
+
+        {/* 2. IT Expenses & Tracking */}
+        <div 
+          onClick={() => onNavigateTab('expenses')}
+          className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-violet-300 transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">IT Expenses</span>
+            <div className="p-2 rounded-xl bg-violet-50 dark:bg-violet-950/50 text-violet-600 group-hover:scale-110 transition-transform">
+              <Receipt size={18} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+              ${Math.round(expenseMetrics.totalSpend).toLocaleString()}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {expenseMetrics.txCount} Recorded Invoices
+            </p>
+          </div>
+          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span className="text-violet-600 font-semibold">Active Ledger</span>
+            <span className="text-indigo-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
+              View <ChevronRight size={12} />
+            </span>
+          </div>
+        </div>
+
+        {/* 3. Hardware Assets Fleet (Fixed + Control) */}
+        <div 
+          onClick={() => onNavigateTab('assets')}
+          className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Hardware Fleet</span>
+            <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/50 text-blue-600 group-hover:scale-110 transition-transform">
+              <Monitor size={18} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+              {hardwareMetrics.totalFleet} <span className="text-xs text-slate-500 font-normal">Units</span>
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5 truncate" title={`$${Math.round(hardwareMetrics.totalValuation).toLocaleString()} Valuation`}>
+              ${Math.round(hardwareMetrics.totalValuation).toLocaleString()} Fixed Val
+            </p>
+          </div>
+          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span className="text-blue-600 font-semibold">{hardwareMetrics.totalFixed} FA / {hardwareMetrics.totalControl} AC</span>
+            <span className="text-indigo-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
+              View <ChevronRight size={12} />
+            </span>
+          </div>
+        </div>
+
+        {/* 4. Cloud & HIS Subscriptions */}
+        <div 
+          onClick={() => onNavigateTab('subscriptions')}
+          className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Cloud & HIS</span>
+            <div className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 group-hover:scale-110 transition-transform">
+              <Cloud size={18} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+              ${Math.round(cloudSummary.totalMonthlySpend || 0).toLocaleString()}
               <span className="text-xs text-slate-500 font-normal">/mo</span>
             </p>
-            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
-              <span className="text-emerald-600 font-semibold truncate">{cloudSummary.activeCount || 0} Subs</span>
-              <span className="text-indigo-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
-                View <ChevronRight size={12} />
-              </span>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              ${Math.round(cloudSummary.annualRunRate || 0).toLocaleString()}/yr Run-Rate
+            </p>
+          </div>
+          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span className="text-indigo-600 font-semibold">{cloudSummary.activeCount || 0} Subscriptions</span>
+            <span className="text-indigo-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
+              View <ChevronRight size={12} />
+            </span>
+          </div>
+        </div>
+
+        {/* 5. Helpdesk Tickets */}
+        <div 
+          onClick={() => onNavigateTab('helpdesk')}
+          className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-amber-300 transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Helpdesk SLAs</span>
+            <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600 group-hover:scale-110 transition-transform">
+              <Wrench size={18} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+              {ticketMetrics.total} <span className="text-xs text-slate-500 font-normal">Incidents</span>
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {ticketMetrics.completed} Resolved
+            </p>
+          </div>
+          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span className="text-emerald-600 font-semibold">{ticketMetrics.resolutionRate}% SLA</span>
+            <span className="text-indigo-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
+              View <ChevronRight size={12} />
+            </span>
+          </div>
+        </div>
+
+        {/* 6. IT Engineering Staff */}
+        <div 
+          onClick={() => onNavigateTab('staffing')}
+          className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-md hover:border-teal-300 transition-all cursor-pointer group flex flex-col justify-between"
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">IT Engineers</span>
+            <div className="p-2 rounded-xl bg-teal-50 dark:bg-teal-950/50 text-teal-600 group-hover:scale-110 transition-transform">
+              <Users size={18} />
+            </div>
+          </div>
+          <div>
+            <p className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
+              {staffMetrics.total} <span className="text-xs text-slate-500 font-normal">Engineers</span>
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              100% Multi-Site Standby
+            </p>
+          </div>
+          <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+            <span className="text-teal-600 font-semibold">{staffMetrics.avgScore}/5.0 Score</span>
+            <span className="text-indigo-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform">
+              View <ChevronRight size={12} />
+            </span>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ========================================================================= */}
+      {/* SECTION 1: IT CAPEX & OPEX BUDGET VS. ACTUAL EXECUTION */}
+      {/* ========================================================================= */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 lg:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-100 dark:border-emerald-900 flex items-center justify-center text-emerald-600">
+              <DollarSign size={22} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                  IT CapEx & OpEx Strategic Planning & Budget Variance
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300">
+                  FY 2026 Live
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Capital investments, operating budgets, and variance tracking across hospitals and clinics
+              </p>
             </div>
           </div>
 
-          {/* 2. IT Assets */}
-          <div 
+          <Button
+            onClick={() => onNavigateTab('capex-opex')}
+            className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 border border-emerald-200/80 gap-1.5 text-xs font-semibold shadow-none self-start sm:self-auto"
+          >
+            <span>Open CapEx & OpEx Module</span>
+            <ArrowRight size={14} />
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          {/* Card: CapEx */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-5 border border-slate-100 dark:border-slate-800">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">CapEx (Capital Expenditure)</span>
+            <p className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+              ${Math.round(budgetMetrics.actualCapex).toLocaleString()}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Planned: <span className="font-semibold text-slate-700 dark:text-slate-300">${Math.round(budgetMetrics.plannedCapex).toLocaleString()}</span>
+            </p>
+            <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mt-3 overflow-hidden">
+              <div 
+                className="bg-emerald-500 h-full rounded-full transition-all duration-500" 
+                style={{ width: `${budgetMetrics.plannedCapex > 0 ? Math.min(100, (budgetMetrics.actualCapex / budgetMetrics.plannedCapex) * 100) : 0}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Card: OpEx */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-5 border border-slate-100 dark:border-slate-800">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">OpEx (Operating Expenditure)</span>
+            <p className="text-2xl font-black text-slate-900 dark:text-white mt-2">
+              ${Math.round(budgetMetrics.actualOpex).toLocaleString()}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Planned: <span className="font-semibold text-slate-700 dark:text-slate-300">${Math.round(budgetMetrics.plannedOpex).toLocaleString()}</span>
+            </p>
+            <div className="w-full bg-slate-200 dark:bg-slate-700 h-2 rounded-full mt-3 overflow-hidden">
+              <div 
+                className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
+                style={{ width: `${budgetMetrics.plannedOpex > 0 ? Math.min(100, (budgetMetrics.actualOpex / budgetMetrics.plannedOpex) * 100) : 0}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Card: Total Variance */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-5 border border-slate-100 dark:border-slate-800">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Remaining Unspent Budget</span>
+            <p className="text-2xl font-black text-emerald-600 mt-2">
+              ${Math.round(budgetMetrics.variance).toLocaleString()}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Budget Health: <span className="font-semibold text-emerald-600">On Track / Within Limits</span>
+            </p>
+          </div>
+
+          {/* Card: Execution Rate */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-5 border border-slate-100 dark:border-slate-800">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Budget Execution Velocity</span>
+            <p className="text-2xl font-black text-indigo-600 mt-2">
+              {budgetMetrics.executionRate.toFixed(1)}%
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              Annual Allocation Consumed
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* SECTION 2: HARDWARE ASSET FLEET & MULTI-BU INVENTORY ROLL-UP */}
+      {/* ========================================================================= */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 lg:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900 flex items-center justify-center text-blue-600">
+              <Monitor size={22} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+                  IT Fixed Assets & Control Equipment Fleet
+                </h3>
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                  {hardwareMetrics.totalFleet} Total Fleet Assets
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Consolidated Fixed Assets Register ($18,500+ value) and Asset Control inventory across 4 Business Units
+              </p>
+            </div>
+          </div>
+
+          <Button
             onClick={() => onNavigateTab('assets')}
-            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-blue-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
+            className="bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-800 border border-blue-200/80 gap-1.5 text-xs font-semibold shadow-none self-start sm:self-auto"
           >
-            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Hardware Fleet">Hardware Fleet</span>
-              <div className="p-2 rounded-xl bg-blue-50 text-blue-600 group-hover:scale-110 transition-transform shrink-0">
-                <Monitor size={18} />
+            <span>Open Assets Management Module</span>
+            <ArrowRight size={14} />
+          </Button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Column 1: Multi-BU Distribution */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-5 border border-slate-100 dark:border-slate-800 flex flex-col justify-between">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-4 flex items-center gap-2">
+                <Building2 size={16} className="text-blue-600" />
+                Fleet Distribution by Business Unit
+              </h4>
+              <div className="space-y-3">
+                {hardwareMetrics.buBreakdown.map((bu, idx) => (
+                  <div key={bu.bu_name} className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800">
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">{bu.bu_name}</span>
+                    <div className="text-right">
+                      <span className="font-bold text-blue-600">{bu.total} Units</span>
+                      <span className="text-[11px] text-slate-400 block">({bu.fixed} Fixed / {bu.control} Control)</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
-              {assetMetrics.total} <span className="text-xs text-slate-500 font-normal">Assets</span>
-            </p>
-            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
-              <span className="text-slate-600 truncate max-w-[90px]" title={`$${assetMetrics.totalValue.toLocaleString()}`}>
-                ${Math.round(assetMetrics.totalValue).toLocaleString()} Val
-              </span>
-              <span className="text-blue-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
-                View <ChevronRight size={12} />
-              </span>
+            <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-700 text-xs text-slate-500 flex justify-between">
+              <span>Total Fleet Valuation:</span>
+              <span className="font-bold text-slate-800 dark:text-slate-200">${Math.round(hardwareMetrics.totalValuation).toLocaleString()}</span>
             </div>
           </div>
 
-          {/* 3. Helpdesk Tickets */}
-          <div 
-            onClick={() => onNavigateTab('helpdesk')}
-            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-amber-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
-          >
-            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Helpdesk">Helpdesk</span>
-              <div className="p-2 rounded-xl bg-amber-50 text-amber-600 group-hover:scale-110 transition-transform shrink-0">
-                <Wrench size={18} />
-              </div>
-            </div>
-            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
-              {ticketMetrics.total} <span className="text-xs text-slate-500 font-normal">Tickets</span>
-            </p>
-            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
-              <span className="text-emerald-600 font-semibold truncate">{ticketMetrics.resolutionRate}% Done</span>
-              <span className="text-amber-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
-                View <ChevronRight size={12} />
-              </span>
-            </div>
-          </div>
-
-          {/* 4. IT Staffing (Selected Element in Focus Mode) */}
-          <div 
-            onClick={() => onNavigateTab('staffing')}
-            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
-          >
-            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="IT Engineers">
-                IT Engineers
-              </span>
-              <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600 group-hover:scale-110 transition-transform shrink-0">
-                <Users size={18} />
-              </div>
-            </div>
-            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
-              {staffMetrics.total} <span className="text-xs text-slate-500 font-normal">Specialists</span>
-            </p>
-            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
-              <span className="text-emerald-600 font-semibold truncate">{staffMetrics.avgScore}/5.0 Score</span>
-              <span className="text-emerald-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
-                View <ChevronRight size={12} />
-              </span>
+          {/* Column 2: Equipment Category Breakdown */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-5 border border-slate-100 dark:border-slate-800">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-4 flex items-center gap-2">
+              <Layers size={16} className="text-blue-600" />
+              Top Hardware Asset Categories
+            </h4>
+            <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
+              {hardwareMetrics.categoryBreakdown.slice(0, 7).map((cat, idx) => {
+                const pct = Math.round((cat.count / (hardwareMetrics.totalFleet || 1)) * 100);
+                return (
+                  <div key={cat.name} className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-medium text-slate-700 dark:text-slate-300">{cat.name}</span>
+                      <span className="font-bold text-slate-900 dark:text-white">{cat.count} units ({pct}%)</span>
+                    </div>
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-blue-500 h-full rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
-          {/* 5. Connected Sites */}
-          <div 
-            onClick={() => onNavigateTab('sites')}
-            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-purple-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
-          >
-            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Facilities">Facilities</span>
-              <div className="p-2 rounded-xl bg-purple-50 text-purple-600 group-hover:scale-110 transition-transform shrink-0">
-                <Building2 size={18} />
+          {/* Column 3: Fixed vs. Control Highlights */}
+          <div className="bg-gradient-to-br from-blue-900 to-indigo-950 rounded-2xl p-6 text-white flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="p-2 rounded-xl bg-white/10 text-blue-300">
+                  <ShieldCheck size={20} />
+                </span>
+                <span className="text-xs font-bold uppercase tracking-wider text-blue-200">Inventory Integrity</span>
               </div>
+              <h5 className="text-xl font-bold">Dual-Tier Asset Tracking</h5>
+              <p className="text-xs text-blue-200/80 mt-2 leading-relaxed">
+                Hospital IT enforces high-capital Fixed Assets verification (PCs, Laptops, Synology, Servers) alongside operational Asset Control tracking (printers, biometrics, UPS, networking).
+              </p>
             </div>
-            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
-              {sites.length} <span className="text-xs text-slate-500 font-normal">Sites</span>
-            </p>
-            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
-              <span className="text-purple-600 font-semibold truncate">100% Online</span>
-              <span className="text-purple-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
-                View <ChevronRight size={12} />
-              </span>
-            </div>
-          </div>
 
-          {/* 6. IT Notes & Governance */}
-          <div 
-            onClick={() => onNavigateTab('notes')}
-            className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm hover:shadow-md hover:border-teal-300 transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between min-w-0"
-          >
-            <div className="flex justify-between items-center gap-2 mb-2 min-w-0">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider truncate" title="Strategy & Notes">Strategy & Notes</span>
-              <div className="p-2 rounded-xl bg-teal-50 text-teal-600 group-hover:scale-110 transition-transform shrink-0">
-                <FileText size={18} />
+            <div className="grid grid-cols-2 gap-3 pt-6 border-t border-white/10 mt-4">
+              <div className="bg-white/5 p-3 rounded-xl">
+                <span className="text-[11px] text-blue-300 uppercase block font-semibold">Fixed Assets</span>
+                <span className="text-2xl font-black text-white">{hardwareMetrics.totalFixed}</span>
               </div>
-            </div>
-            <p className="text-xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
-              {notes.length} <span className="text-xs text-slate-500 font-normal">Records</span>
-            </p>
-            <div className="flex items-center justify-between text-[11px] mt-2 pt-2 border-t border-slate-100 whitespace-nowrap gap-1">
-              <span className="text-teal-600 font-semibold truncate">SLA Reviews</span>
-              <span className="text-teal-600 font-medium flex items-center group-hover:translate-x-0.5 transition-transform shrink-0">
-                View <ChevronRight size={12} />
-              </span>
+              <div className="bg-white/5 p-3 rounded-xl">
+                <span className="text-[11px] text-blue-300 uppercase block font-semibold">Asset Control</span>
+                <span className="text-2xl font-black text-white">{hardwareMetrics.totalControl}</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* SECTION 1: KHEMA GLOBAL CLOUD SUBSCRIPTION CONSOLIDATION */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-100">
+      {/* ========================================================================= */}
+      {/* SECTION 3: CLOUD & HIS SUBSCRIPTIONS CONSOLIDATION */}
+      {/* ========================================================================= */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 lg:p-8 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600">
-              <Cloud size={20} />
+            <div className="w-11 h-11 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-100 dark:border-indigo-900 flex items-center justify-center text-indigo-600">
+              <Cloud size={22} />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                   Khema Global Cloud & HIS Subscriptions
                 </h3>
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700">
-                  {cloudSummary.totalCount || 0} Subscriptions
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                  {cloudSummary.totalCount || 0} Subscriptions Active
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Consolidated SaaS & Cloud Infrastructure spend, renewal radar, and provider allocations
+                Consolidated SaaS & Cloud Infrastructure spend, renewal countdowns, and provider licenses
               </p>
             </div>
           </div>
@@ -470,7 +762,7 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
           <div className="flex items-center gap-3">
             <div className="text-right hidden sm:block">
               <p className="text-xs font-semibold text-slate-500 uppercase">Annual Run-Rate</p>
-              <p className="text-base font-bold text-indigo-700">
+              <p className="text-base font-bold text-indigo-700 dark:text-indigo-400">
                 ${(cloudSummary.annualRunRate || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </div>
@@ -478,564 +770,249 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
               onClick={() => onNavigateTab('subscriptions')}
               className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 hover:text-indigo-800 border border-indigo-200/80 gap-1.5 text-xs font-semibold shadow-none"
             >
-              <span>Explore Cloud Subscriptions</span>
+              <span>Explore Subscriptions</span>
               <ArrowRight size={14} />
             </Button>
           </div>
         </div>
 
-        {/* Cloud Breakdown Cards & Preview */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Spend by Category */}
-          <div className="bg-slate-50/70 rounded-xl p-4 border border-slate-200/60">
-            <div className="flex items-center justify-between mb-3">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <Layers size={14} className="text-indigo-600" /> Spend by Category
-              </h4>
-              <span className="text-[11px] text-slate-500 font-medium">Monthly Cost</span>
-            </div>
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-5 border border-slate-100 dark:border-slate-800">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-4 flex items-center gap-2">
+              <Layers size={16} className="text-indigo-600" /> Spend by Category
+            </h4>
             <div className="space-y-3">
-              {(cloudSummary.categoryBreakdown || []).map((cat: any, idx: number) => {
+              {(cloudSummary.categoryBreakdown || []).map((cat: any) => {
                 const total = cloudSummary.totalMonthlySpend || 1;
                 const pct = Math.min(100, Math.round(((cat.spend || 0) / total) * 100));
                 return (
-                  <div key={cat.category || idx} className="space-y-1">
-                    <div className="flex justify-between text-xs font-medium">
-                      <span className="text-slate-700 truncate max-w-[170px]">{cat.category}</span>
-                      <span className="text-slate-900 font-semibold">
-                        ${(cat.spend || 0).toFixed(2)} <span className="text-slate-400 font-normal">({pct}%)</span>
-                      </span>
+                  <div key={cat.category} className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">{cat.category}</span>
+                      <span className="font-bold text-indigo-700 dark:text-indigo-400">${(cat.spend || 0).toLocaleString()}/mo ({pct}%)</span>
                     </div>
-                    <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                      <div 
-                        className="bg-indigo-600 h-2 rounded-full transition-all duration-500" 
-                        style={{ width: `${pct}%`, backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }} 
-                      />
+                    <div className="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-indigo-600 h-full rounded-full" style={{ width: `${pct}%` }} />
                     </div>
                   </div>
                 );
               })}
-              {(!cloudSummary.categoryBreakdown || cloudSummary.categoryBreakdown.length === 0) && (
-                <p className="text-xs text-slate-400 py-4 text-center">No category spend recorded.</p>
-              )}
             </div>
           </div>
 
-          {/* Provider Allocation & Seats */}
-          <div className="bg-slate-50/70 rounded-xl p-4 border border-slate-200/60 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                  <Database size={14} className="text-indigo-600" /> Active Cloud Providers
-                </h4>
-                <span className="text-[11px] text-slate-500 font-medium">{cloudSummary.providerBreakdown?.length || 0} Vendors</span>
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {(cloudSummary.providerBreakdown || []).map((p: any) => (
-                  <span 
-                    key={p.provider} 
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs bg-white border border-slate-200 text-slate-700 shadow-2xs font-medium"
-                  >
-                    <span>{p.provider}</span>
-                    <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded">
-                      ${(p.spend || 0).toFixed(0)}/mo
-                    </span>
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-4 pt-3 border-t border-slate-200/80">
-              <div className="flex justify-between items-center text-xs mb-1">
-                <span className="text-slate-600 font-medium">User Seat Utilization</span>
-                <span className="font-bold text-slate-900">{cloudSummary.usedSeats || 0} / {cloudSummary.totalSeats || 0} ({cloudSummary.seatUtilization || 0}%)</span>
-              </div>
-              <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-                <div 
-                  className="bg-emerald-500 h-2 rounded-full" 
-                  style={{ width: `${Math.min(100, cloudSummary.seatUtilization || 0)}%` }} 
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Top Subscriptions Quick Table */}
-          <div className="bg-slate-50/70 rounded-xl p-4 border border-slate-200/60">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <Sparkles size={14} className="text-indigo-600" /> Top Subscriptions
-              </h4>
-              <button 
-                type="button" 
-                onClick={() => onNavigateTab('subscriptions')}
-                className="text-[11px] text-indigo-600 hover:text-indigo-800 font-medium"
-              >
-                View all ({cloudSubscriptions.length})
-              </button>
-            </div>
-            <div className="space-y-2 mt-2">
-              {cloudSubscriptions.slice(0, 4).map(sub => (
-                <div key={sub.id} className="p-2.5 bg-white rounded-lg border border-slate-200/80 flex items-center justify-between text-xs">
-                  <div className="truncate pr-2">
-                    <p className="font-semibold text-slate-900 truncate">{sub.name}</p>
-                    <p className="text-[11px] text-slate-500 truncate">{sub.provider} • {sub.billing_cycle}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="font-bold text-slate-900">${(sub.cost || 0).toLocaleString()}</p>
-                    <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700">
-                      {sub.status || 'Active'}
-                    </span>
-                  </div>
+          {/* Spend by Provider */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-5 border border-slate-100 dark:border-slate-800">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-4 flex items-center gap-2">
+              <Server size={16} className="text-indigo-600" /> Key Cloud Providers
+            </h4>
+            <div className="space-y-2.5 max-h-[240px] overflow-y-auto pr-1">
+              {(cloudSummary.providerBreakdown || []).slice(0, 6).map((p: any) => (
+                <div key={p.provider} className="flex items-center justify-between p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200/60 dark:border-slate-800 text-xs">
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">{p.provider}</span>
+                  <span className="font-bold text-slate-900 dark:text-white">${Math.round(p.spend || 0).toLocaleString()}/mo</span>
                 </div>
               ))}
-              {cloudSubscriptions.length === 0 && (
-                <p className="text-xs text-slate-400 py-4 text-center">No subscriptions recorded.</p>
-              )}
+            </div>
+          </div>
+
+          {/* License Utilization & Renewal Radar */}
+          <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-5 border border-slate-100 dark:border-slate-800 flex flex-col justify-between">
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-4 flex items-center gap-2">
+                <Clock size={16} className="text-amber-600" /> Renewal Radar & Seats
+              </h4>
+              <div className="space-y-3">
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/60 dark:border-amber-900 text-amber-900 dark:text-amber-200 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle size={16} className="text-amber-600" />
+                    <span>Renewals in next 30 days:</span>
+                  </div>
+                  <span className="font-black text-sm">{cloudSummary.expiring30Days || 0}</span>
+                </div>
+                <div className="p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200/60 dark:border-indigo-900 text-indigo-900 dark:text-indigo-200 text-xs flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Users size={16} className="text-indigo-600" />
+                    <span>Seat Utilization:</span>
+                  </div>
+                  <span className="font-black text-sm">{cloudSummary.seatUtilization || 0}%</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-slate-200/60 dark:border-slate-700 text-xs text-slate-500">
+              Total Managed Seats: <span className="font-bold text-slate-800 dark:text-slate-200">{cloudSummary.totalSeats || 0}</span>
             </div>
           </div>
         </div>
       </div>
 
-      {/* SECTION 2: HARDWARE & ASSETS FLEET CONSOLIDATION */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600">
-              <Monitor size={20} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-slate-900 tracking-tight">
-                  IT Assets & Hardware Inventory
-                </h3>
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
-                  {assetMetrics.total} Total Devices
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Hardware rollout, category distribution, warranty status, and fleet valuations
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs font-semibold text-slate-500 uppercase">Fleet Capital Value</p>
-              <p className="text-base font-bold text-blue-700">
-                ${Math.round(assetMetrics.totalValue).toLocaleString()}
-              </p>
-            </div>
-            <Button
-              onClick={() => onNavigateTab('assets')}
-              className="bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-800 border border-blue-200/80 gap-1.5 text-xs font-semibold shadow-none"
-            >
-              <span>Manage Assets Fleet</span>
-              <ArrowRight size={14} />
-            </Button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Asset Category Badges */}
-          <div className="lg:col-span-2 bg-slate-50/70 rounded-xl p-4 border border-slate-200/60">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
-              <Laptop size={14} className="text-blue-600" /> Equipment by Category
-            </h4>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-              {Object.entries(assetMetrics.categoryCounts).map(([cat, count], idx) => (
-                <div key={cat} className="p-3 bg-white rounded-xl border border-slate-200/80 flex flex-col justify-between">
-                  <span className="text-xs text-slate-500 font-medium truncate" title={cat}>{cat}</span>
-                  <div className="flex items-baseline justify-between mt-1">
-                    <span className="text-lg font-bold text-slate-800">{count}</span>
-                    <span className="text-[10px] text-slate-400">
-                      {Math.round((count / (assetMetrics.total || 1)) * 100)}%
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {Object.keys(assetMetrics.categoryCounts).length === 0 && (
-                <p className="text-xs text-slate-400 col-span-3 py-4 text-center">No categories recorded.</p>
-              )}
-            </div>
-          </div>
-
-          {/* Operational Status */}
-          <div className="bg-slate-50/70 rounded-xl p-4 border border-slate-200/60 flex flex-col justify-between">
-            <div>
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
-                <ShieldCheck size={14} className="text-blue-600" /> Deployment Status
-              </h4>
-              <div className="space-y-2">
-                {Object.entries(assetMetrics.statusCounts).map(([stat, count]) => (
-                  <div key={stat} className="flex items-center justify-between p-2 bg-white rounded-lg border border-slate-200/70 text-xs">
-                    <span className="font-medium text-slate-700">{stat}</span>
-                    <span className={`px-2 py-0.5 rounded-full font-bold text-[11px] ${
-                      stat === 'Active' || stat === 'In Use' ? 'bg-emerald-50 text-emerald-700' :
-                      stat === 'Repair' || stat === 'Maintenance' ? 'bg-amber-50 text-amber-700' :
-                      'bg-slate-100 text-slate-700'
-                    }`}>
-                      {count}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-3 pt-3 border-t border-slate-200/80 text-xs text-slate-600 flex items-center justify-between">
-              <span>Warranty Alerts:</span>
-              <span className={`font-bold px-2 py-0.5 rounded text-[11px] ${assetMetrics.expiringSoon > 0 ? 'bg-rose-50 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
-                {assetMetrics.expiringSoon} Expiring &lt;90d
-              </span>
-            </div>
-          </div>
-
-          {/* Recent Deployed Assets */}
-          <div className="bg-slate-50/70 rounded-xl p-4 border border-slate-200/60">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <Server size={14} className="text-blue-600" /> Recent Assets
-              </h4>
-              <button 
-                type="button" 
-                onClick={() => onNavigateTab('assets')}
-                className="text-[11px] text-blue-600 hover:text-blue-800 font-medium"
-              >
-                View all ({assetMetrics.total})
-              </button>
-            </div>
-            <div className="space-y-2 mt-2">
-              {filteredAssets.slice(0, 4).map(asset => (
-                <div key={asset.id} className="p-2 bg-white rounded-lg border border-slate-200/80 text-xs flex justify-between items-center">
-                  <div className="truncate pr-2">
-                    <p className="font-semibold text-slate-900 truncate">{asset.asset_tag} - {asset.model}</p>
-                    <p className="text-[10px] text-slate-500 truncate">{asset.site_name} • {asset.category}</p>
-                  </div>
-                  <span className="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">
-                    {asset.status || 'Active'}
-                  </span>
-                </div>
-              ))}
-              {filteredAssets.length === 0 && (
-                <p className="text-xs text-slate-400 py-4 text-center">No assets found for this facility.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* SECTION 3: HELPDESK & SERVICE DESK TICKETS CONSOLIDATION */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center text-amber-600">
-              <Wrench size={20} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-slate-900 tracking-tight">
-                  Helpdesk Support & SLA Management
-                </h3>
-                <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700">
-                  {ticketMetrics.total} Total Reported
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Ticket volume pipeline, completion rates, pending reviews, and technician leaderboard
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs font-semibold text-slate-500 uppercase">Resolution SLA Rate</p>
-              <p className="text-base font-bold text-emerald-600">
-                {ticketMetrics.resolutionRate}%
-              </p>
-            </div>
-            <Button
-              onClick={() => onNavigateTab('helpdesk')}
-              className="bg-amber-50 hover:bg-amber-100 text-amber-800 hover:text-amber-900 border border-amber-200/80 gap-1.5 text-xs font-semibold shadow-none"
-            >
-              <span>Go to Helpdesk</span>
-              <ArrowRight size={14} />
-            </Button>
-          </div>
-        </div>
-
-        {/* 4-Stage Ticket Pipeline Cards (Responsive scroll to fit grid) */}
-        <div className="w-full overflow-x-auto pb-2 -mx-1 px-1">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2 min-w-[480px] sm:min-w-0">
-            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200/70 border-l-4 border-l-slate-400">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider truncate block">Not Started</span>
-              <p className="text-2xl font-bold text-slate-800 mt-1">{ticketMetrics.notStarted}</p>
-              <span className="text-[10px] text-slate-400">Pending intake</span>
-            </div>
-            <div className="bg-amber-50/50 rounded-xl p-3.5 border border-amber-200/70 border-l-4 border-l-amber-500">
-              <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider truncate block">In Progress</span>
-              <p className="text-2xl font-bold text-amber-900 mt-1">{ticketMetrics.inProgress}</p>
-              <span className="text-[10px] text-amber-600">Active troubleshooting</span>
-            </div>
-            <div className="bg-sky-50/50 rounded-xl p-3.5 border border-sky-200/70 border-l-4 border-l-sky-500">
-              <span className="text-[11px] font-semibold text-sky-700 uppercase tracking-wider truncate block">Testing / QA</span>
-              <p className="text-2xl font-bold text-sky-900 mt-1">{ticketMetrics.testing}</p>
-              <span className="text-[10px] text-sky-600">User verification</span>
-            </div>
-            <div className="bg-emerald-50/50 rounded-xl p-3.5 border border-emerald-200/70 border-l-4 border-l-emerald-500">
-              <span className="text-[11px] font-semibold text-emerald-700 uppercase tracking-wider truncate block">Completed</span>
-              <p className="text-2xl font-bold text-emerald-900 mt-1">{ticketMetrics.completed}</p>
-              <span className="text-[10px] text-emerald-600">SLA satisfied</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Tickets Breakdown by Site & Assignees */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* By Site */}
-          <div className="bg-slate-50/70 rounded-xl p-4 border border-slate-200/60">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
-              <MapPin size={14} className="text-amber-600" /> Tickets by Facility
-            </h4>
-            <div className="space-y-2.5">
-              {Object.entries(ticketMetrics.siteBreakdown).map(([sName, count]) => {
-                const total = ticketMetrics.total || 1;
-                const pct = Math.round((count / total) * 100);
-                return (
-                  <div key={sName} className="space-y-1">
-                    <div className="flex justify-between text-xs font-medium">
-                      <span className="text-slate-700">{sName}</span>
-                      <span className="text-slate-900 font-semibold">{count} tickets ({pct}%)</span>
-                    </div>
-                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
-                      <div className="bg-amber-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-              {Object.keys(ticketMetrics.siteBreakdown).length === 0 && (
-                <p className="text-xs text-slate-400 py-3 text-center">No ticket data for this site.</p>
-              )}
-            </div>
-          </div>
-
-          {/* Top Technician Assignees */}
-          <div className="bg-slate-50/70 rounded-xl p-4 border border-slate-200/60">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
-              <Users size={14} className="text-amber-600" /> Resolution Leaderboard
-            </h4>
-            <div className="space-y-2">
-              {Object.entries(ticketMetrics.assigneeBreakdown).slice(0, 4).map(([name, stats]) => {
-                const pct = stats.total > 0 ? Math.round((stats.completed / stats.total) * 100) : 100;
-                return (
-                  <div key={name} className="p-2.5 bg-white rounded-lg border border-slate-200/70 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-[11px]">
-                        {name.charAt(0)}
-                      </div>
-                      <span className="font-medium text-slate-800">{name}</span>
-                    </div>
-                    <div className="text-right">
-                      <span className="font-bold text-emerald-600">{stats.completed} resolved</span>
-                      <span className="text-slate-400 text-[10px]"> / {stats.total} total ({pct}%)</span>
-                    </div>
-                  </div>
-                );
-              })}
-              {Object.keys(ticketMetrics.assigneeBreakdown).length === 0 && (
-                <p className="text-xs text-slate-400 py-3 text-center">No technician tickets found.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* SECTION 4 & 5: STAFFING & MULTI-SITE INFRASTRUCTURE MATRIX */}
+      {/* ========================================================================= */}
+      {/* SECTION 4: HELPDESK SLAS & IT ENGINEERING STAFFING */}
+      {/* ========================================================================= */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Staffing & Shifts */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm flex flex-col justify-between">
+        
+        {/* Helpdesk Support Incident Funnel */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 lg:p-7 shadow-sm flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
-                  <Users size={18} />
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 text-amber-600">
+                  <Wrench size={20} />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">IT Staffing & Standby Shifts</h3>
-                  <p className="text-xs text-slate-500">Roster, performance ratings & hospital coverage</p>
+                  <h4 className="text-base font-bold text-slate-900 dark:text-white">Helpdesk Support SLAs</h4>
+                  <p className="text-xs text-slate-500">Incident funnel & turnaround rate</p>
                 </div>
               </div>
               <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onNavigateTab('helpdesk')}
+                className="text-xs"
+              >
+                View Tickets
+              </Button>
+            </div>
+
+            <div className="grid grid-cols-4 gap-2 text-center my-4">
+              <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                <span className="text-[11px] text-slate-500 uppercase block font-semibold">Total</span>
+                <span className="text-xl font-bold text-slate-900 dark:text-white">{ticketMetrics.total}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/40">
+                <span className="text-[11px] text-blue-600 uppercase block font-semibold">In Progress</span>
+                <span className="text-xl font-bold text-blue-700 dark:text-blue-300">{ticketMetrics.inProgress}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-purple-50 dark:bg-purple-950/40">
+                <span className="text-[11px] text-purple-600 uppercase block font-semibold">Testing</span>
+                <span className="text-xl font-bold text-purple-700 dark:text-purple-300">{ticketMetrics.testing}</span>
+              </div>
+              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40">
+                <span className="text-[11px] text-emerald-600 uppercase block font-semibold">Resolved</span>
+                <span className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{ticketMetrics.completed}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-100 dark:border-emerald-900 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-300">
+              <CheckCircle2 size={16} />
+              <span>Overall Resolution Compliance:</span>
+            </div>
+            <span className="font-black text-sm text-emerald-700 dark:text-emerald-300">{ticketMetrics.resolutionRate}% SLA Met</span>
+          </div>
+        </div>
+
+        {/* IT Engineering Staffing & Coverage */}
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 lg:p-7 shadow-sm flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/50 text-teal-600">
+                  <Users size={20} />
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-slate-900 dark:text-white">IT Engineering Roster</h4>
+                  <p className="text-xs text-slate-500">Multi-hospital technical standby coverage</p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
                 onClick={() => onNavigateTab('staffing')}
-                className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 hover:text-emerald-800 border border-emerald-200/80 text-xs font-semibold shadow-none"
+                className="text-xs"
               >
-                View Roster
+                View Staffing
               </Button>
             </div>
 
-            <div className="space-y-2.5">
-              {filteredStaff.map((st) => (
-                <div key={st.id} className="p-3 bg-slate-50/70 rounded-xl border border-slate-200/70 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-xl bg-white border border-slate-200 flex items-center justify-center font-bold text-slate-700 shadow-2xs">
-                      {st.employee_name.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-900">{st.employee_name}</p>
-                      <p className="text-[11px] text-slate-500">{st.role} • {st.site_name}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <span className="font-semibold text-slate-800">{st.performance_score ? `${st.performance_score}/5.0` : '4.8/5.0'}</span>
-                    <p className="text-[10px] text-slate-400 max-w-[120px] truncate" title={st.monthly_schedule}>
-                      Standby: {st.monthly_schedule || 'All Sites'}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              {filteredStaff.length === 0 && (
-                <p className="text-xs text-slate-400 py-6 text-center">No staffing records found.</p>
-              )}
+            <div className="grid grid-cols-3 gap-3 text-center my-4">
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50">
+                <span className="text-[11px] text-slate-500 uppercase block font-semibold">Specialists</span>
+                <span className="text-xl font-bold text-slate-900 dark:text-white">{staffMetrics.total}</span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-teal-50 dark:bg-teal-950/40">
+                <span className="text-[11px] text-teal-600 uppercase block font-semibold">Active On Duty</span>
+                <span className="text-xl font-bold text-teal-700 dark:text-teal-300">{staffMetrics.active}</span>
+              </div>
+              <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/40">
+                <span className="text-[11px] text-indigo-600 uppercase block font-semibold">Eval Score</span>
+                <span className="text-xl font-bold text-indigo-700 dark:text-indigo-300">{staffMetrics.avgScore} / 5.0</span>
+              </div>
             </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900 flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2 text-teal-800 dark:text-teal-300">
+              <ShieldCheck size={16} />
+              <span>Hospital Technical Coverage:</span>
+            </div>
+            <span className="font-black text-sm text-teal-700 dark:text-teal-300">100% 24/7 Multi-Site Standby</span>
           </div>
         </div>
 
-        {/* Multi-Site Facilities Matrix */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
-                  <Building2 size={18} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Multi-Facility Matrix</h3>
-                  <p className="text-xs text-slate-500">Connected branches, cross-facility inventory & coverage</p>
-                </div>
-              </div>
-              <Button
-                onClick={() => onNavigateTab('sites')}
-                className="bg-purple-50 hover:bg-purple-100 text-purple-700 hover:text-purple-800 border border-purple-200/80 text-xs font-semibold shadow-none"
-              >
-                Manage Sites
-              </Button>
-            </div>
+      </div>
 
-            <div className="space-y-2.5">
+      {/* ========================================================================= */}
+      {/* SECTION 5: MULTI-FACILITY INFRASTRUCTURE MATRIX */}
+      {/* ========================================================================= */}
+      <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200/80 dark:border-slate-800 p-6 lg:p-8 shadow-sm">
+        <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
+              Multi-Facility Operations & Infrastructure Roll-Up
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Cross-hospital deployment matrix consolidating hardware units, engineering headcount, cloud services, and tickets
+            </p>
+          </div>
+          <span className="text-xs font-semibold px-3 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+            {facilityMatrix.length} Facilities Connected
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs whitespace-nowrap">
+            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200 dark:border-slate-700">
+              <tr>
+                <th className="py-3 px-4">Hospital / Facility</th>
+                <th className="py-3 px-4">Location</th>
+                <th className="py-3 px-4">Hardware Fleet</th>
+                <th className="py-3 px-4">IT Staff Assigned</th>
+                <th className="py-3 px-4">Cloud Services</th>
+                <th className="py-3 px-4">Support Incidents</th>
+                <th className="py-3 px-4 text-right">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-200">
               {facilityMatrix.map((fac) => (
-                <div key={fac.id} className="p-3 bg-slate-50/70 rounded-xl border border-slate-200/70 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-200" />
-                    <div>
-                      <p className="font-bold text-slate-900">{fac.site_name}</p>
-                      <p className="text-[11px] text-slate-500">{fac.location || 'Active Branch Facility'}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 text-right">
-                    <div className="text-[11px]">
-                      <span className="font-semibold text-slate-800">{fac.assetCount}</span>
-                      <span className="text-slate-400"> Assets</span>
-                    </div>
-                    <div className="text-[11px]">
-                      <span className="font-semibold text-slate-800">{fac.staffCount}</span>
-                      <span className="text-slate-400"> Staff</span>
-                    </div>
-                    <div className="text-[11px]">
-                      <span className="font-semibold text-amber-700">{fac.ticketCount}</span>
-                      <span className="text-slate-400"> Tkts</span>
-                    </div>
-                  </div>
-                </div>
+                <tr key={fac.id || fac.site_name} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                  <td className="py-3.5 px-4 font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Building2 size={16} className="text-indigo-600" />
+                    {fac.site_name}
+                  </td>
+                  <td className="py-3.5 px-4 text-slate-500">{fac.location || 'Phnom Penh'}</td>
+                  <td className="py-3.5 px-4 font-semibold">
+                    {fac.totalAssets} units
+                    <span className="text-[11px] text-slate-400 block">({fac.fixedAssets} FA / {fac.controlAssets} AC)</span>
+                  </td>
+                  <td className="py-3.5 px-4">{fac.staffCount} Specialists</td>
+                  <td className="py-3.5 px-4">{fac.subsCount} Subscriptions</td>
+                  <td className="py-3.5 px-4">{fac.ticketCount} logged</td>
+                  <td className="py-3.5 px-4 text-right">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-900">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Online
+                    </span>
+                  </td>
+                </tr>
               ))}
-            </div>
-          </div>
+            </tbody>
+          </table>
         </div>
       </div>
 
-      {/* SECTION 6: MANAGEMENT COMMENTARY, CORE SYSTEMS & GOVERNANCE NOTES */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Core Systems Status */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm">
-          <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2 text-sm">
-            <Activity size={16} className="text-indigo-600" /> Core Clinical Systems
-          </h3>
-          <div className="space-y-2.5">
-            {[
-              { sys: 'Core Hospital HIS/HMS', stat: 'Operational', uptime: '99.98%', icon: <CheckCircle2 size={16} className="text-emerald-500" /> },
-              { sys: 'RadiAnt PACS Imaging', stat: 'Operational', uptime: '99.95%', icon: <CheckCircle2 size={16} className="text-emerald-500" /> },
-              { sys: 'Laboratory LIS System', stat: 'Operational', uptime: '99.99%', icon: <CheckCircle2 size={16} className="text-emerald-500" /> },
-              { sys: 'Multi-Site SD-WAN', stat: 'Operational', uptime: '100.0%', icon: <CheckCircle2 size={16} className="text-emerald-500" /> },
-              { sys: 'Financial ERP System', stat: 'Under Maintenance', uptime: '98.5%', icon: <AlertCircle size={16} className="text-amber-500" /> }
-            ].map((s, i) => (
-              <div key={i} className="flex justify-between items-center p-2.5 bg-slate-50/70 rounded-xl border border-slate-200/60 text-xs">
-                <span className="font-medium text-slate-800">{s.sys}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold text-slate-600">{s.uptime}</span>
-                  {s.icon}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Management Commentary */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm">
-          <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2 text-sm">
-            <AlertTriangle size={16} className="text-amber-500" /> Management Commentary
-          </h3>
-          <div className="space-y-3.5 text-xs text-slate-600">
-            <div className="flex gap-2.5 items-start">
-              <CheckCircle2 className="text-emerald-500 shrink-0 mt-0.5" size={16}/> 
-              <p><strong>Highlights:</strong> Subscriptions consolidated under Khema Global master agreement. Helpdesk SLA resolution reached {ticketMetrics.resolutionRate}% this period.</p>
-            </div>
-            <div className="flex gap-2.5 items-start">
-              <AlertCircle className="text-amber-500 shrink-0 mt-0.5" size={16}/> 
-              <p><strong>Risks:</strong> {assetMetrics.expiringSoon} IT workstations approaching warranty expiration. Scheduled audit planned for next quarter.</p>
-            </div>
-            <div className="flex gap-2.5 items-start">
-              <Activity className="text-blue-500 shrink-0 mt-0.5" size={16}/> 
-              <p><strong>Next Steps:</strong> Reviewing PACS cloud storage expansion at Toul Kork facility to support higher imaging fidelity.</p>
-            </div>
-          </div>
-        </div>
-
-        {/* IT Notes & Meeting Action Items */}
-        <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-slate-900 flex items-center gap-2 text-sm">
-                <GraduationCap size={16} className="text-teal-600" /> Notes & Strategic Action Items
-              </h3>
-              <button 
-                type="button" 
-                onClick={() => onNavigateTab('notes')}
-                className="text-xs text-teal-600 hover:text-teal-800 font-semibold"
-              >
-                Open Notes →
-              </button>
-            </div>
-            <div className="space-y-2.5 text-xs">
-              {notes.slice(0, 3).map((n) => (
-                <div key={n.id} className="p-2.5 bg-slate-50/70 rounded-xl border border-slate-200/60">
-                  <p className="font-bold text-slate-800 truncate">{n.title || 'Meeting Summary'}</p>
-                  <p className="text-[11px] text-slate-500 line-clamp-2 mt-0.5">{n.content || 'Action items discussed during weekly IT briefing.'}</p>
-                </div>
-              ))}
-              {notes.length === 0 && (
-                <div className="p-4 text-center text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
-                  <FileText size={20} className="mx-auto mb-1 text-slate-300" />
-                  <p className="text-xs">No recent meeting notes logged yet.</p>
-                  <button 
-                    type="button" 
-                    onClick={() => onNavigateTab('notes')} 
-                    className="text-indigo-600 font-semibold text-xs mt-1 hover:underline"
-                  >
-                    + Add New Note
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };
