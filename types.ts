@@ -27,7 +27,9 @@ export interface User {
   full_name?: string;
   display_name?: string;
   email: string;
-  avatarUrl?: string;
+  avatarUrl?: string | null;
+  avatar_url?: string | null;
+  timezone?: string;
   role?: string;
   status?: string;
   can_access_welcome?: boolean;

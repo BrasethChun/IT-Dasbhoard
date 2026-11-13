@@ -223,6 +223,8 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
   // Sub-tab Navigation
   type SubTab = 'overview' | 'fixed' | 'control' | 'audit' | 'config';
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('overview');
+  const [overviewCategoryScope, setOverviewCategoryScope] = useState<'all' | 'fixed' | 'control'>('all');
+  const [overviewCategoryBu, setOverviewCategoryBu] = useState<string>('All BUs');
 
   // Filters & Search
   const [searchTerm, setSearchTerm] = useState('');
@@ -397,11 +399,12 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
     fetchConfigData();
   }, [selectedBu]);
 
-  // Keep audit BU in sync with selected BU if not All
+  // Keep audit BU and category BU filter in sync with global Business Unit selector
   useEffect(() => {
     if (selectedBu !== 'All BUs') {
       setAuditBu(selectedBu);
     }
+    setOverviewCategoryBu(selectedBu);
   }, [selectedBu]);
 
   // Dynamic Categories Synced from Asset Configuration Database (Zero duplicates)
@@ -870,6 +873,260 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
     result.sort(([a], [b]) => a.localeCompare(b));
     return result;
   }, [filteredControlAssets, allControlCategories]);
+
+  // Executive Overview Normalized Stats (Separated FixAssets vs Assets Control + Category Matrix)
+  const overviewStats = useMemo(() => {
+    const fixedTotal = analytics?.totalFixedCount ?? fixedAssets.length;
+    const controlTotal = analytics?.totalControlCount ?? controlAssets.length;
+    const fleetTotal = fixedTotal + controlTotal;
+
+    const fixedBreakdown = analytics?.fixedBreakdown || {
+      total: fixedAssets.length,
+      active: fixedAssets.filter(a => a.status === 'Active').length,
+      spare: fixedAssets.filter(a => a.status === 'Spare').length,
+      maintenance: fixedAssets.filter(a => a.status === 'In Repair').length,
+      planDispose: fixedAssets.filter(a => a.status === 'Plan dispose').length,
+      disposed: fixedAssets.filter(a => a.status === 'Disposed').length,
+      valuation: fixedAssets.reduce((sum, a) => sum + (Number(a.grand_total) || 0), 0)
+    };
+
+    const controlBreakdown = analytics?.controlBreakdown || {
+      total: controlAssets.length,
+      active: controlAssets.filter(a => a.status === 'Active').length,
+      missing: controlAssets.filter(a => a.status === 'Missing').length,
+      maintenance: controlAssets.filter(a => a.status === 'In Repair').length,
+      planDispose: controlAssets.filter(a => a.status === 'Plan dispose').length,
+      disposed: controlAssets.filter(a => a.status === 'Disposed').length
+    };
+
+    const activeTotal = (fixedBreakdown.active || 0) + (controlBreakdown.active || 0);
+    const maintenanceTotal = (fixedBreakdown.maintenance || 0) + (controlBreakdown.maintenance || 0);
+    const planDisposeTotal =
+      (fixedBreakdown.planDispose || 0) +
+      (fixedBreakdown.disposed || 0) +
+      (controlBreakdown.planDispose || 0) +
+      (controlBreakdown.disposed || 0);
+    const standbyOrMissingTotal = (fixedBreakdown.spare || 0) + (controlBreakdown.missing || 0);
+
+    type CategoryBuEntry = {
+      buName: string;
+      fixedCount: number;
+      controlCount: number;
+      count: number;
+      activeCount: number;
+      maintenanceCount: number;
+      planDisposeCount: number;
+      spareOrMissingCount: number;
+      fixedValuation: number;
+    };
+
+    type CategoryEntry = {
+      key: string;
+      name: string;
+      fixedCount: number;
+      controlCount: number;
+      count: number;
+      activeCount: number;
+      maintenanceCount: number;
+      planDisposeCount: number;
+      spareOrMissingCount: number;
+      fixedValuation: number;
+      buCounts?: Record<string, CategoryBuEntry>;
+      businessUnits?: string[];
+    };
+
+    let categoryBreakdown: CategoryEntry[] = [];
+
+    if (analytics?.categoryBreakdown && analytics.categoryBreakdown.length > 0) {
+      categoryBreakdown = analytics.categoryBreakdown;
+    } else {
+      const catMap = new Map<string, CategoryEntry>();
+      const getEntry = (raw: string) => {
+        const clean = (raw || 'OTHER').trim();
+        const key = clean.toUpperCase();
+        if (!catMap.has(key)) {
+          catMap.set(key, {
+            key,
+            name: clean,
+            fixedCount: 0,
+            controlCount: 0,
+            count: 0,
+            activeCount: 0,
+            maintenanceCount: 0,
+            planDisposeCount: 0,
+            spareOrMissingCount: 0,
+            fixedValuation: 0,
+            buCounts: {},
+            businessUnits: []
+          });
+        }
+        return catMap.get(key)!;
+      };
+      const getBuEntry = (entry: CategoryEntry, rawBu?: string) => {
+        const buName = (rawBu || 'Unassigned').trim();
+        if (!entry.buCounts) entry.buCounts = {};
+        if (!entry.businessUnits) entry.businessUnits = [];
+        if (!entry.buCounts[buName]) {
+          entry.buCounts[buName] = {
+            buName,
+            fixedCount: 0,
+            controlCount: 0,
+            count: 0,
+            activeCount: 0,
+            maintenanceCount: 0,
+            planDisposeCount: 0,
+            spareOrMissingCount: 0,
+            fixedValuation: 0
+          };
+          entry.businessUnits.push(buName);
+        }
+        return entry.buCounts[buName];
+      };
+
+      fixedAssets.forEach(item => {
+        const entry = getEntry(item.category);
+        const buEntry = getBuEntry(entry, item.bu_name);
+        const val = Number(item.grand_total) || 0;
+        entry.fixedCount += 1;
+        entry.count += 1;
+        entry.fixedValuation += val;
+        buEntry.fixedCount += 1;
+        buEntry.count += 1;
+        buEntry.fixedValuation += val;
+        if (item.status === 'Active') {
+          entry.activeCount += 1;
+          buEntry.activeCount += 1;
+        } else if (item.status === 'In Repair') {
+          entry.maintenanceCount += 1;
+          buEntry.maintenanceCount += 1;
+        } else if (item.status === 'Plan dispose' || item.status === 'Disposed') {
+          entry.planDisposeCount += 1;
+          buEntry.planDisposeCount += 1;
+        } else {
+          entry.spareOrMissingCount += 1;
+          buEntry.spareOrMissingCount += 1;
+        }
+      });
+
+      controlAssets.forEach(item => {
+        const entry = getEntry(item.category);
+        const buEntry = getBuEntry(entry, item.bu_name);
+        entry.controlCount += 1;
+        entry.count += 1;
+        buEntry.controlCount += 1;
+        buEntry.count += 1;
+        if (item.status === 'Active') {
+          entry.activeCount += 1;
+          buEntry.activeCount += 1;
+        } else if (item.status === 'In Repair') {
+          entry.maintenanceCount += 1;
+          buEntry.maintenanceCount += 1;
+        } else if (item.status === 'Plan dispose' || item.status === 'Disposed') {
+          entry.planDisposeCount += 1;
+          buEntry.planDisposeCount += 1;
+        } else {
+          entry.spareOrMissingCount += 1;
+          buEntry.spareOrMissingCount += 1;
+        }
+      });
+
+      categoryBreakdown = Array.from(catMap.values()).sort(
+        (a, b) => b.count - a.count || a.name.localeCompare(b.name)
+      );
+    }
+
+    const effectiveCategoryBu = selectedBu !== 'All BUs' ? selectedBu : overviewCategoryBu;
+
+    const buFilteredCategories = categoryBreakdown
+      .map(cat => {
+        const orderedBus = (cat.businessUnits && cat.businessUnits.length > 0
+          ? cat.businessUnits
+          : Object.keys(cat.buCounts || {})
+        ).filter(bu => (cat.buCounts?.[bu]?.count || 0) > 0);
+
+        if (effectiveCategoryBu !== 'All BUs' && selectedBu === 'All BUs') {
+          const buStat = cat.buCounts?.[effectiveCategoryBu];
+          if (!buStat || buStat.count === 0) return null;
+          return {
+            ...cat,
+            fixedCount: buStat.fixedCount,
+            controlCount: buStat.controlCount,
+            count: buStat.count,
+            activeCount: buStat.activeCount,
+            maintenanceCount: buStat.maintenanceCount,
+            planDisposeCount: buStat.planDisposeCount,
+            spareOrMissingCount: buStat.spareOrMissingCount,
+            fixedValuation: buStat.fixedValuation,
+            activeBuList: [effectiveCategoryBu]
+          };
+        }
+
+        return {
+          ...cat,
+          activeBuList: orderedBus.length > 0 ? orderedBus : (selectedBu !== 'All BUs' ? [selectedBu] : [])
+        };
+      })
+      .filter((c): c is NonNullable<typeof c> => Boolean(c));
+
+    const categoryScopeFixedTotal = buFilteredCategories.reduce((sum, c) => sum + c.fixedCount, 0);
+    const categoryScopeControlTotal = buFilteredCategories.reduce((sum, c) => sum + c.controlCount, 0);
+    const categoryScopeFleetTotal = categoryScopeFixedTotal + categoryScopeControlTotal;
+
+    const scopedCategories = buFilteredCategories
+      .filter(cat => {
+        if (overviewCategoryScope === 'fixed') return cat.fixedCount > 0;
+        if (overviewCategoryScope === 'control') return cat.controlCount > 0;
+        return cat.count > 0;
+      })
+      .sort((a, b) => {
+        if (overviewCategoryScope === 'fixed') return b.fixedCount - a.fixedCount || a.name.localeCompare(b.name);
+        if (overviewCategoryScope === 'control') return b.controlCount - a.controlCount || a.name.localeCompare(b.name);
+        return b.count - a.count || a.name.localeCompare(b.name);
+      });
+
+    const buOptionsSet = new Set<string>(BUSINESS_UNITS.filter(b => b !== 'All BUs'));
+    categoryBreakdown.forEach(c => {
+      (c.businessUnits || Object.keys(c.buCounts || {})).forEach(bu => {
+        if (bu) buOptionsSet.add(bu);
+      });
+    });
+    const categoryBuOptions = ['All BUs', ...Array.from(buOptionsSet)];
+
+    return {
+      fixedTotal,
+      controlTotal,
+      fleetTotal,
+      fixedBreakdown,
+      controlBreakdown,
+      activeTotal,
+      maintenanceTotal,
+      planDisposeTotal,
+      standbyOrMissingTotal,
+      categoryBreakdown,
+      buFilteredCategories,
+      scopedCategories,
+      effectiveCategoryBu,
+      categoryScopeFixedTotal,
+      categoryScopeControlTotal,
+      categoryScopeFleetTotal,
+      categoryBuOptions
+    };
+  }, [analytics, fixedAssets, controlAssets, overviewCategoryScope, overviewCategoryBu, selectedBu]);
+
+  const handleCategoryBuChange = (nextBu: string) => {
+    if (selectedBu !== 'All BUs') {
+      setSelectedBu(nextBu as BusinessUnit);
+    }
+    setOverviewCategoryBu(nextBu);
+  };
+
+  const handleInspectCategory = (catName: string, preferredTab: 'fixed' | 'control') => {
+    if (overviewStats.effectiveCategoryBu !== 'All BUs' && selectedBu !== overviewStats.effectiveCategoryBu) {
+      setSelectedBu(overviewStats.effectiveCategoryBu as BusinessUnit);
+    }
+    setFilterCategory(catName);
+    setActiveSubTab(preferredTab);
+  };
 
 
   // --- ACTIONS: ADD / EDIT / DELETE ---
@@ -1718,9 +1975,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
           {/* Quick Metrics Capsule */}
           <div className="flex items-center gap-3 text-xs flex-wrap">
             <div className="px-3.5 py-1.5 rounded-xl bg-slate-50 border border-slate-200/80 text-slate-700">
-              <span className="text-slate-400 font-medium">Fixed Val: </span>
+              <span className="text-slate-400 font-medium">Total Fleet: </span>
               <span className="font-bold text-slate-900 font-mono">
-                ${(analytics?.totalFixedValuation || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {fixedAssets.length + controlAssets.length} Units
               </span>
             </div>
             <div className="px-3 py-1.5 rounded-xl bg-indigo-50 border border-indigo-200/60 text-indigo-800 font-bold">
@@ -1878,159 +2135,766 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
       {/* ========================================================================= */}
       {activeSubTab === 'overview' && (
         <div className="space-y-6 animate-in fade-in duration-200">
-          {/* KPI Summary Cards */}
+          {/* Separated Executive KPI Cards: FixAssets, Assets Control, Fleet Health, Aging Alerts */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Total Fixed Assets Valuation */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Fixed Capital</span>
-                <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
-                  <DollarSign size={16} />
-                </span>
-              </div>
-              <div className="mt-3">
-                <div className="text-2xl font-bold text-slate-900 tracking-tight font-mono">
-                  ${(analytics?.totalFixedValuation || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {/* Card 1: Fixed Assets Register (FixAssets) */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-indigo-300 transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Fixed Assets (FixAssets)</span>
+                  <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                    <Monitor size={16} />
+                  </span>
                 </div>
-                <div className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
-                  <span>{analytics?.totalFixedCount || 0} Registered Units</span>
-                  <span className="text-indigo-600 font-semibold">{selectedBu}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Total Controlled Equipment */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Controlled Peripherals</span>
-                <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
-                  <Layers size={16} />
-                </span>
-              </div>
-              <div className="mt-3">
-                <div className="text-2xl font-bold text-emerald-900 tracking-tight font-mono">
-                  {(analytics?.totalControlCount || 0)} Units
-                </div>
-                <div className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100">
-                  Printers, WiFi, Fingerprint, CCTV & Peripherals
-                </div>
-              </div>
-            </div>
-
-            {/* Plan Dispose & Refresh Alerts */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Plan Dispose / Aged</span>
-                <span className="p-2 rounded-xl bg-amber-50 text-amber-600">
-                  <AlertTriangle size={16} />
-                </span>
-              </div>
-              <div className="mt-3">
-                <div className="text-2xl font-bold text-amber-900 tracking-tight font-mono">
-                  {(analytics?.planDisposeCount || 0)} Units
-                </div>
-                <div className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
-                  <span>{analytics?.refreshAlerts?.length || 0} need 5-yr refresh</span>
-                  <span className="text-amber-700 font-semibold">Flagged</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Active Networked Endpoints */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Network Endpoints</span>
-                <span className="p-2 rounded-xl bg-sky-50 text-sky-600">
-                  <Wifi size={16} />
-                </span>
-              </div>
-              <div className="mt-3">
-                <div className="text-2xl font-bold text-slate-900 tracking-tight font-mono">
-                  {(analytics?.networkedEndpointsCount || 0)} Online
-                </div>
-                <div className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100">
-                  Assigned IP LAN / Static Hostnames
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Multi-BU Valuation Comparison Card */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2 mb-4">
-              <Building2 size={16} className="text-indigo-600" />
-              <span>Multi-Business Unit Valuation & Equipment Density</span>
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {['Khema Global', 'Khema TK', 'Khema BKK', 'Sakal 2004'].map((bu) => {
-                const data = analytics?.buValuationMap?.[bu] || { valuation: 0, fixedCount: 0, controlCount: 0 };
-                return (
-                  <div key={bu} className="p-4 rounded-xl bg-slate-50/70 border border-slate-200/70 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800">{bu}</span>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-white text-slate-600 border border-slate-200">
-                        {data.fixedCount + data.controlCount} Total Assets
-                      </span>
-                    </div>
-                    <div className="text-xl font-bold text-slate-900 font-mono">
-                      ${data.valuation.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                    <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1 border-t border-slate-200/50">
-                      <span>Fixed: {data.fixedCount} units</span>
-                      <span>Control: {data.controlCount} units</span>
-                    </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-bold text-indigo-950 tracking-tight tabular-nums flex items-baseline gap-2">
+                    <span>{overviewStats.fixedTotal}</span>
+                    <span className="text-sm font-semibold text-slate-500">Units</span>
+                    <span className="text-xs font-medium text-indigo-600 tabular-nums ml-auto">
+                      {overviewStats.fleetTotal > 0 ? Math.round((overviewStats.fixedTotal / overviewStats.fleetTotal) * 100) : 0}% of Fleet
+                    </span>
                   </div>
-                );
-              })}
+                  <div className="text-xs text-slate-500 mt-1.5 tabular-nums">
+                    {overviewStats.fixedBreakdown.active} Active · {overviewStats.fixedBreakdown.spare} Spare · {overviewStats.fixedBreakdown.maintenance} Repair · {(overviewStats.fixedBreakdown.planDispose || 0) + (overviewStats.fixedBreakdown.disposed || 0)} Dispose
+                  </div>
+                </div>
+              </div>
+              <div className="text-xs text-slate-500 mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                <span className="font-mono font-semibold text-slate-700 tabular-nums">
+                  ${Math.round(overviewStats.fixedBreakdown.valuation || analytics?.totalFixedValuation || 0).toLocaleString()} Value
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('fixed')}
+                  className="text-indigo-600 hover:text-indigo-800 font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Open FixAssets &rarr;
+                </button>
+              </div>
+            </div>
+
+            {/* Card 2: Assets Control Register (Assets Control) */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-emerald-300 transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Assets Control</span>
+                  <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+                    <Layers size={16} />
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-bold text-emerald-950 tracking-tight tabular-nums flex items-baseline gap-2">
+                    <span>{overviewStats.controlTotal}</span>
+                    <span className="text-sm font-semibold text-slate-500">Units</span>
+                    <span className="text-xs font-medium text-emerald-700 tabular-nums ml-auto">
+                      {overviewStats.fleetTotal > 0 ? Math.round((overviewStats.controlTotal / overviewStats.fleetTotal) * 100) : 0}% of Fleet
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1.5 tabular-nums">
+                    {overviewStats.controlBreakdown.active} Active · {overviewStats.controlBreakdown.maintenance} Repair · {(overviewStats.controlBreakdown.planDispose || 0) + (overviewStats.controlBreakdown.disposed || 0)} Dispose · {overviewStats.controlBreakdown.missing} Missing
+                  </div>
+                </div>
+              </div>
+              <div className="text-xs text-slate-500 mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                <span className="font-medium text-slate-600 tabular-nums">
+                  {overviewStats.categoryBreakdown.filter(c => c.controlCount > 0).length} Control Categories
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('control')}
+                  className="text-emerald-700 hover:text-emerald-900 font-semibold whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  Open Control &rarr;
+                </button>
+              </div>
+            </div>
+
+            {/* Card 3: Combined Fleet Operational Health */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-sky-300 transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Operational Health</span>
+                  <span className="p-2 rounded-xl bg-sky-50 text-sky-600">
+                    <ShieldCheck size={16} />
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-bold text-slate-900 tracking-tight tabular-nums flex items-baseline gap-2">
+                    <span>{analytics?.fleetHealthScore ?? 100}%</span>
+                    <span className="text-xs font-semibold text-emerald-700">Optimal</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1.5 tabular-nums">
+                    {overviewStats.activeTotal} Active across {overviewStats.fleetTotal} Total Fleet
+                  </div>
+                </div>
+              </div>
+              <div className="text-xs text-slate-500 mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between tabular-nums">
+                <span>{overviewStats.maintenanceTotal} In Repair ({overviewStats.fixedBreakdown.maintenance} Fix · {overviewStats.controlBreakdown.maintenance} Ctrl)</span>
+                <span className="text-slate-400 font-mono text-[11px]">{selectedBu}</span>
+              </div>
+            </div>
+
+            {/* Card 4: Aging Alerts & Refresh Radar */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-amber-300 transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Aging & Refresh Alerts</span>
+                  <span className="p-2 rounded-xl bg-amber-50 text-amber-600">
+                    <AlertTriangle size={16} />
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-bold text-amber-900 tracking-tight tabular-nums flex items-baseline gap-1.5">
+                    <span>{analytics?.refreshAlerts?.length || 0}</span>
+                    <span className="text-sm font-semibold text-slate-500">Units</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1.5 tabular-nums">
+                    {overviewStats.planDisposeTotal} Plan Dispose / Disposed · {overviewStats.standbyOrMissingTotal} Spare / Missing
+                  </div>
+                </div>
+              </div>
+              <div className="text-xs text-slate-500 mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between tabular-nums">
+                <span>{overviewStats.categoryBreakdown.length} Active Categories</span>
+                <span className="text-amber-700 font-semibold">&ge; 5 Yrs Hardware</span>
+              </div>
             </div>
           </div>
 
-          {/* Visual Charts: Category Breakdown & Floor Density */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Category Breakdown */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2 pb-3 border-b border-slate-100">
-                <Layers size={16} className="text-indigo-600" />
-                <span>Equipment Distribution by Category</span>
-              </h3>
-              <div className="h-64 w-full">
-                {analytics?.categoryData && analytics.categoryData.length > 0 ? (
+          {/* Smart Operational Fleet Intelligence: Lifecycle Donut & Campus Matrix */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Column (5 Cols): Lifecycle Health Donut Chart */}
+            <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                  <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                    <Tag size={16} className="text-indigo-600" />
+                    <span>Fleet Lifecycle Health Distribution</span>
+                  </h3>
+                  <span className="text-xs font-medium text-slate-500 tabular-nums">
+                    {overviewStats.fixedTotal} Fix · {overviewStats.controlTotal} Control
+                  </span>
+                </div>
+
+                {/* Donut Chart with Centered Total */}
+                <div className="relative h-56 w-full flex items-center justify-center">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analytics.categoryData} margin={{ top: 10, right: 10, left: 0, bottom: 25 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} angle={-25} textAnchor="end" />
-                      <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
-                      <RechartsTooltip contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px' }} />
-                      <Bar dataKey="count" name="Total Units" fill="#4f46e5" radius={[4, 4, 0, 0]} />
-                    </BarChart>
+                    <PieChart>
+                      <Pie
+                        data={
+                          analytics?.lifecycleDonut && analytics.lifecycleDonut.length > 0
+                            ? analytics.lifecycleDonut
+                            : [
+                                { name: 'Active In-Service', value: overviewStats.activeTotal, color: '#10b981' },
+                                { name: 'Under Maintenance', value: overviewStats.maintenanceTotal, color: '#f59e0b' },
+                                { name: 'Plan Dispose / Aging', value: overviewStats.planDisposeTotal, color: '#ef4444' },
+                                { name: 'Standby Spares', value: overviewStats.standbyOrMissingTotal, color: '#3b82f6' }
+                              ].filter((d: any) => d.value > 0)
+                        }
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={62}
+                        outerRadius={88}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {(
+                          analytics?.lifecycleDonut && analytics.lifecycleDonut.length > 0
+                            ? analytics.lifecycleDonut
+                            : [
+                                { name: 'Active In-Service', value: overviewStats.activeTotal, color: '#10b981' },
+                                { name: 'Under Maintenance', value: overviewStats.maintenanceTotal, color: '#f59e0b' },
+                                { name: 'Plan Dispose / Aging', value: overviewStats.planDisposeTotal, color: '#ef4444' },
+                                { name: 'Standby Spares', value: overviewStats.standbyOrMissingTotal, color: '#3b82f6' }
+                              ].filter((d: any) => d.value > 0)
+                        ).map((entry: any, index: number) => (
+                          <Cell key={`cell-${index}`} fill={entry.color || '#6366f1'} stroke="#ffffff" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip 
+                        contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }} 
+                        formatter={(val: any, name: any) => [`${val} Units`, name]}
+                      />
+                    </PieChart>
                   </ResponsiveContainer>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-slate-400 text-xs">No asset data recorded</div>
-                )}
+                  {/* Donut Center Label */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
+                      {overviewStats.fleetTotal}
+                    </span>
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                      Total Fleet
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Status Breakdown Legend & Counts with FixAssets vs Assets Control Split */}
+              <div className="grid grid-cols-2 gap-2.5 pt-4 border-t border-slate-100">
+                <div className="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-200/50">
+                  <div className="text-[11px] font-semibold text-emerald-800">Active In-Service</div>
+                  <div className="text-lg font-bold text-emerald-950 font-mono tabular-nums mt-0.5">
+                    {overviewStats.activeTotal}
+                  </div>
+                  <div className="text-[11px] text-emerald-700/90 tabular-nums mt-0.5">
+                    {overviewStats.fixedBreakdown.active} Fix · {overviewStats.controlBreakdown.active} Control
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-amber-50/60 border border-amber-200/50">
+                  <div className="text-[11px] font-semibold text-amber-800">Under Maintenance</div>
+                  <div className="text-lg font-bold text-amber-950 font-mono tabular-nums mt-0.5">
+                    {overviewStats.maintenanceTotal}
+                  </div>
+                  <div className="text-[11px] text-amber-700/90 tabular-nums mt-0.5">
+                    {overviewStats.fixedBreakdown.maintenance} Fix · {overviewStats.controlBreakdown.maintenance} Control
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-rose-50/60 border border-rose-200/50">
+                  <div className="text-[11px] font-semibold text-rose-800">Plan Dispose / Disposed</div>
+                  <div className="text-lg font-bold text-rose-950 font-mono tabular-nums mt-0.5">
+                    {overviewStats.planDisposeTotal}
+                  </div>
+                  <div className="text-[11px] text-rose-700/90 tabular-nums mt-0.5">
+                    {(overviewStats.fixedBreakdown.planDispose || 0) + (overviewStats.fixedBreakdown.disposed || 0)} Fix · {(overviewStats.controlBreakdown.planDispose || 0) + (overviewStats.controlBreakdown.disposed || 0)} Control
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-sky-50/60 border border-sky-200/50">
+                  <div className="text-[11px] font-semibold text-sky-800">Spare / Missing</div>
+                  <div className="text-lg font-bold text-sky-950 font-mono tabular-nums mt-0.5">
+                    {overviewStats.standbyOrMissingTotal}
+                  </div>
+                  <div className="text-[11px] text-sky-700/90 tabular-nums mt-0.5">
+                    {overviewStats.fixedBreakdown.spare} Spare Fix · {overviewStats.controlBreakdown.missing} Missing Ctrl
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Floor Density Distribution */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
-              <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2 pb-3 border-b border-slate-100">
-                <Building2 size={16} className="text-emerald-600" />
-                <span>Equipment Density by Floor (G to 10)</span>
-              </h3>
-              <div className="h-64 w-full">
-                {analytics?.floorData && analytics.floorData.length > 0 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={analytics.floorData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="floor" tick={{ fontSize: 11, fill: '#64748b' }} />
-                      <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
-                      <RechartsTooltip contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px' }} />
-                      <Bar dataKey="count" name="Assets Count" fill="#059669" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-slate-400 text-xs">No floor distribution data</div>
-                )}
+            {/* Right Column (7 Cols): Campus Fleet Operational Matrix (Separated FixAssets & Assets Control) */}
+            <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                  <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                    <Building2 size={16} className="text-indigo-600" />
+                    <span>Campus Fleet Operational Matrix</span>
+                  </h3>
+                  <span className="text-xs font-medium text-slate-500">
+                    FixAssets &amp; Assets Control by Site
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200/70">
+                      <tr>
+                        <th className="py-2.5 px-3">Campus / Site</th>
+                        <th className="py-2.5 px-2 text-right text-indigo-700">FixAssets</th>
+                        <th className="py-2.5 px-2 text-right text-emerald-700">Assets Control</th>
+                        <th className="py-2.5 px-2 text-right">Active</th>
+                        <th className="py-2.5 px-2 text-right">Repair</th>
+                        <th className="py-2.5 px-2 text-right">Dispose</th>
+                        <th className="py-2.5 px-3 text-right">Total Fleet</th>
+                        <th className="py-2.5 px-3 text-right">Health</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium">
+                      {['Khema Global', 'Khema TK', 'Khema BKK', 'Sakal 2004'].map((bu) => {
+                        const op = analytics?.buOperationalMap?.[bu] || {
+                          active: 0,
+                          inStorage: 0,
+                          maintenance: 0,
+                          planDispose: 0,
+                          fixedCount: analytics?.buValuationMap?.[bu]?.fixedCount || 0,
+                          controlCount: analytics?.buValuationMap?.[bu]?.controlCount || 0,
+                          totalAssets: (analytics?.buValuationMap?.[bu]?.fixedCount || 0) + (analytics?.buValuationMap?.[bu]?.controlCount || 0),
+                          healthRate: 100
+                        };
+                        const fixedCnt = op.fixedCount ?? (analytics?.buValuationMap?.[bu]?.fixedCount || 0);
+                        const controlCnt = op.controlCount ?? (analytics?.buValuationMap?.[bu]?.controlCount || 0);
+                        const total = op.totalAssets || (fixedCnt + controlCnt);
+                        const active = op.active ?? Math.max(0, total - (op.planDispose || 0) - (op.maintenance || 0));
+                        const health = op.healthRate ?? (total > 0 ? Math.round((active / total) * 100) : 100);
+
+                        return (
+                          <tr key={bu} className="hover:bg-slate-50/70 transition-colors">
+                            <td className="py-3 px-3 font-semibold text-slate-800 whitespace-nowrap">
+                              {bu}
+                            </td>
+                            <td className="py-3 px-2 text-right font-mono tabular-nums font-bold text-indigo-700">
+                              {fixedCnt}
+                            </td>
+                            <td className="py-3 px-2 text-right font-mono tabular-nums font-bold text-emerald-700">
+                              {controlCnt}
+                            </td>
+                            <td className="py-3 px-2 text-right font-mono tabular-nums text-slate-700">
+                              {active}
+                            </td>
+                            <td className="py-3 px-2 text-right font-mono tabular-nums">
+                              {op.maintenance > 0 ? (
+                                <span className="text-amber-700 font-bold">{op.maintenance}</span>
+                              ) : (
+                                <span className="text-slate-400">0</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-2 text-right font-mono tabular-nums">
+                              {op.planDispose > 0 ? (
+                                <span className="text-rose-700 font-bold">{op.planDispose}</span>
+                              ) : (
+                                <span className="text-slate-400">0</span>
+                              )}
+                            </td>
+                            <td className="py-3 px-3 text-right font-mono tabular-nums font-bold text-slate-900">
+                              {total}
+                            </td>
+                            <td className="py-3 px-3 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <div className="w-14 bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                                  <div 
+                                    className={`h-full rounded-full ${health >= 90 ? 'bg-emerald-500' : health >= 75 ? 'bg-amber-500' : 'bg-rose-500'}`}
+                                    style={{ width: `${health}%` }}
+                                  ></div>
+                                </div>
+                                <span className="font-mono tabular-nums text-[11px] font-bold text-slate-700 w-8 text-right">
+                                  {health}%
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="bg-slate-50/90 border-t border-slate-200 font-bold text-slate-900">
+                      <tr>
+                        <td className="py-2.5 px-3">All Sites Total</td>
+                        <td className="py-2.5 px-2 text-right font-mono tabular-nums text-indigo-700">{overviewStats.fixedTotal}</td>
+                        <td className="py-2.5 px-2 text-right font-mono tabular-nums text-emerald-700">{overviewStats.controlTotal}</td>
+                        <td className="py-2.5 px-2 text-right font-mono tabular-nums">{overviewStats.activeTotal}</td>
+                        <td className="py-2.5 px-2 text-right font-mono tabular-nums text-amber-700">{overviewStats.maintenanceTotal}</td>
+                        <td className="py-2.5 px-2 text-right font-mono tabular-nums text-rose-700">{overviewStats.planDisposeTotal}</td>
+                        <td className="py-2.5 px-3 text-right font-mono tabular-nums">{overviewStats.fleetTotal}</td>
+                        <td className="py-2.5 px-3 text-right font-mono tabular-nums">{analytics?.fleetHealthScore ?? 100}%</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
               </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 size={13} className="text-emerald-500" />
+                  Separated FixAssets &amp; Assets Control fleet counts
+                </span>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('fixed')}
+                    className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    FixAssets Register &rarr;
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSubTab('control')}
+                    className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    Control Register &rarr;
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ===================================================================== */}
+          {/* ASSETS CATEGORY DASHBOARD (Separated FixAssets vs Assets Control + BU) */}
+          {/* ===================================================================== */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-6">
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                  <FolderKanban size={18} className="text-indigo-600" />
+                  <span>Assets Category Dashboard</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5 tabular-nums">
+                  {overviewStats.effectiveCategoryBu} · {overviewStats.scopedCategories.length} Categories · {overviewStats.categoryScopeFixedTotal} FixAssets · {overviewStats.categoryScopeControlTotal} Assets Control · Click any category or Business Unit to inspect
+                </p>
+              </div>
+
+              {/* Business Unit & Register Scope Filter Controls */}
+              <div className="flex flex-wrap items-center gap-2.5 self-start xl:self-auto">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-50 rounded-xl border border-slate-200/80">
+                  <Building2 size={13} className="text-indigo-600 shrink-0" />
+                  <span className="text-[11px] font-semibold text-slate-500 whitespace-nowrap">Business Unit:</span>
+                  <select
+                    aria-label="Filter Assets Category Dashboard by Business Unit"
+                    value={overviewStats.effectiveCategoryBu}
+                    onChange={e => handleCategoryBuChange(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-slate-800 focus:outline-none cursor-pointer pr-1"
+                  >
+                    {overviewStats.categoryBuOptions.map(bu => (
+                      <option key={bu} value={bu}>
+                        {bu === 'All BUs' ? 'All Business Units' : bu}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="inline-flex items-center p-1 bg-slate-100 rounded-xl border border-slate-200/80">
+                  <button
+                    type="button"
+                    onClick={() => setOverviewCategoryScope('all')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                      overviewCategoryScope === 'all'
+                        ? 'bg-white text-slate-900 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    All Categories ({overviewStats.buFilteredCategories.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOverviewCategoryScope('fixed')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                      overviewCategoryScope === 'fixed'
+                        ? 'bg-white text-indigo-700 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    FixAssets ({overviewStats.buFilteredCategories.filter(c => c.fixedCount > 0).length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOverviewCategoryScope('control')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap shrink-0 transition-all cursor-pointer ${
+                      overviewCategoryScope === 'control'
+                        ? 'bg-white text-emerald-700 shadow-xs font-bold'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Assets Control ({overviewStats.buFilteredCategories.filter(c => c.controlCount > 0).length})
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Category Charts Split: Stacked Bar (7 cols) + Top Categories Breakdown (5 cols) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left: Category Stacked Distribution Chart */}
+              <div className="lg:col-span-7 space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-700">
+                    FixAssets vs Assets Control by Category ({overviewStats.effectiveCategoryBu})
+                  </span>
+                  <div className="flex items-center gap-4 text-slate-500">
+                    {overviewCategoryScope !== 'control' && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-xs bg-indigo-600 inline-block" />
+                        FixAssets
+                      </span>
+                    )}
+                    {overviewCategoryScope !== 'fixed' && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-xs bg-emerald-600 inline-block" />
+                        Assets Control
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="h-72 w-full">
+                  {overviewStats.scopedCategories.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={overviewStats.scopedCategories} margin={{ top: 10, right: 10, left: 0, bottom: 35 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#64748b' }} angle={-28} textAnchor="end" interval={0} height={60} />
+                        <YAxis tick={{ fontSize: 11, fill: '#64748b' }} allowDecimals={false} />
+                        <RechartsTooltip
+                          contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px' }}
+                        />
+                        {overviewCategoryScope !== 'control' && (
+                          <Bar
+                            dataKey="fixedCount"
+                            name="FixAssets"
+                            stackId="cat"
+                            fill="#4f46e5"
+                            radius={overviewCategoryScope === 'fixed' ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                          />
+                        )}
+                        {overviewCategoryScope !== 'fixed' && (
+                          <Bar
+                            dataKey="controlCount"
+                            name="Assets Control"
+                            stackId="cat"
+                            fill="#059669"
+                            radius={[4, 4, 0, 0]}
+                          />
+                        )}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-slate-400 text-xs">
+                      No categories found for {overviewStats.effectiveCategoryBu}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Right: Top Categories Share & Mix */}
+              <div className="lg:col-span-5 space-y-3 border-t lg:border-t-0 lg:border-l border-slate-100 pt-4 lg:pt-0 lg:pl-6">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-700">Top Asset Categories Share</span>
+                  <span className="text-slate-400 tabular-nums">Top 6 · {overviewStats.effectiveCategoryBu}</span>
+                </div>
+                <div className="space-y-3">
+                  {overviewStats.scopedCategories.slice(0, 6).map(cat => {
+                    const displayCount =
+                      overviewCategoryScope === 'fixed'
+                        ? cat.fixedCount
+                        : overviewCategoryScope === 'control'
+                        ? cat.controlCount
+                        : cat.count;
+                    const denom =
+                      overviewCategoryScope === 'fixed'
+                        ? overviewStats.categoryScopeFixedTotal
+                        : overviewCategoryScope === 'control'
+                        ? overviewStats.categoryScopeControlTotal
+                        : overviewStats.categoryScopeFleetTotal;
+                    const sharePct = denom > 0 ? Math.round((displayCount / denom) * 1000) / 10 : 0;
+                    const fixedPct = displayCount > 0 && overviewCategoryScope === 'all' ? (cat.fixedCount / displayCount) * 100 : overviewCategoryScope === 'fixed' ? 100 : 0;
+                    const controlPct = displayCount > 0 && overviewCategoryScope === 'all' ? (cat.controlCount / displayCount) * 100 : overviewCategoryScope === 'control' ? 100 : 0;
+
+                    const buSummaryText = overviewStats.effectiveCategoryBu === 'All BUs'
+                      ? cat.activeBuList
+                          .map(bu => {
+                            const bStat = cat.buCounts?.[bu];
+                            const cnt = overviewCategoryScope === 'fixed'
+                              ? (bStat?.fixedCount || 0)
+                              : overviewCategoryScope === 'control'
+                              ? (bStat?.controlCount || 0)
+                              : (bStat?.count || 0);
+                            return cnt > 0 ? `${bu}: ${cnt}` : null;
+                          })
+                          .filter(Boolean)
+                          .join(' · ')
+                      : overviewStats.effectiveCategoryBu;
+
+                    return (
+                      <button
+                        key={cat.key}
+                        type="button"
+                        onClick={() => handleInspectCategory(cat.name, cat.fixedCount >= cat.controlCount && cat.fixedCount > 0 ? 'fixed' : 'control')}
+                        className="w-full text-left group hover:bg-slate-50/80 p-2 -mx-2 rounded-xl transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="font-semibold text-slate-800 group-hover:text-indigo-700 truncate pr-2">
+                            {cat.name}
+                          </span>
+                          <span className="font-mono tabular-nums text-slate-700 shrink-0">
+                            <span className="font-bold">{displayCount}</span>
+                            <span className="text-slate-400"> ({sharePct}%)</span>
+                          </span>
+                        </div>
+                        <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden flex">
+                          {fixedPct > 0 && (
+                            <div
+                              className="h-full bg-indigo-600"
+                              style={{ width: `${Math.max(4, (sharePct / 100) * fixedPct)}%` }}
+                              title={`FixAssets: ${cat.fixedCount}`}
+                            />
+                          )}
+                          {controlPct > 0 && (
+                            <div
+                              className="h-full bg-emerald-600"
+                              style={{ width: `${Math.max(4, (sharePct / 100) * controlPct)}%` }}
+                              title={`Assets Control: ${cat.controlCount}`}
+                            />
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 mt-1 tabular-nums">
+                          <span className="truncate">
+                            {cat.fixedCount} FixAssets · {cat.controlCount} Control
+                            {buSummaryText ? ` · ${buSummaryText}` : ''}
+                          </span>
+                          {cat.fixedValuation > 0 && (
+                            <span className="font-mono text-slate-600 shrink-0">${Math.round(cat.fixedValuation).toLocaleString()}</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {overviewStats.scopedCategories.length === 0 && (
+                    <div className="py-10 text-center text-xs text-slate-400">No category breakdown available</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Category Breakdown Summary Table (with Business Unit Distribution) */}
+            <div className="overflow-x-auto rounded-xl border border-slate-200/80">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200/70">
+                  <tr>
+                    <th className="py-2.5 px-3">Category</th>
+                    <th className="py-2.5 px-3">Business Unit</th>
+                    <th className="py-2.5 px-3">Register Scope</th>
+                    <th className="py-2.5 px-3 text-right text-indigo-700">FixAssets</th>
+                    <th className="py-2.5 px-3 text-right text-emerald-700">Assets Control</th>
+                    <th className="py-2.5 px-3 text-right">Total Units</th>
+                    <th className="py-2.5 px-3 text-right">Fleet %</th>
+                    <th className="py-2.5 px-3 text-right">Active</th>
+                    <th className="py-2.5 px-3 text-right">Repair / Dispose</th>
+                    <th className="py-2.5 px-3 text-right">FixAssets Value</th>
+                    <th className="py-2.5 px-3 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {overviewStats.scopedCategories.length > 0 ? (
+                    overviewStats.scopedCategories.map(cat => {
+                      const scopeLabel =
+                        cat.fixedCount > 0 && cat.controlCount > 0
+                          ? 'FixAssets + Control'
+                          : cat.fixedCount > 0
+                          ? 'FixAssets'
+                          : 'Assets Control';
+                      const fleetShare = overviewStats.categoryScopeFleetTotal > 0 ? Math.round((cat.count / overviewStats.categoryScopeFleetTotal) * 1000) / 10 : 0;
+                      const attentionCount = cat.maintenanceCount + cat.planDisposeCount;
+
+                      const buEntries = cat.activeBuList
+                        .map(bu => {
+                          const stat = cat.buCounts?.[bu];
+                          const cnt = overviewCategoryScope === 'fixed'
+                            ? (stat?.fixedCount || 0)
+                            : overviewCategoryScope === 'control'
+                            ? (stat?.controlCount || 0)
+                            : (stat?.count || 0);
+                          return { bu, count: cnt };
+                        })
+                        .filter(item => item.count > 0);
+
+                      return (
+                        <tr key={cat.key} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="py-2.5 px-3 font-bold text-slate-900 whitespace-nowrap">{cat.name}</td>
+                          <td className="py-2.5 px-3">
+                            {overviewStats.effectiveCategoryBu !== 'All BUs' ? (
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-700 whitespace-nowrap">
+                                <Building2 size={11} className="text-indigo-500" />
+                                {overviewStats.effectiveCategoryBu}
+                              </span>
+                            ) : buEntries.length > 0 ? (
+                              <div className="flex flex-wrap items-center gap-1 max-w-[260px]">
+                                {buEntries.map(({ bu, count }) => (
+                                  <button
+                                    key={bu}
+                                    type="button"
+                                    onClick={() => handleCategoryBuChange(bu)}
+                                    title={`Filter Category Dashboard to ${bu}`}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-50 hover:bg-indigo-50 border border-slate-200/80 hover:border-indigo-300 text-[11px] text-slate-700 hover:text-indigo-700 transition-colors cursor-pointer whitespace-nowrap"
+                                  >
+                                    <span>{bu}</span>
+                                    <span className="font-mono tabular-nums font-bold text-slate-900">{count}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">--</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-500 whitespace-nowrap">{scopeLabel}</td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-indigo-700">
+                            {cat.fixedCount}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-700">
+                            {cat.controlCount}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-slate-900">
+                            {cat.count}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-600">
+                            {fleetShare}%
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums text-emerald-700">
+                            {cat.activeCount}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums">
+                            {attentionCount > 0 ? (
+                              <span className="text-amber-700 font-semibold">{attentionCount}</span>
+                            ) : (
+                              <span className="text-slate-400">0</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-700">
+                            {cat.fixedValuation > 0 ? `$${Math.round(cat.fixedValuation).toLocaleString()}` : '--'}
+                          </td>
+                          <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                            <div className="inline-flex items-center gap-2">
+                              {cat.fixedCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleInspectCategory(cat.name, 'fixed')}
+                                  className="text-indigo-600 hover:text-indigo-800 font-semibold cursor-pointer"
+                                >
+                                  FixAssets &rarr;
+                                </button>
+                              )}
+                              {cat.controlCount > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleInspectCategory(cat.name, 'control')}
+                                  className="text-emerald-700 hover:text-emerald-900 font-semibold cursor-pointer"
+                                >
+                                  Control &rarr;
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={11} className="py-6 text-center text-slate-400">
+                        No asset categories recorded for {overviewStats.effectiveCategoryBu}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Floor Density Distribution (Separated FixAssets vs Assets Control) */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+              <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                <Building2 size={16} className="text-emerald-600" />
+                <span>Equipment Density by Floor (FixAssets vs Assets Control)</span>
+              </h3>
+              <div className="flex items-center gap-4 text-xs text-slate-500">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-xs bg-indigo-600 inline-block" />
+                  FixAssets
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-xs bg-emerald-600 inline-block" />
+                  Assets Control
+                </span>
+              </div>
+            </div>
+            <div className="h-64 w-full">
+              {analytics?.floorData && analytics.floorData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={analytics.floorData} margin={{ top: 10, right: 10, left: 0, bottom: 10 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                    <XAxis dataKey="floor" tick={{ fontSize: 11, fill: '#64748b' }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} allowDecimals={false} />
+                    <RechartsTooltip contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px' }} />
+                    <Bar dataKey="fixedCount" name="FixAssets" stackId="fl" fill="#4f46e5" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="controlCount" name="Assets Control" stackId="fl" fill="#059669" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full flex items-center justify-center text-slate-400 text-xs">No floor distribution data</div>
+              )}
             </div>
           </div>
 

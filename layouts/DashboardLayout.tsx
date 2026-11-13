@@ -213,29 +213,66 @@ export const DashboardLayout: React.FC = () => {
                 /* Authenticated User Menu */
                 <div className="flex items-center gap-4" ref={menuRef}>
                   <div className="relative">
-                    <button 
-                      type="button"
-                      onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-                      className="relative flex items-center justify-center rounded-full bg-white/40 backdrop-blur-md p-0.5 border border-white/70 shadow-[0_10px_30px_rgba(15,23,42,0.25)] cursor-pointer transition-all duration-200 ease-out hover:scale-[1.04] hover:shadow-[0_14px_40px_rgba(15,23,42,0.3)] focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:ring-offset-2 focus:ring-offset-transparent overflow-hidden"
-                    >
-                      <StorageImage 
-                        path={user?.avatarUrl} 
-                        fallbackSrc="https://picsum.photos/100/100" 
-                        alt="User Avatar" 
-                        className="w-9 h-9 md:w-10 md:h-10 rounded-full object-cover"
-                        showLoading={false}
-                      />
-                    </button>
+                    {(() => {
+                      const displayName = user?.display_name || user?.full_name || user?.name || user?.email || 'User';
+                      const initials = displayName
+                        .split(/[\s@._-]+/)
+                        .filter(Boolean)
+                        .slice(0, 2)
+                        .map((part: string) => part[0]?.toUpperCase())
+                        .join('');
+                      const avatarFallback = (
+                        <div className="w-9 h-9 md:w-10 md:h-10 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center text-xs md:text-sm font-bold tracking-tight">
+                          {initials || <User size={18} />}
+                        </div>
+                      );
+
+                      return (
+                        <button 
+                          type="button"
+                          onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                          className="relative flex items-center justify-center rounded-full bg-white/40 backdrop-blur-md p-0.5 border border-white/70 shadow-[0_10px_30px_rgba(15,23,42,0.25)] cursor-pointer transition-all duration-200 ease-out hover:scale-[1.04] hover:shadow-[0_14px_40px_rgba(15,23,42,0.3)] focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:ring-offset-2 focus:ring-offset-transparent overflow-hidden"
+                        >
+                          <StorageImage 
+                            path={user?.avatarUrl || user?.avatar_url} 
+                            fallback={avatarFallback}
+                            alt={displayName} 
+                            className="w-9 h-9 md:w-10 md:h-10 rounded-full object-cover"
+                            showLoading={false}
+                          />
+                        </button>
+                      );
+                    })()}
 
                     {/* Dropdown Menu */}
                     <div 
                       role="menu"
-                      className={`absolute right-0 mt-3 w-56 z-50 bg-white/60 backdrop-blur-2xl border border-white/80 rounded-2xl shadow-[0_22px_70px_rgba(15,23,42,0.35)] py-2 transition-all duration-180 ease-out origin-top-right ${
+                      className={`absolute right-0 mt-3 w-64 z-50 bg-white/80 backdrop-blur-2xl border border-white/80 rounded-2xl shadow-[0_22px_70px_rgba(15,23,42,0.35)] py-2 transition-all duration-180 ease-out origin-top-right ${
                         isProfileMenuOpen 
                           ? 'opacity-100 translate-y-0' 
                           : 'opacity-0 -translate-y-2 pointer-events-none'
                       }`}
                     >
+                      <div className="px-4 py-2.5 border-b border-slate-200/60 mb-1 flex items-center gap-3">
+                        <StorageImage
+                          path={user?.avatarUrl || user?.avatar_url}
+                          fallback={
+                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                              <User size={16} />
+                            </div>
+                          }
+                          alt={user?.name || 'User'}
+                          className="w-9 h-9 rounded-full object-cover shrink-0 ring-1 ring-slate-200"
+                          showLoading={false}
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-900 truncate">
+                            {user?.full_name || user?.display_name || user?.name || 'Account'}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate">{user?.email}</p>
+                        </div>
+                      </div>
+
                       <div className="px-2 space-y-1">
                         <button 
                           onClick={() => handleNavigation(RoutePath.ACCOUNT)}

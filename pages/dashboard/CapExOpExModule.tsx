@@ -6,7 +6,7 @@ import {
   ExternalLink, ChevronDown, ChevronRight, X, AlertTriangle, Building2,
   PieChart as PieChartIcon, BarChart3, CheckSquare, Sparkles, FileText,
   Printer, Monitor, Laptop, Video, Server, Network, Copy, ArrowRightLeft,
-  SlidersHorizontal, Check, Info, RotateCcw
+  SlidersHorizontal, Check, Info, RotateCcw, Tag, Calculator
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
@@ -60,6 +60,9 @@ export interface OpExItem {
   qty: number;
   unit_price: number;
   annual_cost: number;
+  budget_classification?: 'Planned' | 'Unplanned';
+  unplanned_reason?: string;
+  approval_ref?: string;
   monthly_spending: Record<string, { planned: number; actual: number }>;
   quarterly_spending?: {
     planned: { q1: number; q2: number; q3: number; q4: number; total: number };
@@ -84,6 +87,9 @@ interface ExecutiveSummaryData {
   totalAnnualOpex: number;
   totalAnnualOpexActual: number;
   totalAnnualOpexVariance: number;
+  totalUnplannedOpexPlanned?: number;
+  totalUnplannedOpexActual?: number;
+  unplannedOpexCount?: number;
   capexCount: number;
   opexCount: number;
   upcomingRenewals: Array<{
@@ -159,12 +165,24 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
   const [cloneTargetYear, setCloneTargetYear] = useState<number>(2027);
   const [cloneOverwrite, setCloneOverwrite] = useState(false);
 
+  // Dedicated Fiscal Year Planning Rollover & Copy State (Sync & Template tab)
+  const [rolloverSourceYear, setRolloverSourceYear] = useState<number>(selectedFiscalYear);
+  const [rolloverTargetYear, setRolloverTargetYear] = useState<number>(selectedFiscalYear + 1);
+  const [rolloverCopyCapex, setRolloverCopyCapex] = useState<boolean>(true);
+  const [rolloverCopyOpex, setRolloverCopyOpex] = useState<boolean>(true);
+  const [rolloverCampus, setRolloverCampus] = useState<string>('All Sites');
+  const [rolloverAdjustmentPercent, setRolloverAdjustmentPercent] = useState<number>(0);
+  const [rolloverOverwrite, setRolloverOverwrite] = useState<boolean>(false);
+  const [isRollingOver, setIsRollingOver] = useState<boolean>(false);
+
   useEffect(() => {
     localStorage.setItem('khema_capex_subtab', activeSubTab);
   }, [activeSubTab]);
 
   useEffect(() => {
     localStorage.setItem('khema_capex_fiscal_year', String(selectedFiscalYear));
+    setRolloverSourceYear(selectedFiscalYear);
+    setRolloverTargetYear(selectedFiscalYear + 1);
   }, [selectedFiscalYear]);
 
   // Dynamic asset categories synced from IT Asset Management
@@ -185,9 +203,11 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
   const [capexAssetFilter, setCapexAssetFilter] = useState<string>('All Types');
   const [capexStatusFilter, setCapexStatusFilter] = useState<string>('All Statuses');
   const [expandedCapexId, setExpandedCapexId] = useState<string | null>(null);
+  const [showPortfolioPhasingTotal, setShowPortfolioPhasingTotal] = useState<boolean>(false);
 
   // OpEx specific filters & settings
   const [opexAccountFilter, setOpexAccountFilter] = useState<string>('All Accounts');
+  const [opexClassificationFilter, setOpexClassificationFilter] = useState<'All' | 'Planned' | 'Unplanned'>('All');
   const [smartSpreadEnabled, setSmartSpreadEnabled] = useState<boolean>(true);
   const [viewMode, setViewMode] = useState<'side-by-side' | 'planned-only' | 'actual-only'>('side-by-side');
 
@@ -205,6 +225,62 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
   const effectiveAccountCodes = useMemo(() => {
     return accountCodes.length > 0 ? accountCodes : OPEX_ACCOUNT_CODES;
   }, [accountCodes]);
+
+  const capexStatusCounts = useMemo(() => {
+    let approved = 0;
+    let inProgress = 0;
+    let completed = 0;
+    let pending = 0;
+    capexItems.forEach(item => {
+      const s = (item.status || '').toLowerCase();
+      if (s === 'completed') completed++;
+      else if (s === 'in progress') inProgress++;
+      else if (s === 'approved') approved++;
+      else pending++;
+    });
+    return { approved, inProgress, completed, pending, total: capexItems.length };
+  }, [capexItems]);
+
+  const strategicDomainData = useMemo(() => {
+    const list: Array<{ name: string; value: number; color: string }> = [];
+    const opexMap = summaryData?.opexByAccount || {};
+    const capexMap = summaryData?.capexByAssetType || {};
+
+    let cloudVal = 0;
+    let outsideVal = 0;
+    let telecomVal = 0;
+    let rentVal = 0;
+    let otherOpexVal = 0;
+
+    Object.entries(opexMap).forEach(([acc, val]) => {
+      const lower = acc.toLowerCase();
+      const amount = val.planned || 0;
+      if (lower.includes('cloud') || lower.includes('saas') || lower.includes('630105')) cloudVal += amount;
+      else if (lower.includes('outside') || lower.includes('service') || lower.includes('support') || lower.includes('630104')) outsideVal += amount;
+      else if (lower.includes('communication') || lower.includes('internet') || lower.includes('data') || lower.includes('630102') || lower.includes('690101')) telecomVal += amount;
+      else if (lower.includes('rent') || lower.includes('630103')) rentVal += amount;
+      else otherOpexVal += amount;
+    });
+
+    let hardwareCap = 0;
+    let infraCap = 0;
+    Object.entries(capexMap).forEach(([type, val]) => {
+      const lower = type.toLowerCase();
+      const amount = val.planned || 0;
+      if (lower.includes('network') || lower.includes('server') || lower.includes('cctv') || lower.includes('infra')) infraCap += amount;
+      else hardwareCap += amount;
+    });
+
+    if (cloudVal > 0) list.push({ name: 'Cloud & SaaS Licenses', value: cloudVal, color: '#6366f1' });
+    if (outsideVal > 0) list.push({ name: 'IT Support & Outsourced', value: outsideVal, color: '#10b981' });
+    if (hardwareCap > 0) list.push({ name: 'Workstations & Endpoints', value: hardwareCap, color: '#3b82f6' });
+    if (telecomVal > 0) list.push({ name: 'Telecom & ISP Data', value: telecomVal, color: '#0ea5e9' });
+    if (rentVal > 0) list.push({ name: 'Equipment Lease & Rent', value: rentVal, color: '#8b5cf6' });
+    if (infraCap > 0) list.push({ name: 'Network & Security Infra', value: infraCap, color: '#f59e0b' });
+    if (otherOpexVal > 0) list.push({ name: 'Other Operations', value: otherOpexVal, color: '#64748b' });
+
+    return list.sort((a, b) => b.value - a.value);
+  }, [summaryData]);
 
   const fetchAccountCodes = async () => {
     try {
@@ -274,11 +350,18 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
   };
 
   // Fetch OpEx data
-  const fetchOpex = async (fy: number = selectedFiscalYear, site: string = selectedSite, acct: string = opexAccountFilter, q: string = searchQuery) => {
+  const fetchOpex = async (
+    fy: number = selectedFiscalYear, 
+    site: string = selectedSite, 
+    acct: string = opexAccountFilter, 
+    q: string = searchQuery,
+    classification: string = opexClassificationFilter
+  ) => {
     try {
       const params = new URLSearchParams({ fiscal_year: String(fy) });
       if (site !== 'All Sites') params.append('site', site);
       if (acct !== 'All Accounts') params.append('account_code', acct);
+      if (classification && classification !== 'All') params.append('budget_classification', classification);
       if (q) params.append('search', q);
 
       const res = await fetch(`/api/it-budget/opex?${params.toString()}`, {
@@ -337,7 +420,7 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     await Promise.all([
       fetchSummary(selectedFiscalYear, selectedSite),
       fetchCapex(selectedFiscalYear, selectedSite, capexAssetFilter, capexStatusFilter, searchQuery),
-      fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery),
+      fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery, opexClassificationFilter),
       fetchAssetCategories(),
       fetchAccountCodes()
     ]);
@@ -353,8 +436,8 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
   }, [capexAssetFilter, capexStatusFilter, searchQuery]);
 
   useEffect(() => {
-    fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery);
-  }, [opexAccountFilter, searchQuery]);
+    fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery, opexClassificationFilter);
+  }, [opexAccountFilter, searchQuery, opexClassificationFilter]);
 
   // Sync actuals from it_expenses table
   const handleSyncExpenses = async () => {
@@ -379,7 +462,7 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     }
   };
 
-  // Clone/Roll over fiscal year
+  // Clone/Roll over fiscal year (Modal action)
   const handleCloneYear = async () => {
     try {
       const res = await fetch('/api/it-budget/clone-year', {
@@ -395,12 +478,157 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
       if (res.ok) {
         showToast(data.message, 'success');
         setShowCloneYearModal(false);
+        setAvailableYears(prev => Array.from(new Set([...prev, cloneTargetYear])).sort((a, b) => a - b));
         setSelectedFiscalYear(cloneTargetYear);
       } else {
         showToast(data.error || 'Failed to clone fiscal year', 'error');
       }
     } catch (e: any) {
       showToast('Error cloning fiscal year: ' + e.message, 'error');
+    }
+  };
+
+  // Aggregated totals and statistics for CapEx Planner grid
+  const capexTotals = useMemo(() => {
+    let totalQty = 0;
+    let totalPlanned = 0;
+    let totalActual = 0;
+    const statusCounts: Record<string, number> = {};
+
+    const monthlyPlanned: Record<string, number> = {
+      jan: 0, feb: 0, mar: 0, apr: 0, may: 0, jun: 0,
+      jul: 0, aug: 0, sep: 0, oct: 0, nov: 0, dec: 0
+    };
+    const monthlyActual: Record<string, number> = {
+      jan: 0, feb: 0, mar: 0, apr: 0, may: 0, jun: 0,
+      jul: 0, aug: 0, sep: 0, oct: 0, nov: 0, dec: 0
+    };
+
+    capexItems.forEach(item => {
+      totalQty += Number(item.qty) || 0;
+      totalPlanned += Number(item.requested_amount) || 0;
+      statusCounts[item.status] = (statusCounts[item.status] || 0) + 1;
+
+      MONTH_KEYS.forEach(m => {
+        const p = Number(item.monthly_spending?.[m]?.planned) || 0;
+        const a = Number(item.monthly_spending?.[m]?.actual) || 0;
+        monthlyPlanned[m] += p;
+        monthlyActual[m] += a;
+        totalActual += a;
+      });
+    });
+
+    const totalVariance = totalPlanned - totalActual;
+    const burnPercent = totalPlanned > 0 ? (totalActual / totalPlanned) * 100 : 0;
+    const avgUnitPrice = totalQty > 0 ? totalPlanned / totalQty : 0;
+
+    const q1Planned = monthlyPlanned.jan + monthlyPlanned.feb + monthlyPlanned.mar;
+    const q2Planned = monthlyPlanned.apr + monthlyPlanned.may + monthlyPlanned.jun;
+    const q3Planned = monthlyPlanned.jul + monthlyPlanned.aug + monthlyPlanned.sep;
+    const q4Planned = monthlyPlanned.oct + monthlyPlanned.nov + monthlyPlanned.dec;
+
+    const q1Actual = monthlyActual.jan + monthlyActual.feb + monthlyActual.mar;
+    const q2Actual = monthlyActual.apr + monthlyActual.may + monthlyActual.jun;
+    const q3Actual = monthlyActual.jul + monthlyActual.aug + monthlyActual.sep;
+    const q4Actual = monthlyActual.oct + monthlyActual.nov + monthlyActual.dec;
+
+    return {
+      totalQty,
+      totalPlanned,
+      totalActual,
+      totalVariance,
+      burnPercent,
+      avgUnitPrice,
+      statusCounts,
+      monthlyPlanned,
+      monthlyActual,
+      quarterly: {
+        planned: { q1: q1Planned, q2: q2Planned, q3: q3Planned, q4: q4Planned },
+        actual: { q1: q1Actual, q2: q2Actual, q3: q3Actual, q4: q4Actual }
+      }
+    };
+  }, [capexItems]);
+
+  // Preview calculation for Fiscal Year Rollover card
+  const rolloverPreview = useMemo(() => {
+    let sourceCapexCount = capexItems.length;
+    let sourceOpexCount = opexItems.length;
+    let sourceCapexAmount = capexItems.reduce((sum, item) => sum + (Number(item.requested_amount) || 0), 0);
+    let sourceOpexAmount = opexItems.reduce((sum, item) => sum + (Number(item.annual_cost) || 0), 0);
+
+    if (rolloverCampus !== 'All Sites') {
+      const filteredCapex = capexItems.filter(c => c.site === rolloverCampus);
+      const filteredOpex = opexItems.filter(o => o.site === rolloverCampus);
+      sourceCapexCount = filteredCapex.length;
+      sourceOpexCount = filteredOpex.length;
+      sourceCapexAmount = filteredCapex.reduce((sum, item) => sum + (Number(item.requested_amount) || 0), 0);
+      sourceOpexAmount = filteredOpex.reduce((sum, item) => sum + (Number(item.annual_cost) || 0), 0);
+    }
+
+    const multiplier = 1 + (rolloverAdjustmentPercent / 100);
+    const targetCapexAmount = sourceCapexAmount * multiplier;
+    const targetOpexAmount = sourceOpexAmount * multiplier;
+
+    const totalItems = (rolloverCopyCapex ? sourceCapexCount : 0) + (rolloverCopyOpex ? sourceOpexCount : 0);
+    const totalTargetBudget = (rolloverCopyCapex ? targetCapexAmount : 0) + (rolloverCopyOpex ? targetOpexAmount : 0);
+
+    return {
+      sourceCapexCount,
+      sourceOpexCount,
+      sourceCapexAmount,
+      sourceOpexAmount,
+      targetCapexAmount,
+      targetOpexAmount,
+      totalItems,
+      totalTargetBudget
+    };
+  }, [capexItems, opexItems, rolloverCampus, rolloverAdjustmentPercent, rolloverCopyCapex, rolloverCopyOpex]);
+
+  // Execute Fiscal Year Planning Rollover & Copy from Sync & Template tab
+  const handleExecuteRollover = async () => {
+    if (!rolloverCopyCapex && !rolloverCopyOpex) {
+      showToast('Please select at least CapEx or OpEx/S-Operation to copy', 'error');
+      return;
+    }
+    if (rolloverSourceYear === rolloverTargetYear) {
+      showToast('Source and Target Fiscal Year cannot be the same', 'error');
+      return;
+    }
+
+    setIsRollingOver(true);
+    try {
+      const res = await fetch('/api/it-budget/clone-year', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          from_year: rolloverSourceYear,
+          to_year: rolloverTargetYear,
+          copy_capex: rolloverCopyCapex,
+          copy_opex: rolloverCopyOpex,
+          campus_filter: rolloverCampus,
+          adjustment_percent: rolloverAdjustmentPercent,
+          overwrite: rolloverOverwrite
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        showToast(
+          data.message || `Successfully rolled over FY ${rolloverSourceYear} plan into FY ${rolloverTargetYear}!`,
+          'success'
+        );
+        // Ensure new target year is in availableYears list
+        setAvailableYears(prev => Array.from(new Set([...prev, rolloverTargetYear])).sort((a, b) => a - b));
+        
+        // Auto-switch to target year as requested
+        setSelectedFiscalYear(rolloverTargetYear);
+      } else {
+        showToast(data.error || 'Failed to roll over fiscal year', 'error');
+      }
+    } catch (e: any) {
+      showToast('Error rolling over fiscal year: ' + e.message, 'error');
+    } finally {
+      setIsRollingOver(false);
     }
   };
 
@@ -990,243 +1218,531 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
         </div>
       </div>
 
-      {/* --- SUB-TAB 1: EXECUTIVE OVERVIEW (PLANNED VS ACTUAL COMMAND CENTER) --- */}
+      {/* --- SUB-TAB 1: EXECUTIVE OVERVIEW (SMART DASHBOARD FOR HEAD OF IT) --- */}
       {activeSubTab === 'overview' && (
         <div className="space-y-6">
-          {/* Top Planned vs Actual KPI Metric Cards */}
+          {/* Out-of-Budget Expense Warning Alert Banner if any unplanned items exist */}
+          {Number(summaryData?.unplannedOpexCount || 0) > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-rose-500/10 border border-amber-300 rounded-2xl shadow-xs">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="p-2.5 bg-amber-500 text-white rounded-xl shadow-xs shrink-0 mt-0.5 sm:mt-0">
+                  <AlertTriangle size={18} />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-amber-950 flex flex-wrap items-center gap-2">
+                    <span>Out-of-Budget Expense Alert:</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200/90 text-amber-900 border border-amber-300">
+                      {summaryData?.unplannedOpexCount} Unbudgeted Service{(summaryData?.unplannedOpexCount || 0) > 1 ? 's' : ''}
+                    </span>
+                    <span className="font-mono text-amber-900 font-bold">
+                      (${Number(summaryData?.totalUnplannedOpexPlanned || 0).toLocaleString()} allocated)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    Unplanned operational expenditures registered for FY {selectedFiscalYear}. Monitored for justification approval and budget audit control.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpexClassificationFilter('Unplanned');
+                  setActiveSubTab('opex');
+                }}
+                className="px-3.5 py-1.5 text-xs font-bold text-amber-950 bg-white hover:bg-amber-50 border border-amber-300 rounded-xl shadow-xs transition-colors shrink-0 self-start sm:self-auto cursor-pointer"
+              >
+                Review Unplanned &rarr;
+              </button>
+            </div>
+          )}
+
+          {/* Head of IT Command Ribbon: 4 Smart Metric Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Total Budget Card */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total FY {selectedFiscalYear} Budget</span>
-                <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
-                  <DollarSign size={16} />
-                </span>
-              </div>
-              <div className="mt-3">
-                <div className="text-2xl font-bold text-slate-900 tracking-tight">
-                  ${(summaryData?.totalFiscalBudget || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="flex items-center justify-between text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100">
-                  <span>CapEx: ${(summaryData?.totalCapexRequested || 0).toLocaleString()}</span>
-                  <span>OpEx: ${(summaryData?.totalAnnualOpex || 0).toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Realized Actuals Card */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">YTD Actual Realized</span>
-                <span className="p-2 rounded-xl bg-sky-50 text-sky-600">
-                  <TrendingUp size={16} />
-                </span>
-              </div>
-              <div className="mt-3">
-                <div className="text-2xl font-bold text-slate-900 tracking-tight">
-                  ${(summaryData?.totalFiscalActual || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="flex items-center justify-between text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100">
-                  <span>CapEx: ${(summaryData?.totalCapexActual || 0).toLocaleString()}</span>
-                  <span>OpEx: ${(summaryData?.totalAnnualOpexActual || 0).toLocaleString()}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Net Budget Variance Card */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Net Budget Variance</span>
-                <span className={`p-2 rounded-xl ${
-                  (summaryData?.totalFiscalVariance || 0) >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
-                }`}>
-                  {(summaryData?.totalFiscalVariance || 0) >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}
-                </span>
-              </div>
-              <div className="mt-3">
-                <div className={`text-2xl font-bold tracking-tight ${
-                  (summaryData?.totalFiscalVariance || 0) >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                }`}>
-                  {(summaryData?.totalFiscalVariance || 0) >= 0 ? '+' : ''}
-                  ${(summaryData?.totalFiscalVariance || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-                <div className="text-xs mt-2 pt-2 border-t border-slate-100 font-medium flex items-center justify-between">
-                  <span className={(summaryData?.totalFiscalVariance || 0) >= 0 ? 'text-emerald-700' : 'text-rose-600'}>
-                    {(summaryData?.totalFiscalVariance || 0) >= 0 ? 'Under Budget' : 'Over Budget'}
-                  </span>
-                  <span className="text-slate-500">
-                    {summaryData?.variancePercentage || '0.0'}% remaining
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Upcoming Renewals Alert Card */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">30/60-Day Renewals</span>
-                <span className="p-2 rounded-xl bg-amber-50 text-amber-600">
-                  <Clock size={16} />
-                </span>
-              </div>
-              <div className="mt-3">
-                <div className="text-2xl font-bold text-slate-900 tracking-tight">
-                  {summaryData?.upcomingRenewals?.length || 0} Contracts
-                </div>
-                <div className="text-xs text-slate-500 mt-2 pt-2 border-t border-slate-100 flex items-center justify-between">
-                  <span>Critical (&lt;30d): {summaryData?.upcomingRenewals?.filter(r => r.isCritical).length || 0}</span>
-                  <button 
-                    onClick={() => setActiveSubTab('opex')}
-                    className="text-indigo-600 font-semibold hover:underline"
-                  >
-                    View matrix &rarr;
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Cash Flow Forecast Chart: Planned vs. Actual Spend */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            {/* Card 1: Total IT Envelope & Allocation */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-indigo-300 transition-all flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-bold text-slate-900 tracking-tight">
-                  Monthly Cash Flow: Planned Budget vs. Realized Actuals
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  FY {selectedFiscalYear} monthly comparison across all IT operations and capital investments
-                </p>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total IT Portfolio Envelope</span>
+                  <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+                    <DollarSign size={16} />
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-bold text-slate-900 tracking-tight font-mono">
+                    ${(summaryData?.totalFiscalBudget || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 font-medium">
+                    <span>Execution:</span>
+                    <span className="font-bold text-indigo-700 font-mono">
+                      ${(summaryData?.totalFiscalActual || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      ({Math.round(((summaryData?.totalFiscalActual || 0) / (summaryData?.totalFiscalBudget || 1)) * 100)}% Realized)
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-4 text-xs font-medium text-slate-600">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-sm bg-indigo-500"></span>
-                  <span>Planned Budget</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="w-3 h-3 rounded-sm bg-emerald-500"></span>
-                  <span>Actual Spend</span>
-                </div>
+              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                  CapEx: ${(summaryData?.totalCapexRequested || 0).toLocaleString()}
+                </span>
+                <span className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-sky-500"></span>
+                  S-OpEx: ${(summaryData?.totalAnnualOpex || 0).toLocaleString()}
+                </span>
               </div>
             </div>
 
-            <div className="h-72 w-full">
-              {summaryData?.cashFlowChartData && summaryData.cashFlowChartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={summaryData.cashFlowChartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} />
-                    <YAxis 
-                      tick={{ fontSize: 11, fill: '#64748b' }} 
-                      axisLine={{ stroke: '#e2e8f0' }}
-                      tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} 
-                    />
-                    <RechartsTooltip 
-                      formatter={(value: any, name: any) => [
-                        `$${Number(value).toLocaleString()}`, 
-                        name === 'planned_total' ? 'Planned Total' : name === 'actual_total' ? 'Actual Realized' : name
-                      ]}
-                      contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '12px' }}
-                    />
-                    <Bar dataKey="planned_total" name="planned_total" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="actual_total" name="actual_total" fill="#10b981" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-                  No monthly cash flow data available
+            {/* Card 2: CapEx Strategic Projects & Execution */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-emerald-300 transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">CapEx Delivery Pipeline</span>
+                  <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+                    <Layers size={16} />
+                  </span>
                 </div>
-              )}
+                <div className="mt-3">
+                  <div className="text-2xl font-bold text-emerald-950 tracking-tight font-mono">
+                    {capexItems.length} <span className="text-sm font-semibold text-slate-500">Projects</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 font-medium">
+                    <span>Approved Allocation:</span>
+                    <span className="font-bold text-emerald-700 font-mono">
+                      ${(summaryData?.totalCapexRequested || 0).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                  <CheckCircle2 size={12} className="text-emerald-500" />
+                  {capexStatusCounts.approved} Approved · {capexStatusCounts.inProgress} In-Flight
+                </span>
+                <button 
+                  onClick={() => setActiveSubTab('capex')}
+                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                >
+                  Planner &rarr;
+                </button>
+              </div>
+            </div>
+
+            {/* Card 3: S-Operation Run-Rate & Monthly Burn */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-sky-300 transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">S-OpEx Run-Rate / Burn</span>
+                  <span className="p-2 rounded-xl bg-sky-50 text-sky-600">
+                    <TrendingUp size={16} />
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-bold text-sky-950 tracking-tight font-mono">
+                    ${Math.round((summaryData?.totalAnnualOpex || 0) / 12).toLocaleString()} <span className="text-sm font-semibold text-slate-500">/ mo</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 font-medium">
+                    <span>Active Contracts:</span>
+                    <span className="font-bold text-slate-800">{opexItems.length} Service SLAs</span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                <span className={`font-semibold ${
+                  (summaryData?.totalAnnualOpexVariance || 0) >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                }`}>
+                  {(summaryData?.totalAnnualOpexVariance || 0) >= 0 ? '+' : ''}${(summaryData?.totalAnnualOpexVariance || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} Variance
+                </span>
+                <button 
+                  onClick={() => setActiveSubTab('opex')}
+                  className="text-xs font-semibold text-sky-600 hover:text-sky-800"
+                >
+                  Contracts &rarr;
+                </button>
+              </div>
+            </div>
+
+            {/* Card 4: IT Governance & Financial Guardrails */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-amber-300 transition-all flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Governance & Guardrails</span>
+                  <span className="p-2 rounded-xl bg-amber-50 text-amber-600">
+                    <ShieldCheck size={16} />
+                  </span>
+                </div>
+                <div className="mt-3">
+                  <div className="text-2xl font-bold text-amber-950 tracking-tight font-mono">
+                    {summaryData?.upcomingRenewals?.length || 0} <span className="text-sm font-semibold text-slate-500">Renewals Due</span>
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 font-medium">
+                    <span>Critical (&lt;30d):</span>
+                    <span className="font-bold text-rose-600">
+                      {summaryData?.upcomingRenewals?.filter(r => r.isCritical).length || 0} Urgent
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span>Unbudgeted:</span>
+                    <span className="font-bold text-amber-700">
+                      {summaryData?.unplannedOpexCount || 0}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-emerald-700 font-semibold">
+                <span className="flex items-center gap-1">
+                  <CheckCircle2 size={12} className="text-emerald-500" />
+                  Audit Ready Policy
+                </span>
+                <span className="text-slate-400 font-normal">Next 60 Days</span>
+              </div>
             </div>
           </div>
 
-          {/* Campus Variance & Renewals Grid */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Campus Budget Performance Table */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-900 tracking-tight mb-4 flex items-center gap-2">
-                <Building2 size={16} className="text-indigo-600" />
-                Budget vs. Actual by Khema Campus
-              </h3>
+          {/* Smart Visual Analytics: Monthly Velocity & Strategic Domain Allocation */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Column (7 Cols): Cash Flow Velocity & Monthly Runway */}
+            <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 mb-4">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                      <BarChart3 size={16} className="text-indigo-600" />
+                      <span>Monthly Cash Flow Velocity: CapEx vs S-OpEx vs Actuals</span>
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Planned capital disbursements and recurring monthly operational burn across FY {selectedFiscalYear}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] font-medium text-slate-600 shrink-0">
+                    <div className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-indigo-600"></span>
+                      <span>CapEx</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-sky-400"></span>
+                      <span>S-OpEx</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500"></span>
+                      <span>Actual Spend</span>
+                    </div>
+                  </div>
+                </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-slate-400 uppercase font-semibold">
-                      <th className="pb-2.5">Campus</th>
-                      <th className="pb-2.5 text-right">Planned ($)</th>
-                      <th className="pb-2.5 text-right">Actual ($)</th>
-                      <th className="pb-2.5 text-right">Variance ($)</th>
-                      <th className="pb-2.5 text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {summaryData?.totalBySite && Object.entries(summaryData.totalBySite).map(([siteKey, vals]) => {
-                      const isUnder = vals.variance >= 0;
-                      return (
-                        <tr key={siteKey} className="hover:bg-slate-50/60 transition-colors">
-                          <td className="py-2.5 font-bold text-slate-800">{siteKey}</td>
-                          <td className="py-2.5 text-right text-slate-600 font-medium">
-                            ${vals.planned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-2.5 text-right text-slate-900 font-semibold">
-                            ${vals.actual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className={`py-2.5 text-right font-bold ${isUnder ? 'text-emerald-700' : 'text-rose-600'}`}>
-                            {isUnder ? '+' : ''}${vals.variance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-2.5 text-right">
-                            <span className={`text-[11px] font-semibold ${isUnder ? 'text-emerald-700' : 'text-rose-600'}`}>
-                              {isUnder ? 'Under budget' : 'Over budget'}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                <div className="h-72 w-full">
+                  {summaryData?.cashFlowChartData && summaryData.cashFlowChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={summaryData.cashFlowChartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} />
+                        <YAxis 
+                          tick={{ fontSize: 11, fill: '#64748b' }} 
+                          axisLine={{ stroke: '#e2e8f0' }}
+                          tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} 
+                        />
+                        <RechartsTooltip 
+                          formatter={(value: any, name: any) => [
+                            `$${Number(value).toLocaleString()}`, 
+                            name === 'planned_capex' ? 'Planned CapEx' : name === 'planned_opex' ? 'Planned S-OpEx' : name === 'actual_total' ? 'Actual Disbursed' : name
+                          ]}
+                          contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '12px' }}
+                        />
+                        <Bar dataKey="planned_capex" name="planned_capex" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="planned_opex" name="planned_opex" fill="#38bdf8" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="actual_total" name="actual_total" fill="#10b981" radius={[3, 3, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-slate-400 text-sm">
+                      No monthly cash flow data available
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 mt-2">
+                <span>Average Monthly Burn: <strong className="text-slate-800 font-mono">${Math.round((summaryData?.totalFiscalBudget || 0) / 12).toLocaleString()}</strong></span>
+                <span className="text-emerald-700 font-medium">Predictable Cash Outflow Guaranteed</span>
               </div>
             </div>
 
-            {/* Upcoming Renewals Panel */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-900 tracking-tight mb-4 flex items-center justify-between">
-                <span className="flex items-center gap-2">
-                  <Clock size={16} className="text-amber-600" />
-                  Upcoming License & Contract Renewals
-                </span>
-                <span className="text-xs text-slate-400 font-normal">Next 60 Days</span>
-              </h3>
+            {/* Right Column (5 Cols): Strategic Spend Allocation Donut */}
+            <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+                  <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                    <PieChartIcon size={16} className="text-indigo-600" />
+                    <span>Strategic IT Spend Allocation</span>
+                  </h3>
+                  <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-mono">
+                    FY {selectedFiscalYear}
+                  </span>
+                </div>
 
-              <div className="space-y-2.5">
-                {summaryData?.upcomingRenewals && summaryData.upcomingRenewals.length > 0 ? (
-                  summaryData.upcomingRenewals.map((r) => (
-                    <div 
-                      key={r.id} 
-                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs transition-colors ${
-                        r.isCritical 
-                          ? 'bg-rose-50/60 border-rose-200/80 text-rose-900' 
-                          : 'bg-amber-50/40 border-amber-200/60 text-slate-800'
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <div className="font-bold truncate text-slate-900">{r.description}</div>
-                        <div className="text-[11px] text-slate-500 mt-0.5">
-                          {r.site} · {r.account_code} · Due {r.renewal_date ? new Date(r.renewal_date).toLocaleDateString() : 'N/A'}
-                        </div>
+                <div className="relative h-56 w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={strategicDomainData.length > 0 ? strategicDomainData : [{ name: 'IT Portfolio', value: 100, color: '#6366f1' }]}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={62}
+                        outerRadius={88}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {strategicDomainData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} stroke="#ffffff" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip 
+                        contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }} 
+                        formatter={(val: any, name: any) => [`$${Number(val).toLocaleString()}`, name]}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {/* Donut Center Display */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-2xl font-bold text-slate-900 font-mono">
+                      ${Math.round((summaryData?.totalFiscalBudget || 0) / 1000)}k
+                    </span>
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                      IT Envelope
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Strategic Breakdown List */}
+              <div className="space-y-1.5 pt-3 border-t border-slate-100 max-h-36 overflow-y-auto pr-1">
+                {strategicDomainData.slice(0, 5).map(domain => {
+                  const pct = Math.round((domain.value / ((summaryData?.totalFiscalBudget || 1))) * 100);
+                  return (
+                    <div key={domain.name} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: domain.color }}></span>
+                        <span className="text-slate-700 truncate">{domain.name}</span>
                       </div>
-                      <div className="text-right shrink-0">
-                        <div className="font-bold text-slate-900">${Number(r.annual_cost).toLocaleString()}</div>
-                        <span className={`text-[11px] font-semibold ${r.isCritical ? 'text-rose-600 font-bold' : 'text-amber-700'}`}>
-                          {r.daysRemaining} days left
-                        </span>
+                      <div className="flex items-center gap-2 font-mono shrink-0">
+                        <span className="font-bold text-slate-900">${domain.value.toLocaleString()}</span>
+                        <span className="text-[10px] text-slate-400 w-7 text-right">{pct}%</span>
                       </div>
                     </div>
-                  ))
-                ) : (
-                  <div className="text-center py-8 text-slate-400 text-xs">
-                    No critical contract renewals in the next 60 days
-                  </div>
-                )}
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Campus Budget & Operational Health Matrix */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 mb-4">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                  <Building2 size={16} className="text-indigo-600" />
+                  <span>Campus IT Investment & Performance Matrix (Multi-Site Command)</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  CapEx and S-Operation allocation, realized actuals, and variance performance across Khema campuses
+                </p>
+              </div>
+              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200/60">
+                4 Active Hospital Sites
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50/70 text-slate-600 font-semibold border-b border-slate-200/70">
+                  <tr>
+                    <th className="py-2.5 px-3">Campus / Site</th>
+                    <th className="py-2.5 px-3 text-right">CapEx Budget ($)</th>
+                    <th className="py-2.5 px-3 text-right">S-OpEx Budget ($)</th>
+                    <th className="py-2.5 px-3 text-right">Total Planned ($)</th>
+                    <th className="py-2.5 px-3 text-right">Realized Actual ($)</th>
+                    <th className="py-2.5 px-3 text-right">Net Variance ($)</th>
+                    <th className="py-2.5 px-3 text-right">Health Status</th>
+                    <th className="py-2.5 px-3 text-center">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium">
+                  {summaryData?.totalBySite && Object.entries(summaryData.totalBySite).map(([siteKey, vals]) => {
+                    const isUnder = vals.variance >= 0;
+                    const executionPct = vals.planned > 0 ? Math.round((vals.actual / vals.planned) * 100) : 0;
+                    return (
+                      <tr key={siteKey} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3 px-3 font-semibold text-slate-900 flex items-center gap-2">
+                          <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+                          <span>{siteKey}</span>
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-slate-700">
+                          ${(vals.capex_planned || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-slate-700">
+                          ${(vals.opex_planned || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">
+                          ${vals.planned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-semibold text-indigo-900">
+                          ${vals.actual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className={`py-3 px-3 text-right font-mono font-bold ${isUnder ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {isUnder ? '+' : ''}${vals.variance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            isUnder ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+                          }`}>
+                            {isUnder ? <CheckCircle2 size={10} className="text-emerald-600" /> : <AlertTriangle size={10} className="text-rose-600" />}
+                            {isUnder ? 'Under Budget' : 'Over Budget'} ({executionPct}%)
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedSite(siteKey);
+                              setActiveSubTab('opex');
+                            }}
+                            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                          >
+                            Inspect &rarr;
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Action & Priority Decision Radar (2-Column Grid) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Left: Strategic CapEx Project Pipeline in Flight */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                  <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                    <Layers size={16} className="text-emerald-600" />
+                    <span>CapEx Strategic Projects in Flight</span>
+                  </h3>
+                  <button 
+                    onClick={() => setActiveSubTab('capex')}
+                    className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                  >
+                    View All {capexItems.length} &rarr;
+                  </button>
+                </div>
+
+                <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                  {capexItems.length > 0 ? (
+                    capexItems.slice(0, 5).map((project) => (
+                      <div 
+                        key={project.id}
+                        className="p-3 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-white hover:border-slate-300 transition-all flex items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 font-bold text-slate-900 truncate">
+                            <span className="font-mono text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px] border border-indigo-200/70">
+                              {project.capex_code || `CPX-${project.item_no}`}
+                            </span>
+                            <span className="truncate">{project.description}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2">
+                            <span>{project.site}</span>
+                            <span>·</span>
+                            <span className="text-slate-600 font-medium">{project.asset_type}</span>
+                            <span>·</span>
+                            <span>Qty: {project.qty}</span>
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-bold text-slate-900 font-mono">
+                            ${Number(project.requested_amount).toLocaleString()}
+                          </div>
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold mt-1 ${
+                            project.status === 'Completed' ? 'bg-emerald-100 text-emerald-800' :
+                            project.status === 'In Progress' ? 'bg-sky-100 text-sky-800' :
+                            project.status === 'Approved' ? 'bg-indigo-100 text-indigo-800' :
+                            'bg-slate-200 text-slate-700'
+                          }`}>
+                            {project.status}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="py-8 text-center text-slate-400 text-xs">No CapEx projects registered for FY {selectedFiscalYear}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 mt-2">
+                <span>Infrastructure & Hardware Investments</span>
+                <span className="text-indigo-600 font-semibold cursor-pointer" onClick={() => setActiveSubTab('capex')}>
+                  Open CapEx Planner &rarr;
+                </span>
+              </div>
+            </div>
+
+            {/* Right: 60-Day Contract & License Renewal Decision Radar */}
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                  <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
+                    <Clock size={16} className="text-amber-600" />
+                    <span>Contract & License Renewal Decision Radar</span>
+                  </h3>
+                  <span className="text-xs text-slate-400 font-normal">Next 60 Days</span>
+                </div>
+
+                <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                  {summaryData?.upcomingRenewals && summaryData.upcomingRenewals.length > 0 ? (
+                    summaryData.upcomingRenewals.map((r) => (
+                      <div 
+                        key={r.id} 
+                        className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs transition-colors ${
+                          r.isCritical 
+                            ? 'bg-rose-50/60 border-rose-200/80 text-rose-900' 
+                            : 'bg-amber-50/40 border-amber-200/60 text-slate-800'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="font-bold truncate text-slate-900">{r.description}</div>
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {r.site} · {r.account_code} · Due {r.renewal_date ? new Date(r.renewal_date).toLocaleDateString() : 'N/A'}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <div className="font-bold text-slate-900 font-mono">${Number(r.annual_cost).toLocaleString()}</div>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold mt-1 inline-block ${
+                            r.isCritical ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {r.daysRemaining} days left
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-slate-400 text-xs">
+                      No critical contract renewals in the next 60 days
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 mt-2">
+                <span>Vendor SLA & Licensing Guardrails</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('opex')}
+                  className="text-indigo-600 font-semibold hover:underline"
+                >
+                  Manage S-Operation &rarr;
+                </button>
               </div>
             </div>
           </div>
@@ -1323,7 +1839,16 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {capexItems.map((item, idx) => {
+                  {capexItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={12} className="py-12 text-center text-slate-400">
+                        <Layers size={28} className="mx-auto mb-2 text-slate-300" />
+                        <p className="font-medium text-slate-600 text-xs">No CapEx items found for the selected criteria</p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">Try adjusting your filters, searching another keyword, or click "+ Add CapEx Item".</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    capexItems.map((item, idx) => {
                     const isExpanded = expandedCapexId === item.id;
                     const totalActual = MONTH_KEYS.reduce((acc, m) => acc + (item.monthly_spending?.[m]?.actual || 0), 0);
                     const totalPlanned = Number(item.requested_amount) || 0;
@@ -1535,8 +2060,210 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
                         )}
                       </React.Fragment>
                     );
-                  })}
+                  })
+                )}
                 </tbody>
+                {capexItems.length > 0 && (
+                  <tfoot className="border-t-2 border-indigo-200 bg-slate-50/95 sticky bottom-0 z-10 shadow-xs backdrop-blur-xs">
+                    {/* Primary Total Row */}
+                    <tr className="border-b border-indigo-100 text-slate-900 font-bold">
+                      <td className="py-3.5 px-3 text-center text-indigo-700 bg-indigo-50/50">
+                        <Calculator size={14} className="mx-auto text-indigo-600" />
+                      </td>
+                      <td className="py-3.5 px-3">
+                        <div className="font-extrabold text-slate-900 text-xs tracking-tight flex items-center gap-1.5">
+                          <span>Total CapEx Portfolio</span>
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 font-mono">
+                            {capexItems.length} {capexItems.length === 1 ? 'item' : 'items'}
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">
+                          Fiscal Year {selectedFiscalYear} · {selectedSite === 'All Sites' ? 'All Campuses' : selectedSite}
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-3 text-slate-500 font-medium text-[11px]">
+                        {new Set(capexItems.map(c => c.asset_type)).size} types
+                      </td>
+                      <td className="py-3.5 px-3 font-semibold text-slate-700 text-[11px]">
+                        {selectedSite === 'All Sites' ? 'All Campuses' : selectedSite}
+                      </td>
+                      <td className="py-3.5 px-3 text-center font-extrabold text-slate-900 font-mono text-xs">
+                        {capexTotals.totalQty}
+                      </td>
+                      <td className="py-3.5 px-3 text-right font-medium text-slate-500 font-mono text-[11px]" title="Weighted average unit price">
+                        {capexTotals.avgUnitPrice > 0 ? `~$${capexTotals.avgUnitPrice.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}/ea` : '—'}
+                      </td>
+                      <td className="py-3.5 px-3 text-right text-indigo-700 font-extrabold font-mono text-xs">
+                        ${capexTotals.totalPlanned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                      <td className="py-3.5 px-3 text-right text-slate-900 font-extrabold font-mono text-xs">
+                        <div>${capexTotals.totalActual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                        <div className="text-[9px] font-semibold text-slate-500 font-mono">
+                          {capexTotals.burnPercent.toFixed(1)}% spent
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-3 text-right font-extrabold font-mono text-xs">
+                        <div className={capexTotals.totalVariance >= 0 ? 'text-emerald-700' : 'text-rose-600'}>
+                          {capexTotals.totalVariance >= 0 ? '+' : ''}${capexTotals.totalVariance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div className={`text-[9px] font-semibold ${capexTotals.totalVariance >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                          {capexTotals.totalVariance >= 0 ? 'Under Budget' : 'Over Budget'}
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-3">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            {capexTotals.statusCounts['Approved'] || 0} Appr
+                          </span>
+                          {(capexTotals.statusCounts['In Progress'] || 0) > 0 && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                              {capexTotals.statusCounts['In Progress']} In Prog
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3.5 px-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setShowPortfolioPhasingTotal(!showPortfolioPhasingTotal)}
+                          className="text-xs font-bold text-indigo-700 hover:text-indigo-900 flex items-center justify-center gap-1 mx-auto bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors shadow-2xs cursor-pointer"
+                          title="Toggle 12-Month Portfolio Phasing Totals"
+                        >
+                          <span>{showPortfolioPhasingTotal ? 'Hide 12-Mo' : '12-Mo Total'}</span>
+                          {showPortfolioPhasingTotal ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                        </button>
+                      </td>
+                      <td className="py-3.5 px-3 text-right">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total</span>
+                      </td>
+                    </tr>
+
+                    {/* Expandable 12-Month & Quarterly Rollup for Total Portfolio */}
+                    {showPortfolioPhasingTotal && (
+                      <tr className="bg-indigo-50/70 border-t border-indigo-200">
+                        <td colSpan={12} className="p-4">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
+                                <Layers size={14} className="text-indigo-600" />
+                                <span>Full CapEx Portfolio 12-Month & Quarterly Financial Rollup</span>
+                                <span className="text-[11px] text-indigo-700 font-semibold bg-indigo-100/80 px-2 py-0.5 rounded-full">
+                                  FY {selectedFiscalYear} ({capexItems.length} Items Aggregated)
+                                </span>
+                              </div>
+                              <div className="text-xs text-slate-600 font-medium">
+                                Overall Execution Rate: <span className="font-bold font-mono text-indigo-800">{capexTotals.burnPercent.toFixed(1)}%</span>
+                              </div>
+                            </div>
+
+                            <div className="overflow-x-auto bg-white rounded-xl border border-indigo-100 p-3 shadow-xs">
+                              <table className="w-full text-center text-xs">
+                                <thead>
+                                  <tr className="text-slate-500 font-semibold border-b border-slate-100">
+                                    <th className="py-1 px-2 text-left w-24">Row</th>
+                                    {MONTH_LABELS.map(m => (
+                                      <th key={m} className="py-1 px-1.5 font-bold text-slate-700">{m}</th>
+                                    ))}
+                                    <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q1</th>
+                                    <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q2</th>
+                                    <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q3</th>
+                                    <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q4</th>
+                                    <th className="py-1 px-2 bg-indigo-50 font-bold text-indigo-900">Annual Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {/* Total Planned Row */}
+                                  <tr>
+                                    <td className="py-1.5 px-2 text-left font-bold text-indigo-700">Total Planned ($)</td>
+                                    {MONTH_KEYS.map(m => (
+                                      <td key={m} className="py-1 px-1 font-mono font-semibold text-indigo-900 text-[11px]">
+                                        ${capexTotals.monthlyPlanned[m].toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                      </td>
+                                    ))}
+                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
+                                      ${capexTotals.quarterly.planned.q1.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
+                                      ${capexTotals.quarterly.planned.q2.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
+                                      ${capexTotals.quarterly.planned.q3.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
+                                      ${capexTotals.quarterly.planned.q4.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="py-1.5 px-2 bg-indigo-50 font-mono font-extrabold text-indigo-900">
+                                      ${capexTotals.totalPlanned.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                  </tr>
+
+                                  {/* Total Actual Row */}
+                                  <tr>
+                                    <td className="py-1.5 px-2 text-left font-bold text-emerald-700">Total Actual ($)</td>
+                                    {MONTH_KEYS.map(m => (
+                                      <td key={m} className="py-1 px-1 font-mono font-semibold text-slate-800 text-[11px]">
+                                        ${capexTotals.monthlyActual[m].toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                      </td>
+                                    ))}
+                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
+                                      ${capexTotals.quarterly.actual.q1.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
+                                      ${capexTotals.quarterly.actual.q2.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
+                                      ${capexTotals.quarterly.actual.q3.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
+                                      ${capexTotals.quarterly.actual.q4.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                    <td className="py-1.5 px-2 bg-indigo-50 font-mono font-extrabold text-slate-900">
+                                      ${capexTotals.totalActual.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                  </tr>
+
+                                  {/* Total Variance Row */}
+                                  <tr className="bg-slate-50/50">
+                                    <td className="py-1.5 px-2 text-left font-bold text-slate-800">Net Variance ($)</td>
+                                    {MONTH_KEYS.map(m => {
+                                      const p = capexTotals.monthlyPlanned[m];
+                                      const a = capexTotals.monthlyActual[m];
+                                      const diff = p - a;
+                                      return (
+                                        <td key={m} className={`py-1 px-1 font-mono text-[11px] font-bold ${
+                                          diff >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                                        }`}>
+                                          {diff !== 0 ? (diff > 0 ? `+${diff.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : diff.toLocaleString(undefined, { maximumFractionDigits: 0 })) : '—'}
+                                        </td>
+                                      );
+                                    })}
+                                    {(['q1', 'q2', 'q3', 'q4'] as const).map((qKey) => {
+                                      const p = capexTotals.quarterly.planned[qKey];
+                                      const a = capexTotals.quarterly.actual[qKey];
+                                      const diff = p - a;
+                                      return (
+                                        <td key={qKey} className={`py-1.5 px-2 font-mono font-bold ${
+                                          diff >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                                        }`}>
+                                          {diff >= 0 ? '+' : ''}${diff.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                        </td>
+                                      );
+                                    })}
+                                    <td className={`py-1.5 px-2 font-mono font-extrabold ${
+                                      capexTotals.totalVariance >= 0 ? 'text-emerald-700' : 'text-rose-600'
+                                    }`}>
+                                      {capexTotals.totalVariance >= 0 ? '+' : ''}${capexTotals.totalVariance.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tfoot>
+                )}
               </table>
             </div>
           </div>
@@ -1587,6 +2314,21 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
                   <option key={a.id || a.code} value={a.code}>{a.code}</option>
                 ))}
               </select>
+
+              {/* Budget Classification Filter */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+                <Tag size={13} className="text-slate-400 shrink-0" />
+                <select
+                  value={opexClassificationFilter}
+                  onChange={(e) => setOpexClassificationFilter(e.target.value as any)}
+                  className="text-xs bg-transparent font-semibold text-slate-700 focus:outline-none cursor-pointer"
+                  title="Filter by Budget Classification"
+                >
+                  <option value="All">All Classifications</option>
+                  <option value="Planned">Planned Baseline Only</option>
+                  <option value="Unplanned">Out-of-Budget (Unplanned)</option>
+                </select>
+              </div>
 
               {/* View Mode Toggle */}
               <div className="inline-flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
@@ -1666,8 +2408,22 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
                               {idx + 1}
                             </td>
                             <td className="py-2 px-3" rowSpan={viewMode === 'side-by-side' ? 3 : 1}>
-                              <div className="font-bold text-slate-900">{item.description}</div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="font-bold text-slate-900">{item.description}</span>
+                                {item.budget_classification === 'Unplanned' && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shrink-0 shadow-2xs" title={`Unplanned root cause: ${item.unplanned_reason || 'Out-of-Budget'}`}>
+                                    <AlertTriangle size={10} className="text-amber-600" />
+                                    Out-of-Budget
+                                  </span>
+                                )}
+                              </div>
                               <div className="text-[11px] text-slate-400 truncate max-w-xs">{item.account_code}</div>
+                              {item.budget_classification === 'Unplanned' && item.unplanned_reason && (
+                                <div className="text-[10px] text-amber-800 font-medium truncate max-w-xs mt-0.5 flex items-center gap-1">
+                                  <span className="font-semibold text-amber-900">Reason:</span> {item.unplanned_reason}
+                                  {item.approval_ref && <span className="text-slate-500 font-mono text-[9px] bg-slate-100 px-1 py-0.2 rounded border border-slate-200">[{item.approval_ref}]</span>}
+                                </div>
+                              )}
                               {item.renewal_date && (
                                 <div className="text-[10px] text-amber-600 font-medium mt-0.5">
                                   Renews: {new Date(item.renewal_date).toLocaleDateString()}
@@ -1868,6 +2624,219 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
       {/* --- SUB-TAB 4: SYNC & TEMPLATE TOOLS (RESET TEMPLATE & MASTER ACCOUNT CODES CONFIGURATION) --- */}
       {activeSubTab === 'sync' && (
         <div className="space-y-6">
+          {/* SECTION 1: DEDICATED FISCAL YEAR PLANNING ROLLOVER & COPY SETTING CARD */}
+          <div className="bg-white rounded-2xl border-2 border-indigo-200/90 p-6 shadow-sm space-y-6 relative overflow-hidden">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 border border-indigo-100 shadow-2xs">
+                  <Copy size={22} className="text-indigo-600" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">
+                      Copy & Roll Over IT CapEx & S-Operation Planning
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                      Annual Budget Rollover
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
+                    Instantly copy your planned CapEx investments and OpEx/S-Operation recurring contracts into future fiscal years. Planned monthly numbers are retained with optional inflation scaling, and all actual spending is reset to <strong>$0.00</strong> so you start next year with a clean execution slate.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 self-start lg:self-auto">
+                <span className="text-xs text-slate-500">Current Active View:</span>
+                <span className="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-800 font-mono font-bold text-xs border border-slate-200">
+                  FY {selectedFiscalYear}
+                </span>
+              </div>
+            </div>
+
+            {/* Source & Destination Selectors */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Source Fiscal Year (Copy Plan From)
+                </label>
+                <select
+                  value={rolloverSourceYear}
+                  onChange={(e) => setRolloverSourceYear(parseInt(e.target.value, 10))}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-2xs"
+                >
+                  {availableYears.map(yr => (
+                    <option key={yr} value={yr}>
+                      FY {yr} {yr === selectedFiscalYear ? '(Currently Selected)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <div className="flex items-center gap-2 mt-1.5 text-[11px] text-slate-500">
+                  <span>Available lines in FY {rolloverSourceYear}: <strong>{rolloverPreview.sourceCapexCount}</strong> CapEx · <strong>{rolloverPreview.sourceOpexCount}</strong> OpEx</span>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-bold text-slate-700">
+                    Target Fiscal Year (Roll Plan Into)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setRolloverTargetYear(rolloverSourceYear + 1)}
+                    className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                  >
+                    Quick Next FY (+1 Year)
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="2020"
+                    max="2040"
+                    value={rolloverTargetYear}
+                    onChange={(e) => setRolloverTargetYear(parseInt(e.target.value, 10) || (rolloverSourceYear + 1))}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-2xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setRolloverTargetYear(prev => prev + 1)}
+                    className="px-3 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold shrink-0 transition-colors shadow-2xs"
+                    title="Increment 1 Year"
+                  >
+                    +1 Y
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Destination fiscal year where the cloned budget ledger will be prepared.
+                </p>
+              </div>
+            </div>
+
+            {/* Scope & Adjustment Controls */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+              {/* Checkboxes */}
+              <div className="space-y-2">
+                <label className="text-xs font-bold text-slate-700 block">
+                  Components to Roll Over
+                </label>
+                <label className="flex items-center gap-2.5 text-xs font-medium text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={rolloverCopyCapex}
+                    onChange={(e) => setRolloverCopyCapex(e.target.checked)}
+                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                  />
+                  <span>CapEx Projects ({rolloverPreview.sourceCapexCount} items)</span>
+                </label>
+                <label className="flex items-center gap-2.5 text-xs font-medium text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={rolloverCopyOpex}
+                    onChange={(e) => setRolloverCopyOpex(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                  />
+                  <span>OpEx & S-Operation ({rolloverPreview.sourceOpexCount} items)</span>
+                </label>
+              </div>
+
+              {/* Campus Scope */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Campus Scope
+                </label>
+                <select
+                  value={rolloverCampus}
+                  onChange={(e) => setRolloverCampus(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none"
+                >
+                  <option value="All Sites">All Campuses (K1, K2, KG, Sakal)</option>
+                  {SITES.filter(s => s !== 'All Sites').map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">Copy lines for all branches or isolate one campus.</p>
+              </div>
+
+              {/* Budget Scaling / Inflation */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  Budget Scaling / Inflation Factor
+                </label>
+                <select
+                  value={rolloverAdjustmentPercent}
+                  onChange={(e) => setRolloverAdjustmentPercent(parseFloat(e.target.value) || 0)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none"
+                >
+                  <option value="0">+0% (Exact Identical Planned Budget)</option>
+                  <option value="3">+3% Annual Escalation</option>
+                  <option value="5">+5% General Inflation / CPI Index</option>
+                  <option value="8">+8% Vendor SLA Rate Increase</option>
+                  <option value="10">+10% Growth & Capacity Buffer</option>
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">Multiplies planned monthly figures and unit prices.</p>
+              </div>
+            </div>
+
+            {/* Clean Slate & Overwrite Guard */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-xs">
+              <div className="flex items-center gap-2 text-emerald-900">
+                <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+                <span>
+                  <strong>Clean Execution Slate:</strong> Historical actual disbursements will not carry over; all months in FY {rolloverTargetYear} will start cleanly at <strong>$0.00</strong>.
+                </span>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-semibold shrink-0">
+                <input
+                  type="checkbox"
+                  checked={rolloverOverwrite}
+                  onChange={(e) => setRolloverOverwrite(e.target.checked)}
+                  className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500"
+                />
+                <span className="text-rose-700 text-[11px]">Overwrite if FY {rolloverTargetYear} already exists</span>
+              </label>
+            </div>
+
+            {/* Live Preview & Action Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-slate-100">
+              <div className="flex flex-wrap items-center gap-3 sm:gap-5 text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400">Lines to Clone:</span>
+                  <span className="font-bold text-slate-900 font-mono text-sm">{rolloverPreview.totalItems} items</span>
+                </div>
+                <span className="text-slate-200 hidden sm:inline">|</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-400">Target Budget:</span>
+                  <span className="font-bold text-indigo-700 font-mono text-sm">
+                    ${rolloverPreview.totalTargetBudget.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <span className="text-slate-200 hidden sm:inline">|</span>
+                <div className="flex items-center gap-1.5 text-slate-500 text-[11px]">
+                  <span>Destination: <strong>FY {rolloverTargetYear}</strong></span>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleExecuteRollover}
+                disabled={isRollingOver || rolloverPreview.totalItems === 0 || rolloverSourceYear === rolloverTargetYear}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold py-2.5 px-5 shadow-sm inline-flex items-center gap-2 shrink-0 transition-all hover:shadow disabled:opacity-50"
+              >
+                {isRollingOver ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>Copying Plan into FY {rolloverTargetYear}...</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} />
+                    <span>Clone & Roll Over to FY {rolloverTargetYear}</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
           {/* Top 2 Cards: Excel Spreadsheet Export & Sync */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
@@ -2895,6 +3864,11 @@ const OpexEditModal: React.FC<OpexModalProps> = ({
   const [qty, setQty] = useState(item?.qty || 1);
   const [unitPrice, setUnitPrice] = useState(item?.unit_price || 0);
   const [justification, setJustification] = useState(item?.justification || '');
+  const [budgetClassification, setBudgetClassification] = useState<'Planned' | 'Unplanned'>(
+    (item?.budget_classification as any) || 'Planned'
+  );
+  const [unplannedReason, setUnplannedReason] = useState(item?.unplanned_reason || '');
+  const [approvalRef, setApprovalRef] = useState(item?.approval_ref || '');
   const [autoSmartSpread, setAutoSmartSpread] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -2990,6 +3964,9 @@ const OpexEditModal: React.FC<OpexModalProps> = ({
           qty: Number(qty),
           unit_price: Number(unitPrice),
           justification: justification.trim(),
+          budget_classification: budgetClassification,
+          unplanned_reason: budgetClassification === 'Unplanned' ? unplannedReason.trim() : '',
+          approval_ref: budgetClassification === 'Unplanned' ? approvalRef.trim() : '',
           autoSmartSpread,
           monthly_spending: monthlySpending
         })
@@ -3022,16 +3999,120 @@ const OpexEditModal: React.FC<OpexModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          <div>
-            <label className="font-semibold text-slate-700">Service Description *</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. eHospital Annual Maintenance Fee, MOS/BOS Printer Rental"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium"
-            />
+          {/* FOCUSED ELEMENT (form > div:nth-of-type(1)): Budget Classification & Expense Governance Card */}
+          <div className={`p-4 rounded-2xl border transition-all duration-200 space-y-3 ${
+            budgetClassification === 'Unplanned'
+              ? 'bg-gradient-to-br from-amber-50/80 via-white to-rose-50/40 border-amber-300 shadow-sm ring-2 ring-amber-400/20'
+              : 'bg-gradient-to-br from-slate-50/90 via-white to-emerald-50/30 border-slate-200 shadow-xs'
+          }`}>
+            {/* Header: Classification Mode Selector */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-200/70">
+              <div>
+                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+                  Budget Governance & Expense Control
+                </span>
+                <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5 mt-0.5">
+                  Classification:
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    budgetClassification === 'Unplanned'
+                      ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                  }`}>
+                    {budgetClassification === 'Unplanned' ? '⚡ Out-of-Budget / Unplanned' : '✓ Planned Baseline'}
+                  </span>
+                </span>
+              </div>
+
+              {/* Segmented Control Buttons */}
+              <div className="inline-flex items-center p-1 bg-slate-100/90 rounded-xl border border-slate-200/90 gap-1 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setBudgetClassification('Planned')}
+                  className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 ${
+                    budgetClassification === 'Planned'
+                      ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-slate-200/80'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${budgetClassification === 'Planned' ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                  Planned Budget
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setBudgetClassification('Unplanned')}
+                  className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 ${
+                    budgetClassification === 'Unplanned'
+                      ? 'bg-amber-500 text-white shadow-sm ring-1 ring-amber-400'
+                      : 'text-amber-800 hover:text-amber-900 bg-amber-50/80 hover:bg-amber-100/80 border border-amber-200/60'
+                  }`}
+                >
+                  <AlertTriangle size={12} className={budgetClassification === 'Unplanned' ? 'text-white' : 'text-amber-600'} />
+                  Out-of-Budget
+                </button>
+              </div>
+            </div>
+
+            {/* Unplanned Expense Control Callout & Required Audit Metadata */}
+            {budgetClassification === 'Unplanned' && (
+              <div className="p-3 bg-amber-500/10 border border-amber-200 rounded-xl space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="flex items-start gap-2">
+                  <AlertCircle size={15} className="text-amber-700 shrink-0 mt-0.5" />
+                  <div className="text-[11px] leading-relaxed text-amber-900">
+                    <span className="font-bold">Unbudgeted Expenditure Control:</span> This service is outside the baseline budget. Register the root cause and approval reference for executive sign-off audit.
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-amber-200/60">
+                  <div>
+                    <label className="font-bold text-[11px] text-amber-950 block mb-1">
+                      Unplanned Root Cause *
+                    </label>
+                    <select
+                      value={unplannedReason}
+                      onChange={(e) => setUnplannedReason(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    >
+                      <option value="">Select Root Cause Category...</option>
+                      <option value="Critical Outage / Emergency Recovery">Critical Outage / Emergency Recovery</option>
+                      <option value="Unforeseen Vendor SLA / Renewal Hike">Unforeseen Vendor SLA / Renewal Hike</option>
+                      <option value="Regulatory / Clinical Compliance Mandate">Regulatory / Clinical Compliance Mandate</option>
+                      <option value="Hardware Failure Replacement">Hardware Failure Replacement</option>
+                      <option value="New Urgent Clinical Service Request">New Urgent Clinical Service Request</option>
+                      <option value="Other Unbudgeted Operational Need">Other Unbudgeted Operational Need</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-[11px] text-amber-950 block mb-1">
+                      Approval Ref / Exception Code
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. EXC-2026-084 / CIO Signoff"
+                      value={approvalRef}
+                      onChange={(e) => setApprovalRef(e.target.value)}
+                      className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Service Description Input */}
+            <div>
+              <label className="font-semibold text-slate-700 block mb-1">
+                Service Description *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. eHospital Annual Maintenance Fee, Emergency DR Node Backup"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-slate-900 shadow-2xs"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">

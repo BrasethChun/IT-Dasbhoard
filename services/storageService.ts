@@ -3,7 +3,7 @@ import { apiClient } from '../src/apiClient';
 export const storageService = {
   async getSignedUrl(path: string): Promise<string> {
     if (!path) return '';
-    if (path.startsWith('http') || path.startsWith('blob:')) return path; 
+    if (path.startsWith('http') || path.startsWith('blob:') || path.startsWith('data:')) return path; 
     // In our custom backend, the path is already the URL for public access (e.g. /uploads/...)
     return path;
   },

@@ -86,15 +86,29 @@ const SitesReport = ({ sites, fetchSites }: any) => {
   };
 
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
-  const handleDelete = (id: string) => {
-    fetch(`/api/sites/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-    }).then(() => {
+  const handleDelete = async (id: string) => {
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/sites/${id}`, {
+        method: 'DELETE',
+        headers: { 
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || 'Failed to delete site');
+      }
+    } catch (e: any) {
+      alert('Error deleting site: ' + e.message);
+    } finally {
+      setIsDeleting(false);
       setConfirmDeleteId(null);
       fetchSites();
-    });
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -150,11 +164,32 @@ const SitesReport = ({ sites, fetchSites }: any) => {
                   <button onClick={() => openEditModal(row)} className="text-indigo-600 hover:text-indigo-800 p-1 bg-indigo-50 rounded" title="Edit"><Edit size={14}/></button>
                   {confirmDeleteId === row.id ? (
                     <div className="flex items-center gap-1">
-                      <button onClick={() => handleDelete(row.id)} className="text-xs bg-rose-600 text-white px-2 py-1 rounded hover:bg-rose-700 transition-colors">Confirm</button>
-                      <button onClick={() => setConfirmDeleteId(null)} className="text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded hover:bg-slate-300 transition-colors">Cancel</button>
+                      <button 
+                        type="button"
+                        onClick={() => handleDelete(row.id)} 
+                        disabled={isDeleting}
+                        className="text-xs bg-rose-600 text-white px-2 py-1 rounded hover:bg-rose-700 transition-colors disabled:opacity-50"
+                      >
+                        {isDeleting ? 'Deleting...' : 'Confirm'}
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setConfirmDeleteId(null)} 
+                        disabled={isDeleting}
+                        className="text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded hover:bg-slate-300 transition-colors disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
                     </div>
                   ) : (
-                    <button onClick={() => setConfirmDeleteId(row.id)} className="text-rose-600 hover:text-rose-800 p-1 bg-rose-50 rounded" title="Delete"><Trash2 size={14}/></button>
+                    <button 
+                      type="button"
+                      onClick={() => setConfirmDeleteId(row.id)} 
+                      className="text-rose-600 hover:text-rose-800 p-1 bg-rose-50 rounded" 
+                      title="Delete"
+                    >
+                      <Trash2 size={14}/>
+                    </button>
                   )}
                 </td>
               </tr>

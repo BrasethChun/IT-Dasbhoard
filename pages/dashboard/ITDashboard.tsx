@@ -74,18 +74,18 @@ export const ITDashboard: React.FC = () => {
   const [sites, setSites] = useState<any[]>([{ id: '1', site_name: 'Main Hospital' }, { id: '2', site_name: 'North Clinic' }, { id: '3', site_name: 'South Clinic' }]);
 
   const navigate = useNavigate();
-  const isToolsView = activeTab === 'helpdesk' || activeTab === 'staffing';
+  const isToolsView = activeTab === 'staffing';
 
   const itDashboardTabs = [
-    { id: 'executive', label: 'Executive Summary', icon: BarChart3 },
+    { id: 'executive', label: 'Head IT Executive Dashboard', icon: BarChart3 },
     { id: 'capex-opex', label: 'IT CapEx & S-Operation Tracking & Planning', icon: DollarSign },
     { id: 'expenses', label: 'IT Expenses & Tracking', icon: Receipt },
     { id: 'subscriptions', label: 'Cloud & HIS Subscriptions', icon: Cloud },
     { id: 'assets', label: 'IT Assets Management', icon: Monitor },
+    { id: 'helpdesk', label: 'IT HelpDesk', icon: Wrench },
   ];
 
   const itToolsTabs = [
-    { id: 'helpdesk', label: 'Helpdesk Tickets', icon: Wrench },
     { id: 'staffing', label: 'Staffing & Shifts', icon: Users },
   ];
 

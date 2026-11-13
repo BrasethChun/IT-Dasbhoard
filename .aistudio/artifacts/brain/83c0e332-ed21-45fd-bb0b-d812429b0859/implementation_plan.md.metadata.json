@@ -1,6 +1,0 @@
-{
-  "summary": "Implementation plan for updating Excel (.xlsx) export:\n- Remove category banner rows (e.g., I. *COMPUTER) from both FixAssets and Assets Control sheets for a clean, flat table.\n- Place continuous row numbering (1, 2, 3...) directly in Column A (No) for every asset row.\n- Add and position the CATEGORY column directly as Column B (right after No and before ASSET CODE / AC code in CMS).\n- Synchronize Excel import parser to seamlessly handle the updated column ordering.",
-  "updatedAt": "2026-11-05T03:01:45.631689609Z",
-  "requestFeedback": true,
-  "userFacing": true
-}

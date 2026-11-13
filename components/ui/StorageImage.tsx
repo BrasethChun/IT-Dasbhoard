@@ -5,22 +5,27 @@ import { Loader2, ImageOff } from 'lucide-react';
 interface StorageImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   path?: string | null;
   fallbackSrc?: string;
+  fallback?: React.ReactNode;
   showLoading?: boolean;
 }
 
 export const StorageImage: React.FC<StorageImageProps> = ({ 
   path, 
   fallbackSrc,
+  fallback,
   className = '', 
   alt,
   showLoading = true,
+  onError,
   ...props 
 }) => {
   const [src, setSrc] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
+    setHasError(false);
     
     const loadSrc = async () => {
       setLoading(true);
@@ -30,7 +35,7 @@ export const StorageImage: React.FC<StorageImageProps> = ({
         return;
       }
       
-      // If it's already a full URL (e.g. Google avatar or blob preview)
+      // If it's already a full URL (e.g. Google avatar, data URL, or blob preview)
       if (path.startsWith('http') || path.startsWith('blob:') || path.startsWith('data:')) {
         setSrc(path);
         setLoading(false);
@@ -60,7 +65,10 @@ export const StorageImage: React.FC<StorageImageProps> = ({
     );
   }
 
-  if (!src) {
+  if (!src || hasError) {
+     if (fallback) {
+       return <>{fallback}</>;
+     }
      return (
        <div className={`flex items-center justify-center bg-slate-100 text-slate-300 ${className}`}>
          <ImageOff size={24} />
@@ -68,5 +76,20 @@ export const StorageImage: React.FC<StorageImageProps> = ({
      );
   }
 
-  return <img src={src} alt={alt} className={className} {...props} />;
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      onError={(e) => {
+        if (fallbackSrc && src !== fallbackSrc) {
+          setSrc(fallbackSrc);
+        } else {
+          setHasError(true);
+        }
+        onError?.(e);
+      }}
+      {...props}
+    />
+  );
 };

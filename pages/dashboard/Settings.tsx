@@ -9,12 +9,14 @@ import { SettingsModule } from './SettingsModule';
 import { DatabaseMigrationModule } from './DatabaseMigrationModule';
 import { useAuth } from '../../context/AuthContext';
 import { useSearchParams } from 'react-router-dom';
+import { StorageImage } from '../../components/ui/StorageImage';
 
 interface UserData {
   id: string;
   email: string;
   full_name: string;
   display_name: string;
+  avatar_url?: string | null;
   role: string;
   status: string;
   can_access_welcome: boolean;
@@ -594,11 +596,19 @@ export const Settings: React.FC = () => {
                         <tr key={u.id} className={`hover:bg-slate-50/60 transition-colors ${!isActive ? 'bg-slate-50/40 opacity-75' : ''}`}>
                           <td className="px-5 py-3.5 whitespace-nowrap">
                             <div className="flex items-center gap-3">
-                              <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs ${
-                                isActive ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'
-                              }`}>
-                                {u.full_name?.charAt(0) || u.display_name?.charAt(0) || u.email.charAt(0).toUpperCase()}
-                              </div>
+                              <StorageImage
+                                path={u.avatar_url}
+                                alt={u.full_name || u.display_name || u.email}
+                                className="w-9 h-9 rounded-full object-cover ring-1 ring-slate-200 shrink-0"
+                                showLoading={false}
+                                fallback={
+                                  <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                                    isActive ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-500'
+                                  }`}>
+                                    {u.full_name?.charAt(0) || u.display_name?.charAt(0) || u.email.charAt(0).toUpperCase()}
+                                  </div>
+                                }
+                              />
                               <div>
                                 <div className="font-semibold text-slate-900 flex items-center gap-1.5">
                                   {u.full_name || u.display_name}

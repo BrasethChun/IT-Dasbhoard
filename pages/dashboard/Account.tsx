@@ -32,21 +32,23 @@ export const Account: React.FC = () => {
     if (user) {
         setUserId(user.id);
         setEmail(user.email || '');
-        setAvatarPath(user.avatarUrl || null);
+        setAvatarPath(user.avatarUrl || user.avatar_url || null);
         
         setFormData({
-          fullName: user.name || '',
-          displayName: user.name || '',
-          timezone: 'UTC-8 (Pacific Time)'
+          fullName: user.full_name || user.name || '',
+          displayName: user.display_name || user.name || '',
+          timezone: user.timezone || 'UTC-8 (Pacific Time)'
         });
         setFetching(false);
     } else {
-        // If undefined, might be loading still. We'll rely on AuthContext redirecting or fetching
-        // For simplicity let's just assume if it runs and user=null, we should check status
         const fetchUser = async () => {
           try {
              const data = await apiClient.fetch('/auth/me');
-             setUser(data.user);
+             if (data?.user) {
+               setUser(data.user);
+             } else {
+               navigate(RoutePath.LOGIN);
+             }
           } catch {
              navigate(RoutePath.LOGIN);
           } finally {
@@ -63,19 +65,68 @@ export const Account: React.FC = () => {
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && userId) {
-      try {
-        setLoading(true);
-        const path = await storageService.uploadFile(file, userId, 'avatar');
-        setAvatarPath(path);
-        // Note: For full implementation, we'd add an endpoint to update users avatar url
-        // await apiClient.fetch('/users/me', { method: 'PUT', body: JSON.stringify({ avatar_url: path }) });
-      } catch (error) {
-        console.error("Error uploading avatar:", error);
-        alert("Failed to upload avatar.");
-      } finally {
-        setLoading(false);
+    if (!file || !userId) return;
+
+    if (!file.type.startsWith('image/')) {
+      setSaveStatus({ type: 'error', message: 'Please select a valid image file (PNG, JPG, GIF, or WebP).' });
+      e.target.value = '';
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setSaveStatus({ type: 'error', message: 'Profile photo must be smaller than 5 MB.' });
+      e.target.value = '';
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setSaveStatus(null);
+      const path = await storageService.uploadFile(file, userId, 'avatar');
+      const data = await apiClient.fetch('/auth/me', {
+        method: 'PUT',
+        body: JSON.stringify({ avatar_url: path })
+      });
+      const updatedAvatar = data?.user?.avatarUrl || data?.user?.avatar_url || path;
+      setAvatarPath(updatedAvatar);
+      if (data?.user) {
+        setUser(data.user);
+      } else if (user) {
+        setUser({ ...user, avatarUrl: updatedAvatar, avatar_url: updatedAvatar });
       }
+      setSaveStatus({ type: 'success', message: 'Profile photo updated!' });
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (error: any) {
+      console.error("Error uploading avatar:", error);
+      setSaveStatus({ type: 'error', message: error?.message || 'Failed to upload profile photo.' });
+    } finally {
+      setLoading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    if (!userId || !avatarPath) return;
+    try {
+      setLoading(true);
+      setSaveStatus(null);
+      const data = await apiClient.fetch('/auth/me', {
+        method: 'PUT',
+        body: JSON.stringify({ avatar_url: null })
+      });
+      setAvatarPath(null);
+      if (data?.user) {
+        setUser(data.user);
+      } else if (user) {
+        setUser({ ...user, avatarUrl: null, avatar_url: null });
+      }
+      setSaveStatus({ type: 'success', message: 'Profile photo removed.' });
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (error: any) {
+      console.error("Error removing avatar:", error);
+      setSaveStatus({ type: 'error', message: error?.message || 'Failed to remove profile photo.' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -85,22 +136,31 @@ export const Account: React.FC = () => {
     setSaveStatus(null);
 
     try {
-      // In full backend, we'd update the user
-      // await apiClient.fetch('/auth/me', { method: 'PUT', body: JSON.stringify(formData) });
-      setTimeout(() => {
-        setLoading(false);
-        setSaveStatus({ type: 'success', message: 'Changes saved successfully!' });
-        setTimeout(() => setSaveStatus(null), 3000);
-      }, 500);
-    } catch (error) {
+      const data = await apiClient.fetch('/auth/me', {
+        method: 'PUT',
+        body: JSON.stringify({
+          fullName: formData.fullName,
+          displayName: formData.displayName,
+          timezone: formData.timezone,
+          avatarUrl: avatarPath
+        })
+      });
+      if (data?.user) {
+        setUser(data.user);
+      }
+      setSaveStatus({ type: 'success', message: 'Changes saved successfully!' });
+      setTimeout(() => setSaveStatus(null), 3000);
+    } catch (error: any) {
       console.error("Error updating profile:", error);
-      setSaveStatus({ type: 'error', message: 'Failed to update profile.' });
+      setSaveStatus({ type: 'error', message: error?.message || 'Failed to update profile.' });
+    } finally {
       setLoading(false);
     }
   };
 
   const handlePasswordReset = async () => {
-    alert('Password reset requires email integration on the backend side.');
+    setSaveStatus({ type: 'error', message: 'Password reset can be managed by your administrator in Settings > Users, or via Forgot Password on sign-in.' });
+    setTimeout(() => setSaveStatus(null), 5000);
   };
 
   const handleSignOut = async () => {
@@ -139,30 +199,49 @@ export const Account: React.FC = () => {
                     <div className="absolute inset-0 bg-gradient-to-b from-white/40 to-transparent opacity-50 pointer-events-none" />
                     
                     {/* Avatar Group */}
-                    <div className="group relative mb-6 cursor-pointer" onClick={() => document.getElementById('avatar-upload')?.click()}>
-                        <div className="h-32 w-32 rounded-full p-1 bg-white/50 backdrop-blur-xl border border-white shadow-xl transition-transform duration-500 group-hover:scale-105 relative overflow-hidden">
-                             {avatarPath ? (
-                                <StorageImage 
+                    <div className="flex flex-col items-center mb-6">
+                        <div className="group relative cursor-pointer" onClick={() => document.getElementById('avatar-upload')?.click()}>
+                            <div className="h-32 w-32 rounded-full p-1 bg-white/50 backdrop-blur-xl border border-white shadow-xl transition-transform duration-500 group-hover:scale-105 relative overflow-hidden">
+                                 <StorageImage 
                                     path={avatarPath} 
                                     alt="Profile" 
                                     className="h-full w-full rounded-full object-cover" 
-                                />
-                             ) : (
-                                <div className="h-full w-full rounded-full bg-gradient-to-br from-indigo-100 to-white flex items-center justify-center text-indigo-300">
-                                    <User size={48} />
-                                </div>
-                             )}
+                                    fallback={
+                                      <div className="h-full w-full rounded-full bg-gradient-to-br from-indigo-100 to-white flex items-center justify-center text-indigo-400">
+                                          <User size={48} />
+                                      </div>
+                                    }
+                                 />
+                            </div>
+                            <button
+                                type="button"
+                                aria-label="Upload profile photo"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  document.getElementById('avatar-upload')?.click();
+                                }}
+                                className="absolute bottom-1 right-1 flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-600 shadow-lg ring-1 ring-slate-100 transition-all hover:scale-110 hover:text-indigo-600"
+                            >
+                                <Camera size={18} />
+                            </button>
+                            <input 
+                                id="avatar-upload"
+                                type="file" 
+                                accept="image/*" 
+                                className="hidden" 
+                                onChange={handleAvatarChange}
+                            />
                         </div>
-                        <button type="button" className="absolute bottom-1 right-1 flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-600 shadow-lg ring-1 ring-slate-100 transition-all hover:scale-110 hover:text-indigo-600">
-                            <Camera size={18} />
-                        </button>
-                        <input 
-                            id="avatar-upload"
-                            type="file" 
-                            accept="image/*" 
-                            className="hidden" 
-                            onChange={handleAvatarChange}
-                        />
+                        {avatarPath && (
+                          <button
+                            type="button"
+                            onClick={handleRemoveAvatar}
+                            disabled={loading}
+                            className="mt-3 text-xs font-medium text-slate-500 hover:text-rose-600 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            Remove photo
+                          </button>
+                        )}
                     </div>
 
                     <h1 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">

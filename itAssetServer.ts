@@ -1234,13 +1234,105 @@ export function setupItAssetRoutes(app: Express, authenticateToken: any, getDb: 
       const [controlRows]: any = await db.query(`SELECT * FROM it_assets_control ${controlWhere}`, controlParams);
 
       let totalFixedValuation = 0;
-      let totalFixedCount = fixedRows.length;
-      let totalControlCount = controlRows.length;
+      const totalFixedCount = fixedRows.length;
+      const totalControlCount = controlRows.length;
+      const totalFleetCount = totalFixedCount + totalControlCount;
+
+      const fixedBreakdown = {
+        total: totalFixedCount,
+        active: 0,
+        spare: 0,
+        maintenance: 0,
+        planDispose: 0,
+        disposed: 0,
+        valuation: 0
+      };
+
+      const controlBreakdown = {
+        total: totalControlCount,
+        active: 0,
+        missing: 0,
+        maintenance: 0,
+        planDispose: 0,
+        disposed: 0
+      };
+
+      let activeInServiceCount = 0;
+      let inStorageCount = 0;
+      let maintenanceCount = 0;
       let planDisposeCount = 0;
+      let missingCount = 0;
       let networkedEndpointsCount = 0;
 
-      const categoryMap: Record<string, number> = {};
-      const floorMap: Record<string, number> = {};
+      interface CategoryBuStat {
+        buName: string;
+        fixedCount: number;
+        controlCount: number;
+        count: number;
+        activeCount: number;
+        maintenanceCount: number;
+        planDisposeCount: number;
+        spareOrMissingCount: number;
+        fixedValuation: number;
+      }
+
+      interface CategoryStat {
+        key: string;
+        name: string;
+        fixedCount: number;
+        controlCount: number;
+        count: number;
+        activeCount: number;
+        maintenanceCount: number;
+        planDisposeCount: number;
+        spareOrMissingCount: number;
+        fixedValuation: number;
+        buCounts: Record<string, CategoryBuStat>;
+        businessUnits: string[];
+      }
+
+      const categoryStatsMap = new Map<string, CategoryStat>();
+      const ensureCatStat = (rawCat: string) => {
+        const clean = (rawCat || 'OTHER').trim();
+        const key = clean.toUpperCase();
+        if (!categoryStatsMap.has(key)) {
+          categoryStatsMap.set(key, {
+            key,
+            name: clean,
+            fixedCount: 0,
+            controlCount: 0,
+            count: 0,
+            activeCount: 0,
+            maintenanceCount: 0,
+            planDisposeCount: 0,
+            spareOrMissingCount: 0,
+            fixedValuation: 0,
+            buCounts: {},
+            businessUnits: []
+          });
+        }
+        return categoryStatsMap.get(key)!;
+      };
+      const ensureCatBuStat = (catStat: CategoryStat, rawBu: string) => {
+        const buName = (rawBu || 'Unassigned').trim();
+        if (!catStat.buCounts[buName]) {
+          catStat.buCounts[buName] = {
+            buName,
+            fixedCount: 0,
+            controlCount: 0,
+            count: 0,
+            activeCount: 0,
+            maintenanceCount: 0,
+            planDisposeCount: 0,
+            spareOrMissingCount: 0,
+            fixedValuation: 0
+          };
+          catStat.businessUnits.push(buName);
+        }
+        return catStat.buCounts[buName];
+      };
+
+      const floorMap: Record<string, { floor: string; fixedCount: number; controlCount: number; count: number }> = {};
       const buValuationMap: Record<string, { valuation: number; fixedCount: number; controlCount: number }> = {
         'Khema Global': { valuation: 0, fixedCount: 0, controlCount: 0 },
         'Khema TK': { valuation: 0, fixedCount: 0, controlCount: 0 },
@@ -1248,26 +1340,92 @@ export function setupItAssetRoutes(app: Express, authenticateToken: any, getDb: 
         'Sakal 2004': { valuation: 0, fixedCount: 0, controlCount: 0 }
       };
 
+      const buOperationalMap: Record<string, { active: number; inStorage: number; maintenance: number; planDispose: number; fixedCount: number; controlCount: number; totalAssets: number; healthRate: number }> = {
+        'Khema Global': { active: 0, inStorage: 0, maintenance: 0, planDispose: 0, fixedCount: 0, controlCount: 0, totalAssets: 0, healthRate: 100 },
+        'Khema TK': { active: 0, inStorage: 0, maintenance: 0, planDispose: 0, fixedCount: 0, controlCount: 0, totalAssets: 0, healthRate: 100 },
+        'Khema BKK': { active: 0, inStorage: 0, maintenance: 0, planDispose: 0, fixedCount: 0, controlCount: 0, totalAssets: 0, healthRate: 100 },
+        'Sakal 2004': { active: 0, inStorage: 0, maintenance: 0, planDispose: 0, fixedCount: 0, controlCount: 0, totalAssets: 0, healthRate: 100 }
+      };
+
       const now = new Date();
       const refreshAlerts: any[] = [];
+
+      const classifyStatus = (status: string) => {
+        const s = (status || '').trim().toLowerCase();
+        if (s === 'in repair' || s === 'repair' || s === 'maintenance') return 'maintenance';
+        if (s === 'disposed') return 'disposed';
+        if (s === 'plan dispose' || s === 'scrap') return 'planDispose';
+        if (s === 'in storage' || s === 'storage' || s === 'spare') return 'inStorage';
+        if (s === 'missing') return 'missing';
+        return 'active';
+      };
 
       fixedRows.forEach((r: any) => {
         const val = parseFloat(r.grand_total) || 0;
         totalFixedValuation += val;
+        fixedBreakdown.valuation += val;
+
+        const st = classifyStatus(r.status);
+        if (st === 'maintenance') {
+          maintenanceCount += 1;
+          fixedBreakdown.maintenance += 1;
+        } else if (st === 'planDispose') {
+          planDisposeCount += 1;
+          fixedBreakdown.planDispose += 1;
+        } else if (st === 'disposed') {
+          planDisposeCount += 1;
+          fixedBreakdown.disposed += 1;
+        } else if (st === 'inStorage') {
+          inStorageCount += 1;
+          fixedBreakdown.spare += 1;
+        } else {
+          activeInServiceCount += 1;
+          fixedBreakdown.active += 1;
+        }
 
         if (buValuationMap[r.bu_name]) {
           buValuationMap[r.bu_name].valuation += val;
           buValuationMap[r.bu_name].fixedCount += 1;
         }
 
-        if (r.status === 'Plan dispose') planDisposeCount += 1;
+        if (buOperationalMap[r.bu_name]) {
+          buOperationalMap[r.bu_name].fixedCount += 1;
+          buOperationalMap[r.bu_name].totalAssets += 1;
+          if (st === 'maintenance') buOperationalMap[r.bu_name].maintenance += 1;
+          else if (st === 'planDispose' || st === 'disposed') buOperationalMap[r.bu_name].planDispose += 1;
+          else if (st === 'inStorage') buOperationalMap[r.bu_name].inStorage += 1;
+          else buOperationalMap[r.bu_name].active += 1;
+        }
+
         if (r.ip_lan || r.hostname) networkedEndpointsCount += 1;
 
-        const cat = r.category || 'OTHER';
-        categoryMap[cat] = (categoryMap[cat] || 0) + 1;
+        const catStat = ensureCatStat(r.category);
+        const catBuStat = ensureCatBuStat(catStat, r.bu_name);
+        catStat.fixedCount += 1;
+        catStat.count += 1;
+        catStat.fixedValuation += val;
+        catBuStat.fixedCount += 1;
+        catBuStat.count += 1;
+        catBuStat.fixedValuation += val;
+        if (st === 'maintenance') {
+          catStat.maintenanceCount += 1;
+          catBuStat.maintenanceCount += 1;
+        } else if (st === 'planDispose' || st === 'disposed') {
+          catStat.planDisposeCount += 1;
+          catBuStat.planDisposeCount += 1;
+        } else if (st === 'inStorage') {
+          catStat.spareOrMissingCount += 1;
+          catBuStat.spareOrMissingCount += 1;
+        } else {
+          catStat.activeCount += 1;
+          catBuStat.activeCount += 1;
+        }
 
-        const fl = `Floor ${r.floor || 'G'}`;
-        floorMap[fl] = (floorMap[fl] || 0) + 1;
+        const cleanFl = String(r.floor || 'G').replace(/^Floor\s+/i, '').trim() || 'G';
+        const fl = `Floor ${cleanFl}`;
+        if (!floorMap[fl]) floorMap[fl] = { floor: fl, fixedCount: 0, controlCount: 0, count: 0 };
+        floorMap[fl].fixedCount += 1;
+        floorMap[fl].count += 1;
 
         // Check age: 5 years or older
         let isOld = false;
@@ -1293,30 +1451,99 @@ export function setupItAssetRoutes(app: Express, authenticateToken: any, getDb: 
             current_user: r.current_user,
             age_years: ageYears,
             status: r.status,
-            asset_date: r.asset_date
+            asset_date: r.asset_date,
+            risk_level: ageYears >= 7 || r.status === 'Plan dispose' ? 'Critical' : 'High'
           });
         }
       });
 
       controlRows.forEach((r: any) => {
+        const st = classifyStatus(r.status);
+        if (st === 'maintenance') {
+          maintenanceCount += 1;
+          controlBreakdown.maintenance += 1;
+        } else if (st === 'planDispose') {
+          planDisposeCount += 1;
+          controlBreakdown.planDispose += 1;
+        } else if (st === 'disposed') {
+          planDisposeCount += 1;
+          controlBreakdown.disposed += 1;
+        } else if (st === 'missing') {
+          missingCount += 1;
+          controlBreakdown.missing += 1;
+        } else {
+          activeInServiceCount += 1;
+          controlBreakdown.active += 1;
+        }
+
         if (buValuationMap[r.bu_name]) {
           buValuationMap[r.bu_name].controlCount += 1;
         }
-        if (r.status === 'Plan dispose') planDisposeCount += 1;
 
-        const cat = r.category || 'OTHER';
-        categoryMap[cat] = (categoryMap[cat] || 0) + 1;
+        if (buOperationalMap[r.bu_name]) {
+          buOperationalMap[r.bu_name].controlCount += 1;
+          buOperationalMap[r.bu_name].totalAssets += 1;
+          if (st === 'maintenance') buOperationalMap[r.bu_name].maintenance += 1;
+          else if (st === 'planDispose' || st === 'disposed') buOperationalMap[r.bu_name].planDispose += 1;
+          else if (st === 'missing') buOperationalMap[r.bu_name].inStorage += 1;
+          else buOperationalMap[r.bu_name].active += 1;
+        }
 
-        const fl = `Floor ${r.floor || 'G'}`;
-        floorMap[fl] = (floorMap[fl] || 0) + 1;
+        const catStat = ensureCatStat(r.category);
+        const catBuStat = ensureCatBuStat(catStat, r.bu_name);
+        catStat.controlCount += 1;
+        catStat.count += 1;
+        catBuStat.controlCount += 1;
+        catBuStat.count += 1;
+        if (st === 'maintenance') {
+          catStat.maintenanceCount += 1;
+          catBuStat.maintenanceCount += 1;
+        } else if (st === 'planDispose' || st === 'disposed') {
+          catStat.planDisposeCount += 1;
+          catBuStat.planDisposeCount += 1;
+        } else if (st === 'missing') {
+          catStat.spareOrMissingCount += 1;
+          catBuStat.spareOrMissingCount += 1;
+        } else {
+          catStat.activeCount += 1;
+          catBuStat.activeCount += 1;
+        }
+
+        const cleanFl = String(r.floor || 'G').replace(/^Floor\s+/i, '').trim() || 'G';
+        const fl = `Floor ${cleanFl}`;
+        if (!floorMap[fl]) floorMap[fl] = { floor: fl, fixedCount: 0, controlCount: 0, count: 0 };
+        floorMap[fl].controlCount += 1;
+        floorMap[fl].count += 1;
       });
 
-      const categoryData = Object.entries(categoryMap)
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count);
+      // Calculate health rate per BU
+      Object.keys(buOperationalMap).forEach(k => {
+        const bu = buOperationalMap[k];
+        bu.healthRate = bu.totalAssets > 0 ? Math.round((bu.active / bu.totalAssets) * 100) : 100;
+      });
 
-      const floorData = Object.entries(floorMap)
-        .map(([floor, count]) => ({ floor, count }))
+      const totalKnown = activeInServiceCount + inStorageCount + maintenanceCount + planDisposeCount + missingCount;
+      const fleetHealthScore = totalKnown > 0 ? Math.round(((activeInServiceCount + inStorageCount) / totalKnown) * 1000) / 10 : 100;
+
+      const lifecycleDonut = [
+        { name: 'Active In-Service', value: activeInServiceCount, color: '#10b981' },
+        { name: 'Standby / Spare', value: inStorageCount, color: '#3b82f6' },
+        { name: 'Under Maintenance', value: maintenanceCount, color: '#f59e0b' },
+        { name: 'Plan Dispose / Aged', value: planDisposeCount, color: '#ef4444' },
+        { name: 'Missing (Control)', value: missingCount, color: '#64748b' }
+      ].filter(item => item.value > 0);
+
+      const categoryBreakdown = Array.from(categoryStatsMap.values())
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+      const categoryData = categoryBreakdown.map(c => ({
+        name: c.name,
+        count: c.count,
+        fixedCount: c.fixedCount,
+        controlCount: c.controlCount
+      }));
+
+      const floorData = Object.values(floorMap)
         .sort((a, b) => {
           const numA = parseInt(a.floor.replace(/\D/g, ''), 10) || 0;
           const numB = parseInt(b.floor.replace(/\D/g, ''), 10) || 0;
@@ -1327,10 +1554,21 @@ export function setupItAssetRoutes(app: Express, authenticateToken: any, getDb: 
         totalFixedValuation,
         totalFixedCount,
         totalControlCount,
+        totalFleetCount,
+        fixedBreakdown,
+        controlBreakdown,
+        activeInServiceCount,
+        inStorageCount,
+        maintenanceCount,
         planDisposeCount,
+        missingCount,
+        fleetHealthScore,
+        buOperationalMap,
+        lifecycleDonut,
         networkedEndpointsCount,
         buValuationMap,
         categoryData,
+        categoryBreakdown,
         floorData,
         refreshAlerts
       });

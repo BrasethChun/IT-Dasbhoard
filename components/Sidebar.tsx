@@ -123,28 +123,28 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
           }
         },
         subItems: [
-          { label: 'Executive Summary', id: 'executive', path: `${RoutePath.IT_DASHBOARD}?tab=executive` },
+          { label: 'Head IT Executive Dashboard', id: 'executive', path: `${RoutePath.IT_DASHBOARD}?tab=executive` },
           { label: 'IT CapEx & S-Operation Tracking & Planning', id: 'capex-opex', path: `${RoutePath.IT_DASHBOARD}?tab=capex-opex` },
           { label: 'IT Expenses & Tracking', id: 'expenses', path: `${RoutePath.IT_DASHBOARD}?tab=expenses` },
           { label: 'IT Assets Management', id: 'assets', path: `${RoutePath.IT_DASHBOARD}?tab=assets` },
-          { label: 'Cloud & HIS Subscription', id: 'subscriptions', path: `${RoutePath.IT_DASHBOARD}?tab=subscriptions` }
+          { label: 'Cloud & HIS Subscription', id: 'subscriptions', path: `${RoutePath.IT_DASHBOARD}?tab=subscriptions` },
+          { label: 'IT HelpDesk', id: 'helpdesk', path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk` }
         ]
       },
       {
         icon: Wrench,
         label: 'IT Tools',
-        path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk`,
+        path: `${RoutePath.IT_DASHBOARD}?tab=staffing`,
         isOpen: itToolsOpen,
         toggleOpen: () => {
           if (!getIsActive(RoutePath.MAIL_ASSISTANT, 'IT Tools')) {
-            navigate(`${RoutePath.IT_DASHBOARD}?tab=helpdesk`);
+            navigate(`${RoutePath.IT_DASHBOARD}?tab=staffing`);
             setItToolsOpen(true);
           } else {
             setItToolsOpen(!itToolsOpen);
           }
         },
         subItems: [
-          { label: 'Helpdesk', id: 'helpdesk', path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk` },
           { label: 'Staffing', id: 'staffing', path: `${RoutePath.IT_DASHBOARD}?tab=staffing` },
           { label: 'Mail Assistant', id: 'mail', path: RoutePath.MAIL_ASSISTANT },
           { label: 'IT Notes & Meetings', id: 'notes', path: RoutePath.NOTES },
@@ -161,7 +161,7 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
       return (pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE) || 
              pathname.startsWith(RoutePath.INVOICES) ||
              pathname.startsWith(RoutePath.MAIL_ASSISTANT) ||
-             (pathname === RoutePath.IT_DASHBOARD && (currentTab === 'staffing' || currentTab === 'helpdesk'));
+             (pathname === RoutePath.IT_DASHBOARD && currentTab === 'staffing');
     }
     if (path === RoutePath.HOME) {
       return pathname === RoutePath.HOME;
@@ -173,7 +173,7 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
       return pathname === RoutePath.CREATE_NOTE;
     }
     if (path === RoutePath.IT_DASHBOARD) {
-      if (pathname === RoutePath.IT_DASHBOARD && (currentTab === 'staffing' || currentTab === 'helpdesk')) {
+      if (pathname === RoutePath.IT_DASHBOARD && currentTab === 'staffing') {
         return false;
       }
       return pathname === RoutePath.IT_DASHBOARD || pathname === RoutePath.VENDORS;
@@ -233,17 +233,50 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
                                   ? pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE 
                                   : pathname.startsWith(subItem.path)))
                           : currentTab === subItem.id;
+                        const isExecutiveItem = subItem.id === 'executive';
+                        const isSubscriptionItem = subItem.id === 'subscriptions';
                         return (
                           <Link
                             key={subItem.id}
                             to={subItem.path || `${item.path}?tab=${subItem.id}`}
-                            className={`flex items-center px-4 py-2 rounded-lg text-sm transition-all duration-200 whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'} ${
+                            className={`flex items-center justify-between px-3.5 py-2 rounded-xl text-sm transition-all duration-200 whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'} ${
                               isSubActive 
-                                ? 'bg-indigo-50 text-indigo-700 font-semibold shadow-sm border border-indigo-100/50' 
-                                : 'text-slate-500 font-medium hover:bg-white hover:text-slate-800'
+                                ? isExecutiveItem
+                                  ? 'bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white font-bold shadow-md shadow-indigo-950/30 border border-indigo-700/60 translate-x-1'
+                                  : 'bg-gradient-to-r from-indigo-50 to-blue-50/70 text-indigo-700 font-semibold shadow-xs border border-indigo-200/80 translate-x-1' 
+                                : isExecutiveItem
+                                  ? 'text-indigo-950 font-semibold bg-indigo-50/80 border border-indigo-200/70 hover:bg-indigo-100 hover:text-indigo-950 hover:translate-x-0.5'
+                                  : isSubscriptionItem
+                                    ? 'text-slate-600 font-medium hover:bg-indigo-50/50 hover:text-indigo-900 hover:translate-x-0.5'
+                                    : 'text-slate-500 font-medium hover:bg-white/80 hover:text-slate-800 hover:translate-x-0.5'
                             }`}
                           >
-                            <span className="truncate">{subItem.label}</span>
+                            <div className="flex items-center min-w-0">
+                              {isSubActive && (
+                                <span className={`w-1.5 h-1.5 rounded-full mr-2 shrink-0 animate-pulse ${
+                                  isExecutiveItem ? 'bg-indigo-400' : 'bg-indigo-600'
+                                }`} />
+                              )}
+                              <span className="truncate">{subItem.label}</span>
+                            </div>
+                            {isExecutiveItem && (
+                              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md font-bold tracking-tight shrink-0 ml-1.5 transition-colors ${
+                                isSubActive
+                                  ? 'bg-indigo-500 text-white shadow-xs'
+                                  : 'bg-indigo-600 text-white'
+                              }`}>
+                                Head IT
+                              </span>
+                            )}
+                            {isSubscriptionItem && (
+                              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md font-semibold tracking-tight shrink-0 ml-1.5 transition-colors ${
+                                isSubActive
+                                  ? 'bg-indigo-600 text-white shadow-xs'
+                                  : 'bg-indigo-100/70 text-indigo-700'
+                              }`}>
+                                HIS
+                              </span>
+                            )}
                           </Link>
                         );
                       })}

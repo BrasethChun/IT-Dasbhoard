@@ -5,8 +5,24 @@ import {
   DollarSign, Users, Shield, Server, Filter, X, ChevronDown, 
   FileSpreadsheet, ArrowUpDown, Calendar, CreditCard, Building2, Check, RotateCcw,
   Settings, Sliders, Globe, Tag, Sparkles, Layers,
-  Upload, FileUp, ClipboardList, FileText
+  Upload, FileUp, ClipboardList, FileText, RotateCw, History,
+  BarChart3, PieChart as PieIcon, TrendingUp, Activity, HardDrive, ShieldCheck,
+  CheckSquare, ArrowRight, Zap, Award, ArrowUpRight, Cpu, Network, CheckCircle,
+  HelpCircle, Eye, Info
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend
+} from 'recharts';
 import { Button } from '../../components/ui/Button';
 import * as xlsx from 'xlsx';
 
@@ -49,6 +65,28 @@ export interface CloudSubscription {
   notes?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface CloudSubscriptionRenewal {
+  id: string;
+  subscription_id: string;
+  subscription_name: string;
+  provider: string;
+  campus: string;
+  previous_renewal_date: string | null;
+  new_renewal_date: string;
+  billing_cycle: string;
+  renewal_period_months: number;
+  cost: number | string;
+  currency: string;
+  invoice_no?: string;
+  po_no?: string;
+  payment_method?: string;
+  payment_status?: string;
+  recorded_expense_id?: string | null;
+  renewed_by?: string;
+  notes?: string;
+  renewed_at?: string;
 }
 
 interface SummaryData {
@@ -170,6 +208,60 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
   const [importSuccess, setImportSuccess] = useState('');
   const [importSubmitting, setImportSubmitting] = useState(false);
 
+  // Sub-View Navigation: Executive Dashboard vs Catalog vs Renewal History & Audit Ledger
+  const [activeModuleTab, setActiveModuleTab] = useState<'executive' | 'catalog' | 'renewals'>('executive');
+
+  // Renewal Modal State
+  const [showRenewalModal, setShowRenewalModal] = useState(false);
+  const [renewalTargetItem, setRenewalTargetItem] = useState<CloudSubscription | null>(null);
+  const [renewalDurationPreset, setRenewalDurationPreset] = useState<string>('+1 Year');
+  const [renewalDateInput, setRenewalDateInput] = useState<string>('');
+  const [renewalPeriodMonths, setRenewalPeriodMonths] = useState<number>(12);
+  const [renewalCost, setRenewalCost] = useState<string>('');
+  const [renewalCurrency, setRenewalCurrency] = useState<string>('USD');
+  const [renewalBillingCycle, setRenewalBillingCycle] = useState<string>('Annually');
+  const [renewalInvoiceNo, setRenewalInvoiceNo] = useState<string>('');
+  const [renewalPoNo, setRenewalPoNo] = useState<string>('');
+  const [renewalPaymentMethod, setRenewalPaymentMethod] = useState<string>('Credit Card');
+  const [renewalPaymentStatus, setRenewalPaymentStatus] = useState<string>('Paid');
+  const [renewalOperator, setRenewalOperator] = useState<string>('IT Operations');
+  const [renewalNotes, setRenewalNotes] = useState<string>('');
+  const [renewalRecordExpense, setRenewalRecordExpense] = useState<boolean>(false);
+  const [renewalExpenseCampus, setRenewalExpenseCampus] = useState<string>('All Sites');
+  const [renewalExpenseCategory, setRenewalExpenseCategory] = useState<string>('630105 - Cloud & SaaS Licenses');
+  const [renewalFiscalYear, setRenewalFiscalYear] = useState<number>(() => new Date().getFullYear() || 2026);
+  const [renewalLinkedOpexId, setRenewalLinkedOpexId] = useState<string>('auto');
+  const [opexBudgetItems, setOpexBudgetItems] = useState<Array<{ id: string; name: string; raw_name: string; site: string; category: string; account_code?: string }>>([]);
+  const [autoDetectedOpex, setAutoDetectedOpex] = useState<any | null>(null);
+  const [renewalSubmitting, setRenewalSubmitting] = useState<boolean>(false);
+  const [renewalError, setRenewalError] = useState<string>('');
+
+  // Master Account Codes Synced from IT Expense Configuration
+  const [masterAccountCodes, setMasterAccountCodes] = useState<Array<{ id?: string; code: string; name: string; description?: string }>>([
+    { code: '630105 - Cloud & SaaS Licenses', name: 'Cloud & SaaS Licenses' },
+    { code: '630104 - Other Outside Services', name: 'Other Outside Services' },
+    { code: '630102 - Communication & Internet', name: 'Communication & Internet' },
+    { code: '630103 - Rent - Non-Medical equipment', name: 'Rent - Non-Medical equipment' },
+    { code: '630106 - Software Maintenance & Support', name: 'Software Maintenance & Support' },
+    { code: '630107 - Hardware Maintenance & Repairs', name: 'Hardware Maintenance & Repairs' }
+  ]);
+  const [loadingAccountCodes, setLoadingAccountCodes] = useState<boolean>(false);
+
+  // Renewal History Ledger State
+  const [renewalsList, setRenewalsList] = useState<CloudSubscriptionRenewal[]>([]);
+  const [loadingRenewals, setLoadingRenewals] = useState<boolean>(false);
+  const [renewalsSearch, setRenewalsSearch] = useState<string>('');
+  const [renewalsProviderFilter, setRenewalsProviderFilter] = useState<string>('All Providers');
+  const [renewalsCampusFilter, setRenewalsCampusFilter] = useState<string>('All Sites');
+  const [renewalsTotalSpend, setRenewalsTotalSpend] = useState<number>(0);
+
+  // Single-Item Renewal History Timeline Modal State
+  const [showItemHistoryModal, setShowItemHistoryModal] = useState<boolean>(false);
+  const [itemHistorySub, setItemHistorySub] = useState<CloudSubscription | null>(null);
+  const [itemHistoryLogs, setItemHistoryLogs] = useState<CloudSubscriptionRenewal[]>([]);
+  const [loadingItemHistory, setLoadingItemHistory] = useState<boolean>(false);
+  const [deletingRenewalId, setDeletingRenewalId] = useState<string | null>(null);
+
   // Form State
   const initialFormState = {
     name: '',
@@ -259,10 +351,95 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
     }
   };
 
+  // Fetch Master Account Codes from IT Expense / Budget Configuration
+  const fetchMasterAccountCodes = async () => {
+    try {
+      setLoadingAccountCodes(true);
+      const token = localStorage.getItem('token');
+      const res = await fetch('/api/it-budget/account-codes', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setMasterAccountCodes(data);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching master account codes from IT Expense:', err);
+    } finally {
+      setLoadingAccountCodes(false);
+    }
+  };
+
+  // Match a subscription against OpEx budget items
+  const matchOpexPlan = (subItem: CloudSubscription | null, opexList: any[]) => {
+    if (!subItem || !opexList || opexList.length === 0) return null;
+    const subName = (subItem.name || '').trim().toLowerCase();
+    const provider = (subItem.provider || '').trim().toLowerCase();
+    const site = (subItem.site_name || '').trim().toLowerCase();
+
+    // 1. Exact or substring match on name or provider + matching campus
+    let match = opexList.find((o: any) => {
+      const oName = (o.raw_name || o.name || '').toLowerCase();
+      const nameMatch = oName.includes(subName) || subName.includes(oName) || (provider.length > 2 && (oName.includes(provider) || provider.includes(oName)));
+      const siteMatch = !site || site === 'all sites' || o.site.toLowerCase() === site || site.includes(o.site.toLowerCase());
+      return nameMatch && siteMatch;
+    });
+
+    // 2. Substring match on name or provider across any campus
+    if (!match) {
+      match = opexList.find((o: any) => {
+        const oName = (o.raw_name || o.name || '').toLowerCase();
+        return oName.includes(subName) || subName.includes(oName) || (provider.length > 2 && oName.includes(provider));
+      });
+    }
+
+    // 3. Significant keyword match (radiant, his, google, workspace, fortinet, kaspersky, zoom, sophos, backup, 365)
+    if (!match) {
+      const tokens = subName
+        .split(/[\s\-_\/]+/)
+        .map(t => t.toLowerCase())
+        .filter(t => t.length > 3 && !['cloud', 'saas', 'annual', 'monthly', 'license', 'subscription', 'software'].includes(t));
+      if (tokens.length > 0) {
+        match = opexList.find((o: any) => {
+          const oName = (o.raw_name || o.name || '').toLowerCase();
+          return tokens.some(tok => oName.includes(tok));
+        });
+      }
+    }
+
+    return match || null;
+  };
+
+  // Fetch OpEx Budget items to support linking to S-Operation Planning
+  const fetchOpexBudgetItems = async (fy: number = renewalFiscalYear): Promise<any[]> => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/it-expenses/budget-options?fiscal_year=${fy}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const items = data.opexOptions || [];
+        setOpexBudgetItems(items);
+        return items;
+      }
+    } catch (err) {
+      console.error('Error fetching OpEx budget items:', err);
+    }
+    return [];
+  };
+
   useEffect(() => {
     fetchSubscriptions();
     fetchSummary();
     fetchSettings();
+    fetchMasterAccountCodes();
+    fetchOpexBudgetItems();
   }, [siteFilter]);
 
   // Dynamic Options for Selects & Filters
@@ -436,6 +613,552 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
     } finally {
       setRefreshing(false);
     }
+  };
+
+  // Helper to calculate target renewal date from previous expiration date or today
+  const calculateTargetRenewalDate = (baseDateStr: string | undefined, months: number): string => {
+    let baseDate = new Date();
+    if (baseDateStr) {
+      const parsed = new Date(baseDateStr);
+      if (!isNaN(parsed.getTime())) {
+        if (parsed.getTime() > baseDate.getTime()) {
+          baseDate = parsed;
+        }
+      }
+    }
+    const target = new Date(baseDate);
+    target.setMonth(target.getMonth() + months);
+    return target.toISOString().slice(0, 10);
+  };
+
+  // Open Renew Modal
+  const handleOpenRenewModal = (item: CloudSubscription) => {
+    setRenewalTargetItem(item);
+    const isMonthly = item.billing_cycle === 'Monthly';
+    const defaultMonths = isMonthly ? 1 : 12;
+    const initialPreset = isMonthly ? '+1 Month' : '+1 Year';
+    setRenewalDurationPreset(initialPreset);
+    setRenewalPeriodMonths(defaultMonths);
+    setRenewalBillingCycle(isMonthly ? 'Monthly' : 'Annually');
+    setRenewalDateInput(calculateTargetRenewalDate(item.renewal_date, defaultMonths));
+    setRenewalCost(String(item.cost || ''));
+    setRenewalCurrency(item.currency || 'USD');
+    setRenewalInvoiceNo('');
+    setRenewalPoNo('');
+    setRenewalPaymentMethod(item.payment_method || 'Credit Card');
+    setRenewalPaymentStatus('Paid');
+    setRenewalOperator('IT Operations');
+    setRenewalNotes('');
+    setRenewalRecordExpense(false);
+    const fallbackCampus = item.site_name && item.site_name !== 'All Sites' ? item.site_name : 'K1';
+    setRenewalExpenseCampus(fallbackCampus);
+    const matchingCode = masterAccountCodes.find(a => 
+      a.code.toLowerCase().includes('cloud') || 
+      a.code.toLowerCase().includes('saas') || 
+      a.code.includes('630105')
+    );
+    setRenewalExpenseCategory(matchingCode ? matchingCode.code : (masterAccountCodes[0]?.code || '630105 - Cloud & SaaS Licenses'));
+    const currentYear = new Date().getFullYear() || 2026;
+    setRenewalFiscalYear(currentYear);
+    setRenewalLinkedOpexId('auto');
+    setAutoDetectedOpex(null);
+    setRenewalError('');
+    setShowRenewalModal(true);
+
+    // Auto-detect matching OpEx planning item
+    fetchOpexBudgetItems(currentYear).then(items => {
+      const list = items && items.length > 0 ? items : opexBudgetItems;
+      const matched = matchOpexPlan(item, list);
+      if (matched) {
+        setAutoDetectedOpex(matched);
+        setRenewalLinkedOpexId(matched.id);
+        if (matched.site) {
+          setRenewalExpenseCampus(matched.site);
+        }
+        if (matched.account_code) {
+          const found = masterAccountCodes.find(a => 
+            a.code.startsWith(matched.account_code) || 
+            matched.account_code.startsWith(a.code.split('-')[0].trim()) ||
+            a.name.toLowerCase() === (matched.category || '').toLowerCase()
+          );
+          if (found) {
+            setRenewalExpenseCategory(found.code);
+          }
+        }
+      }
+    });
+  };
+
+  // Handle Duration Preset selection in Renew Modal
+  const handleDurationPresetSelect = (preset: string) => {
+    setRenewalDurationPreset(preset);
+    let months = 12;
+    let cycle = 'Annually';
+    if (preset === '+1 Month') {
+      months = 1;
+      cycle = 'Monthly';
+    } else if (preset === '+3 Months') {
+      months = 3;
+      cycle = 'Quarterly';
+    } else if (preset === '+1 Year') {
+      months = 12;
+      cycle = 'Annually';
+    } else if (preset === '+2 Years') {
+      months = 24;
+      cycle = 'Annually';
+    }
+    setRenewalPeriodMonths(months);
+    setRenewalBillingCycle(cycle);
+    if (preset !== 'custom') {
+      setRenewalDateInput(calculateTargetRenewalDate(renewalTargetItem?.renewal_date, months));
+    }
+  };
+
+  // Execute Subscription Renewal
+  const handleExecuteRenewal = async () => {
+    if (!renewalTargetItem) return;
+    if (!renewalDateInput) {
+      setRenewalError('Please specify the new target renewal date.');
+      return;
+    }
+
+    try {
+      setRenewalSubmitting(true);
+      setRenewalError('');
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/cloud-subscriptions/${renewalTargetItem.id}/renew`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          new_renewal_date: renewalDateInput,
+          renewal_period_months: renewalPeriodMonths,
+          cost: parseFloat(String(renewalCost)) || 0,
+          currency: renewalCurrency,
+          billing_cycle: renewalBillingCycle,
+          invoice_no: renewalInvoiceNo,
+          po_no: renewalPoNo,
+          payment_method: renewalPaymentMethod,
+          payment_status: renewalPaymentStatus,
+          renewed_by: renewalOperator,
+          notes: renewalNotes,
+          record_expense: renewalRecordExpense,
+          expense_category: renewalExpenseCategory,
+          expense_campus: renewalExpenseCampus,
+          fiscal_year: renewalFiscalYear,
+          linked_opex_id: renewalLinkedOpexId,
+          linked_opex_name: renewalLinkedOpexId !== 'auto' ? opexBudgetItems.find(o => o.id === renewalLinkedOpexId)?.raw_name : null
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to complete subscription renewal');
+      }
+
+      setShowRenewalModal(false);
+      await fetchSubscriptions();
+      await fetchSummary();
+      if (activeModuleTab === 'renewals') {
+        await fetchRenewals();
+      }
+    } catch (err: any) {
+      setRenewalError(err.message || 'An error occurred during renewal.');
+    } finally {
+      setRenewalSubmitting(false);
+    }
+  };
+
+  // Fetch all Renewal History logs
+  const fetchRenewals = async () => {
+    try {
+      setLoadingRenewals(true);
+      const token = localStorage.getItem('token');
+      const params = new URLSearchParams();
+      if (renewalsProviderFilter !== 'All Providers') params.append('provider', renewalsProviderFilter);
+      if (renewalsCampusFilter !== 'All Sites') params.append('campus', renewalsCampusFilter);
+      if (renewalsSearch.trim()) params.append('search', renewalsSearch.trim());
+
+      const res = await fetch(`/api/cloud-subscriptions/renewals?${params.toString()}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRenewalsList(data.renewals || []);
+        setRenewalsTotalSpend(data.totalRenewedSpend || 0);
+      }
+    } catch (err) {
+      console.error('Error fetching renewal history:', err);
+    } finally {
+      setLoadingRenewals(false);
+    }
+  };
+
+  // Open Single-Item Renewal History Timeline Modal
+  const handleOpenItemHistoryModal = async (item: CloudSubscription) => {
+    setItemHistorySub(item);
+    setShowItemHistoryModal(true);
+    setLoadingItemHistory(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/cloud-subscriptions/${item.id}/renewals`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setItemHistoryLogs(Array.isArray(data) ? data : []);
+      } else {
+        setItemHistoryLogs([]);
+      }
+    } catch (err) {
+      console.error('Error loading item history:', err);
+      setItemHistoryLogs([]);
+    } finally {
+      setLoadingItemHistory(false);
+    }
+  };
+
+  // Delete a specific renewal log entry
+  const handleDeleteRenewal = async (renewalId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/cloud-subscriptions/renewals/${renewalId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        setRenewalsList(prev => prev.filter(r => r.id !== renewalId));
+        setItemHistoryLogs(prev => prev.filter(r => r.id !== renewalId));
+        setDeletingRenewalId(null);
+      }
+    } catch (err) {
+      console.error('Failed to delete renewal log:', err);
+    }
+  };
+
+  // Export Renewals to Excel
+  const handleExportRenewalsExcel = () => {
+    if (renewalsList.length === 0) return;
+    const exportData = renewalsList.map((r, idx) => ({
+      '#': idx + 1,
+      'Subscription': r.subscription_name,
+      'Provider': r.provider,
+      'Campus': r.campus,
+      'Renewal Period': `${r.renewal_period_months} Mo (${r.billing_cycle})`,
+      'Previous Expiry': r.previous_renewal_date ? r.previous_renewal_date.slice(0, 10) : 'N/A',
+      'New Renewal Date': r.new_renewal_date ? r.new_renewal_date.slice(0, 10) : '',
+      'Cost': Number(r.cost) || 0,
+      'Currency': r.currency,
+      'Invoice No': r.invoice_no || '',
+      'PO No': r.po_no || '',
+      'Payment Status': r.payment_status || 'Paid',
+      'Payment Method': r.payment_method || '',
+      'Renewed By': r.renewed_by || '',
+      'Notes': r.notes || '',
+      'Renewed At': r.renewed_at ? new Date(r.renewed_at).toLocaleString() : ''
+    }));
+
+    const ws = xlsx.utils.json_to_sheet(exportData);
+    const wb = xlsx.utils.book_new();
+    xlsx.utils.book_append_sheet(wb, ws, 'Renewal History');
+    xlsx.writeFile(wb, `Cloud_HIS_Renewal_History_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  // Head of IT Smart Executive Dashboard Metrics & Strategic Insights
+  const executiveMetrics = useMemo(() => {
+    const totalCount = subscriptions.length;
+    const activeSubs = subscriptions.filter(s => s.status === 'Active');
+    
+    // Normalized Annual & Monthly Run Rate
+    const totalAnnualRunRate = subscriptions.reduce((sum, s) => {
+      const cost = Number(s.cost) || 0;
+      if (s.billing_cycle === 'Monthly') return sum + cost * 12;
+      if (s.billing_cycle === 'Quarterly') return sum + cost * 4;
+      return sum + cost; // Annually / Usage-Based
+    }, 0);
+
+    const totalMonthlyRunRate = totalAnnualRunRate / 12;
+
+    let hisAnnual = 0;
+    let hisCount = 0;
+    let computeAnnual = 0;
+    let computeCount = 0;
+    let erpAnnual = 0;
+    let erpCount = 0;
+    let pacsAnnual = 0;
+    let pacsCount = 0;
+    let webSecAnnual = 0;
+    let webSecCount = 0;
+
+    const clinicalWatchlist: Array<CloudSubscription & { annualizedCost: number; daysRemaining: number | null }> = [];
+    const upcomingRenewals: Array<CloudSubscription & { annualizedCost: number; daysRemaining: number | null }> = [];
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    // 12-Month distribution bucket
+    const monthlyVelocity = [
+      { month: 'Jan', name: 'January', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Feb', name: 'February', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Mar', name: 'March', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Apr', name: 'April', amount: 0, count: 0, services: [] as string[] },
+      { month: 'May', name: 'May', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Jun', name: 'June', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Jul', name: 'July', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Aug', name: 'August', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Sep', name: 'September', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Oct', name: 'October', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Nov', name: 'November', amount: 0, count: 0, services: [] as string[] },
+      { month: 'Dec', name: 'December', amount: 0, count: 0, services: [] as string[] },
+    ];
+
+    // Campus Map
+    const campusMap = new Map<string, {
+      site: string;
+      totalSpend: number;
+      count: number;
+      keySystems: string[];
+      slaTier: string;
+      vmCount: number;
+    }>();
+
+    subscriptions.forEach(sub => {
+      const rawCost = Number(sub.cost) || 0;
+      let annualized = rawCost;
+      if (sub.billing_cycle === 'Monthly') annualized = rawCost * 12;
+      else if (sub.billing_cycle === 'Quarterly') annualized = rawCost * 4;
+
+      const subNameLower = (sub.name || '').toLowerCase();
+      const providerLower = (sub.provider || '').toLowerCase();
+      const catLower = (sub.category || '').toLowerCase();
+
+      // Days remaining calculation
+      let daysRemaining: number | null = null;
+      if (sub.renewal_date) {
+        const renDate = new Date(sub.renewal_date);
+        if (!isNaN(renDate.getTime())) {
+          const diffTime = renDate.getTime() - now.getTime();
+          daysRemaining = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+          const mIdx = renDate.getMonth();
+          if (mIdx >= 0 && mIdx < 12) {
+            monthlyVelocity[mIdx].amount += rawCost;
+            monthlyVelocity[mIdx].count += 1;
+            monthlyVelocity[mIdx].services.push(sub.name);
+          }
+        }
+      }
+
+      const itemWithMeta = { ...sub, annualizedCost: annualized, daysRemaining };
+
+      // Domain segmentation
+      if (subNameLower.includes('radiant') || providerLower.includes('radiant') || catLower.includes('radiant') || subNameLower.includes('dicom')) {
+        pacsAnnual += annualized;
+        pacsCount += 1;
+        clinicalWatchlist.push(itemWithMeta);
+      } else if (subNameLower.includes('d365') || subNameLower.includes('dynamics') || providerLower.includes('blue technology')) {
+        erpAnnual += annualized;
+        erpCount += 1;
+        clinicalWatchlist.push(itemWithMeta);
+      } else if (subNameLower.includes('ehospital') || subNameLower.includes('anzer') || providerLower.includes('adroit') || providerLower.includes('anzer')) {
+        hisAnnual += annualized;
+        hisCount += 1;
+        clinicalWatchlist.push(itemWithMeta);
+      } else if (subNameLower.includes('vcloudia') || providerLower.includes('vcloudia') || providerLower.includes('cyfuture') || subNameLower.includes('vm') || subNameLower.includes('vpc')) {
+        computeAnnual += annualized;
+        computeCount += 1;
+      } else {
+        webSecAnnual += annualized;
+        webSecCount += 1;
+      }
+
+      // Renewal radar list
+      if (sub.renewal_date) {
+        upcomingRenewals.push(itemWithMeta);
+      }
+
+      // Campus grouping
+      const site = sub.site_name || 'All Sites';
+      if (!campusMap.has(site)) {
+        let slaTier = '99.5% High SLA';
+        if (site === 'K1' || site === 'K2' || site === 'All Sites') slaTier = '99.9% Mission-Critical';
+        else if (site.includes('Sakal')) slaTier = '99.9% Compute Node';
+        campusMap.set(site, {
+          site,
+          totalSpend: 0,
+          count: 0,
+          keySystems: [],
+          slaTier,
+          vmCount: 0
+        });
+      }
+      const cRec = campusMap.get(site)!;
+      cRec.totalSpend += annualized;
+      cRec.count += 1;
+      if (sub.name.includes('16 VM')) cRec.vmCount += 16;
+      if (sub.name.includes('2 VM')) cRec.vmCount += 2;
+      if (cRec.keySystems.length < 3) {
+        const shortName = sub.name.split('(')[0].split('-')[0].trim();
+        if (!cRec.keySystems.includes(shortName)) cRec.keySystems.push(shortName);
+      }
+    });
+
+    // Strategic Domains array for Donut
+    const domainSpend = [
+      {
+        name: 'HIS & Clinical Systems',
+        shortName: 'HIS Core',
+        value: Number(hisAnnual.toFixed(2)),
+        count: hisCount,
+        color: '#4f46e5', // indigo-600
+        desc: 'eHospital TK & BKK, Anzer Hospital System',
+        share: totalAnnualRunRate > 0 ? (hisAnnual / totalAnnualRunRate) * 100 : 0
+      },
+      {
+        name: 'Cloud VMs & VPC Compute',
+        shortName: 'Cloud Compute',
+        value: Number(computeAnnual.toFixed(2)),
+        count: computeCount,
+        color: '#0284c7', // sky-600
+        desc: '18 Dedicated Cloud VMs & VCLOUDIA VPC',
+        share: totalAnnualRunRate > 0 ? (computeAnnual / totalAnnualRunRate) * 100 : 0
+      },
+      {
+        name: 'Enterprise ERP (D365)',
+        shortName: 'Dynamics 365',
+        value: Number(erpAnnual.toFixed(2)),
+        count: erpCount,
+        color: '#7c3aed', // violet-600
+        desc: 'Dynamics 365 Local Support & User Licensing',
+        share: totalAnnualRunRate > 0 ? (erpAnnual / totalAnnualRunRate) * 100 : 0
+      },
+      {
+        name: 'PACS & Clinical Imaging',
+        shortName: 'RadiAnt PACS',
+        value: Number(pacsAnnual.toFixed(2)),
+        count: pacsCount,
+        color: '#059669', // emerald-600
+        desc: 'RadiAnt DICOM Diagnostic Workstations',
+        share: totalAnnualRunRate > 0 ? (pacsAnnual / totalAnnualRunRate) * 100 : 0
+      },
+      {
+        name: 'Security, Backup & Web',
+        shortName: 'Sec / Web / Backup',
+        value: Number(webSecAnnual.toFixed(2)),
+        count: webSecCount,
+        color: '#d97706', // amber-600
+        desc: 'IDrive Off-site, VPN, Domains & Web Hosting',
+        share: totalAnnualRunRate > 0 ? (webSecAnnual / totalAnnualRunRate) * 100 : 0
+      }
+    ].filter(d => d.value > 0);
+
+    // Sort upcoming renewals by days remaining ascending
+    upcomingRenewals.sort((a, b) => {
+      if (a.daysRemaining === null) return 1;
+      if (b.daysRemaining === null) return -1;
+      return a.daysRemaining - b.daysRemaining;
+    });
+
+    // Sort clinical watchlist by cost descending
+    clinicalWatchlist.sort((a, b) => b.annualizedCost - a.annualizedCost);
+
+    const campusList = Array.from(campusMap.values()).sort((a, b) => b.totalSpend - a.totalSpend);
+
+    const expiring30 = upcomingRenewals.filter(r => r.daysRemaining !== null && r.daysRemaining <= 30 && r.daysRemaining >= 0).length;
+    const expiring90 = upcomingRenewals.filter(r => r.daysRemaining !== null && r.daysRemaining <= 90 && r.daysRemaining >= 0).length;
+
+    return {
+      totalAnnualRunRate,
+      totalMonthlyRunRate,
+      totalCount,
+      activeCount: activeSubs.length,
+      domainSpend,
+      monthlyVelocity,
+      clinicalWatchlist,
+      upcomingRenewals,
+      campusList,
+      expiring30,
+      expiring90,
+      hisAnnual,
+      computeAnnual,
+      erpAnnual,
+      pacsAnnual,
+      webSecAnnual
+    };
+  }, [subscriptions]);
+
+  // Export Executive Summary Excel Workbook for Head of IT & CFO
+  const handleExportExecutiveReport = () => {
+    if (subscriptions.length === 0) return;
+    const wb = xlsx.utils.book_new();
+
+    // 1. Executive Summary Sheet
+    const kpiData = [
+      { 'Metric': 'Total Annual Portfolio Commitment (USD)', 'Value': executiveMetrics.totalAnnualRunRate },
+      { 'Metric': 'Normalized Monthly Run-Rate (USD)', 'Value': executiveMetrics.totalMonthlyRunRate },
+      { 'Metric': 'Total Active Contracted Subscriptions', 'Value': executiveMetrics.activeCount },
+      { 'Metric': 'HIS & Clinical Systems Spend (USD)', 'Value': executiveMetrics.hisAnnual },
+      { 'Metric': 'Cloud VMs & VPC Compute Spend (USD)', 'Value': executiveMetrics.computeAnnual },
+      { 'Metric': 'Enterprise ERP (D365) Spend (USD)', 'Value': executiveMetrics.erpAnnual },
+      { 'Metric': 'PACS Clinical Diagnostic Spend (USD)', 'Value': executiveMetrics.pacsAnnual },
+      { 'Metric': 'Security, Backup & Web Spend (USD)', 'Value': executiveMetrics.webSecAnnual },
+      { 'Metric': 'Upcoming Expirations in Next 30 Days', 'Value': executiveMetrics.expiring30 },
+      { 'Metric': 'Upcoming Expirations in Next 90 Days', 'Value': executiveMetrics.expiring90 },
+      { 'Metric': 'Report Generated At', 'Value': new Date().toLocaleString() }
+    ];
+    const wsKpi = xlsx.utils.json_to_sheet(kpiData);
+    xlsx.utils.book_append_sheet(wb, wsKpi, 'Executive KPI Summary');
+
+    // 2. Strategic Domain Allocation Sheet
+    const domainData = executiveMetrics.domainSpend.map(d => ({
+      'Domain': d.name,
+      'Core Systems & Coverage': d.desc,
+      'Active Services Count': d.count,
+      'Annual Spend (USD)': d.value,
+      'Portfolio Share (%)': Number(d.share.toFixed(1))
+    }));
+    const wsDomain = xlsx.utils.json_to_sheet(domainData);
+    xlsx.utils.book_append_sheet(wb, wsDomain, 'Strategic Domains');
+
+    // 3. Multi-Campus Distribution Sheet
+    const campusData = executiveMetrics.campusList.map(c => ({
+      'Campus / Location': c.site,
+      'Services Count': c.count,
+      'Annual Commitment (USD)': Number(c.totalSpend.toFixed(2)),
+      'Key Systems': c.keySystems.join(', '),
+      'Dedicated Cloud VMs': c.vmCount > 0 ? `${c.vmCount} VMs` : '0',
+      'Target SLA Tier': c.slaTier
+    }));
+    const wsCampus = xlsx.utils.json_to_sheet(campusData);
+    xlsx.utils.book_append_sheet(wb, wsCampus, 'Campus Allocation');
+
+    // 4. Clinical Systems Watchlist
+    const clinicalData = executiveMetrics.clinicalWatchlist.map(c => ({
+      'System Name': c.name,
+      'Provider / Vendor': c.provider,
+      'Campus': c.site_name,
+      'Annual Cost (USD)': Number(c.annualizedCost.toFixed(2)),
+      'Billing Cycle': c.billing_cycle,
+      'Status': c.status,
+      'Target Renewal Date': c.renewal_date ? c.renewal_date.slice(0, 10) : 'N/A',
+      'Days Remaining': c.daysRemaining !== null ? c.daysRemaining : 'N/A',
+      'Owner Team': c.owner_team
+    }));
+    const wsClinical = xlsx.utils.json_to_sheet(clinicalData);
+    xlsx.utils.book_append_sheet(wb, wsClinical, 'Clinical Systems Watchlist');
+
+    // 5. 12-Month Renewal Schedule
+    const velocityData = executiveMetrics.monthlyVelocity.map(m => ({
+      'Month': m.name,
+      'Renewing Contracts Count': m.count,
+      'Renewal Spend Amount (USD)': Number(m.amount.toFixed(2)),
+      'Renewing Services': m.services.join('; ')
+    }));
+    const wsVelocity = xlsx.utils.json_to_sheet(velocityData);
+    xlsx.utils.book_append_sheet(wb, wsVelocity, '12-Month Cash Flow Schedule');
+
+    xlsx.writeFile(wb, `Cloud_HIS_Executive_Dashboard_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   // Helper to normalize imported subscription item
@@ -1248,6 +1971,674 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
         </div>
       </div>
 
+      {/* View Switcher Tabs */}
+      <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
+        <button
+          type="button"
+          onClick={() => setActiveModuleTab('executive')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+            activeModuleTab === 'executive'
+              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/20'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <BarChart3 size={14} />
+          Smart Executive Dashboard
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveModuleTab('catalog')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+            activeModuleTab === 'catalog'
+              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/20'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Cloud size={14} />
+          Active Catalog & Subscriptions ({subscriptions.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setActiveModuleTab('renewals');
+            fetchRenewals();
+          }}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition-all ${
+            activeModuleTab === 'renewals'
+              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/20'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <History size={14} />
+          Renewal History & Audit Log
+        </button>
+      </div>
+
+      {/* SMART EXECUTIVE DASHBOARD TAB VIEW */}
+      {activeModuleTab === 'executive' && (
+        <div className="space-y-6 animate-in fade-in duration-150">
+          {/* Executive Sub-Header / Briefing Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-6 text-white shadow-lg relative overflow-hidden border border-indigo-900/40">
+            <div className="absolute right-0 top-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -left-10 -bottom-10 w-64 h-64 bg-emerald-500/10 rounded-full blur-2xl pointer-events-none" />
+            
+            <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold tracking-wide uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    <Activity size={12} className="text-indigo-400" />
+                    CIO & Head of IT Command Center
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <CheckCircle2 size={12} />
+                    Live Database Sync
+                  </span>
+                </div>
+                <h2 className="text-xl lg:text-2xl font-bold tracking-tight text-white">
+                  Cloud Infrastructure & HIS Subscription Governance
+                </h2>
+                <p className="mt-1 text-xs lg:text-sm text-slate-300 max-w-3xl leading-relaxed">
+                  Real-time portfolio intelligence across mission-critical clinical systems (eHospital, Anzer, RadiAnt DICOM PACS), enterprise ERP (Dynamics 365), and 18 multi-campus cloud virtual machines across Khema facilities.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <Button
+                  onClick={handleExportExecutiveReport}
+                  size="sm"
+                  className="gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 backdrop-blur-sm shadow-sm font-medium"
+                >
+                  <Download size={14} />
+                  Export Executive Excel
+                </Button>
+                <Button
+                  onClick={() => setActiveModuleTab('catalog')}
+                  size="sm"
+                  className="gap-2 bg-indigo-600 hover:bg-indigo-500 text-white shadow-md shadow-indigo-600/30 font-medium"
+                >
+                  Inspect Active Catalog ({subscriptions.length})
+                  <ArrowRight size={14} />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Top Executive Command Metrics (5 KPI Cards) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* 1. Total Annual Portfolio Run-Rate */}
+            <div className="bg-white rounded-xl p-4 border border-slate-200/80 shadow-sm relative overflow-hidden group hover:border-indigo-300 transition-colors">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Annual Commitment</p>
+                <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
+                  <DollarSign size={16} />
+                </div>
+              </div>
+              <div className="mt-2">
+                <span className="text-2xl font-bold font-mono tracking-tight text-slate-900 tabular-nums">
+                  ${executiveMetrics.totalAnnualRunRate.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </span>
+                <span className="text-xs text-slate-400 font-medium"> / yr</span>
+              </div>
+              <p className="mt-2 text-xs text-slate-600 font-medium flex items-center justify-between">
+                <span>Monthly Burn:</span>
+                <span className="font-mono font-semibold text-slate-900">${executiveMetrics.totalMonthlyRunRate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </p>
+              <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-[11px] text-slate-400 flex items-center gap-1">
+                <CheckCircle size={12} className="text-emerald-500" />
+                <span>{executiveMetrics.activeCount} active contracted services</span>
+              </div>
+            </div>
+
+            {/* 2. Core HIS & Clinical Core Systems */}
+            <div className="bg-white rounded-xl p-4 border border-slate-200/80 shadow-sm relative overflow-hidden group hover:border-emerald-300 transition-colors">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">HIS & Clinical Core</p>
+                <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
+                  <Activity size={16} />
+                </div>
+              </div>
+              <div className="mt-2">
+                <span className="text-2xl font-bold font-mono tracking-tight text-emerald-600 tabular-nums">
+                  ${executiveMetrics.hisAnnual.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </span>
+                <span className="text-xs text-slate-400 font-medium"> / yr</span>
+              </div>
+              <p className="mt-2 text-xs text-emerald-700 font-medium flex items-center justify-between">
+                <span>Portfolio Share:</span>
+                <span className="font-mono font-semibold">{((executiveMetrics.hisAnnual / (executiveMetrics.totalAnnualRunRate || 1)) * 100).toFixed(1)}%</span>
+              </p>
+              <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-[11px] text-slate-400 truncate" title="eHospital (TK & BKK) + Anzer HIS">
+                eHospital TK/BKK + Anzer HIS
+              </div>
+            </div>
+
+            {/* 3. Cloud Compute & Virtual Machines */}
+            <div className="bg-white rounded-xl p-4 border border-slate-200/80 shadow-sm relative overflow-hidden group hover:border-sky-300 transition-colors">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Cloud VMs & VPC</p>
+                <div className="p-2 rounded-lg bg-sky-50 text-sky-600">
+                  <Server size={16} />
+                </div>
+              </div>
+              <div className="mt-2">
+                <span className="text-2xl font-bold font-mono tracking-tight text-sky-600 tabular-nums">
+                  ${executiveMetrics.computeAnnual.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </span>
+                <span className="text-xs text-slate-400 font-medium"> / yr</span>
+              </div>
+              <p className="mt-2 text-xs text-sky-700 font-medium flex items-center justify-between">
+                <span>Compute Fleet:</span>
+                <span className="font-semibold text-slate-900">18 VMs + 1 VPC</span>
+              </p>
+              <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-[11px] text-slate-400 truncate" title="Cyfuture 18 VMs + VCLOUDIA VPC">
+                Cyfuture Cloud + VCLOUDIA VPC
+              </div>
+            </div>
+
+            {/* 4. Enterprise ERP & PACS */}
+            <div className="bg-white rounded-xl p-4 border border-slate-200/80 shadow-sm relative overflow-hidden group hover:border-violet-300 transition-colors">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">ERP & Diagnostic PACS</p>
+                <div className="p-2 rounded-lg bg-violet-50 text-violet-600">
+                  <Layers size={16} />
+                </div>
+              </div>
+              <div className="mt-2">
+                <span className="text-2xl font-bold font-mono tracking-tight text-violet-600 tabular-nums">
+                  ${(executiveMetrics.erpAnnual + executiveMetrics.pacsAnnual).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </span>
+                <span className="text-xs text-slate-400 font-medium"> / yr</span>
+              </div>
+              <p className="mt-2 text-xs text-violet-700 font-medium flex items-center justify-between">
+                <span>D365 & PACS:</span>
+                <span className="font-semibold text-slate-900">3 Subscriptions</span>
+              </p>
+              <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-[11px] text-slate-400 truncate" title="Dynamics 365 Support + Users & RadiAnt DICOM">
+                Dynamics 365 + RadiAnt DICOM
+              </div>
+            </div>
+
+            {/* 5. Expiration & Renewal Velocity */}
+            <div className="bg-white rounded-xl p-4 border border-slate-200/80 shadow-sm relative overflow-hidden group hover:border-amber-300 transition-colors">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">90-Day Renewal Radar</p>
+                <div className="p-2 rounded-lg bg-amber-50 text-amber-600">
+                  <Clock size={16} />
+                </div>
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-bold font-mono tracking-tight text-amber-600 tabular-nums">
+                  {executiveMetrics.expiring90}
+                </span>
+                <span className="text-xs text-slate-500 font-medium">expiring</span>
+              </div>
+              <p className="mt-2 text-xs text-slate-600 font-medium flex items-center justify-between">
+                <span>30-Day Critical:</span>
+                <span className={`font-mono font-semibold ${executiveMetrics.expiring30 > 0 ? 'text-rose-600' : 'text-slate-900'}`}>
+                  {executiveMetrics.expiring30} contracts
+                </span>
+              </p>
+              <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-[11px] text-slate-400 truncate" title={executiveMetrics.upcomingRenewals[0]?.name}>
+                Next: {executiveMetrics.upcomingRenewals[0]?.name?.split('(')[0]?.trim() || 'All current'}
+              </div>
+            </div>
+          </div>
+
+          {/* Strategic Analytical Charts Row (Donut & 12-Month Velocity) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left 5 Cols: Strategic Domain Allocation Donut */}
+            <div className="lg:col-span-5 bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
+                      <PieIcon size={16} />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-900">Strategic Capital Allocation</h3>
+                  </div>
+                  <span className="text-xs font-mono font-semibold text-slate-500">
+                    Total: ${executiveMetrics.totalAnnualRunRate.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mb-4">
+                  Breakdown by strategic IT functional domain across clinical and infrastructure operations.
+                </p>
+
+                {/* Donut Chart Container */}
+                <div className="h-56 relative flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={executiveMetrics.domainSpend}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={58}
+                        outerRadius={84}
+                        paddingAngle={3}
+                        dataKey="value"
+                      >
+                        {executiveMetrics.domainSpend.map((entry) => (
+                          <Cell key={`cell-${entry.name}`} fill={entry.color} stroke="#ffffff" strokeWidth={2} />
+                        ))}
+                      </Pie>
+                      <RechartsTooltip 
+                        formatter={(val: any) => [`$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Annual Commitment']}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  {/* Center Donut Metric */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Annual</span>
+                    <span className="text-base font-bold text-slate-900 font-mono">
+                      ${(executiveMetrics.totalAnnualRunRate / 1000).toFixed(1)}k
+                    </span>
+                    <span className="text-[10px] text-slate-400">USD Run-Rate</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Legend & Breakdown Table */}
+              <div className="mt-3 space-y-2 pt-3 border-t border-slate-100">
+                {executiveMetrics.domainSpend.map((domain) => (
+                  <div key={domain.name} className="flex items-center justify-between text-xs py-0.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: domain.color }} />
+                      <div className="truncate">
+                        <span className="font-semibold text-slate-800">{domain.name}</span>
+                        <span className="text-slate-400 ml-1.5 text-[11px]">({domain.count} {domain.count === 1 ? 'service' : 'services'})</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="font-mono font-semibold text-slate-900">
+                        ${domain.value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      </span>
+                      <span className="font-mono text-[11px] text-slate-400 w-11 text-right">
+                        {domain.share.toFixed(1)}%
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Right 7 Cols: 12-Month Renewal & Cash Flow Velocity */}
+            <div className="lg:col-span-7 bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
+                      <TrendingUp size={16} />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-900">12-Month Renewal Cash Flow Velocity</h3>
+                  </div>
+                  <span className="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
+                    Procurement Schedule
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mb-4">
+                  Projected monthly renewal disbursements across the calendar year to prevent liquidity shocks and align quarterly OPEX budgets.
+                </p>
+
+                {/* Bar Chart Container */}
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={executiveMetrics.monthlyVelocity} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis 
+                        dataKey="month" 
+                        tickLine={false} 
+                        axisLine={{ stroke: '#e2e8f0' }} 
+                        tick={{ fontSize: 11, fill: '#64748b' }} 
+                      />
+                      <YAxis 
+                        tickLine={false} 
+                        axisLine={false} 
+                        tick={{ fontSize: 11, fill: '#64748b' }}
+                        tickFormatter={(v) => `$${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`}
+                      />
+                      <RechartsTooltip 
+                        formatter={(val: any) => [`$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 'Renewal Disbursement']}
+                        labelFormatter={(label) => `Month: ${label}`}
+                      />
+                      <Bar 
+                        dataKey="amount" 
+                        fill="#4f46e5" 
+                        radius={[4, 4, 0, 0]} 
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Cash Flow Key Strategic Highlights */}
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2 pt-3 border-t border-slate-100">
+                <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Major Peak (September)</p>
+                  <p className="text-xs font-bold text-slate-800 font-mono mt-0.5">$12,791.00</p>
+                  <p className="text-[10px] text-slate-500 truncate">eHospital BKK Renewal</p>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Major Peak (April)</p>
+                  <p className="text-xs font-bold text-slate-800 font-mono mt-0.5">$12,354.65</p>
+                  <p className="text-[10px] text-slate-500 truncate">Anzer HIS (Sakal / Corp)</p>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-50 border border-slate-100">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Major Peak (March)</p>
+                  <p className="text-xs font-bold text-slate-800 font-mono mt-0.5">$10,283.00</p>
+                  <p className="text-[10px] text-slate-500 truncate">eHospital TK + GoDaddy</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Multi-Campus Subscription Footprint & SLA Resilience Matrix */}
+          <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
+                    <Building2 size={16} />
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900">Multi-Campus Subscription Footprint & SLA Resilience Matrix</h3>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Portfolio commitment, primary clinical/cloud platforms, and guaranteed service uptime tiers mapped by Khema facility.
+                </p>
+              </div>
+
+              <span className="text-xs text-slate-400 font-medium">
+                {executiveMetrics.campusList.length} Operational Facilities
+              </span>
+            </div>
+
+            {/* Campus Matrix Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {executiveMetrics.campusList.map((campus) => (
+                <div 
+                  key={campus.site}
+                  className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-indigo-300 hover:shadow-md transition-all group flex flex-col justify-between"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="min-w-0">
+                        <span className="font-bold text-slate-900 text-sm block truncate group-hover:text-indigo-600 transition-colors">
+                          {campus.site}
+                        </span>
+                        <span className="text-[11px] text-slate-400 font-medium">
+                          {campus.count} {campus.count === 1 ? 'Subscription' : 'Subscriptions'}
+                          {campus.vmCount > 0 ? ` · ${campus.vmCount} Dedicated VMs` : ''}
+                        </span>
+                      </div>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                        campus.slaTier.includes('Critical') || campus.slaTier.includes('Compute')
+                          ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                          : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      }`}>
+                        {campus.slaTier}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex items-baseline justify-between">
+                      <span className="text-xs text-slate-500">Annual Commitment:</span>
+                      <span className="text-base font-bold font-mono text-slate-900 tabular-nums">
+                        ${campus.totalSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </div>
+
+                    <div className="mt-2.5 pt-2 border-t border-slate-200/80">
+                      <p className="text-[11px] font-semibold text-slate-500 mb-1">Key Systems:</p>
+                      <div className="flex flex-wrap gap-1">
+                        {campus.keySystems.map((sys, idx) => (
+                          <span key={idx} className="text-[10px] bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md font-medium truncate max-w-[200px]">
+                            {sys}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSiteFilter(campus.site);
+                      setActiveModuleTab('catalog');
+                    }}
+                    className="mt-4 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50/70 hover:bg-indigo-600 hover:text-white transition-colors"
+                  >
+                    Inspect Campus Catalog
+                    <ArrowRight size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Head of IT Decision Radars: Clinical Systems Watchlist & 90-Day Renewal Radar */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left 6 Cols: Mission-Critical Clinical Systems Watchlist */}
+            <div className="lg:col-span-6 bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-emerald-50 text-emerald-600">
+                      <ShieldCheck size={16} />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-900">Clinical Core Systems Watchlist (HIS, ERP & PACS)</h3>
+                  </div>
+                  <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100">
+                    High Governance
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mb-4">
+                  Dedicated monitoring of hospital operational platforms, medical imaging PACS, and enterprise financial software.
+                </p>
+
+                <div className="space-y-3">
+                  {executiveMetrics.clinicalWatchlist.map((item) => (
+                    <div 
+                      key={item.id}
+                      className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/40 hover:bg-white hover:border-emerald-300 hover:shadow-xs transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900 text-xs truncate">
+                            {item.name}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-md font-semibold bg-indigo-50 text-indigo-600 border border-indigo-100 shrink-0">
+                            {item.site_name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 text-[11px] text-slate-500">
+                          <span>Vendor: <strong className="text-slate-700">{item.provider}</strong></span>
+                          <span>•</span>
+                          <span>Cycle: {item.billing_cycle}</span>
+                        </div>
+                        <div className="mt-1 flex items-center gap-2 text-[11px]">
+                          <span className="text-slate-400">Target Renewal:</span>
+                          <span className="font-mono text-slate-700 font-medium">
+                            {item.renewal_date ? item.renewal_date.slice(0, 10) : 'N/A'}
+                          </span>
+                          {item.daysRemaining !== null && (
+                            <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                              item.daysRemaining <= 30 
+                                ? 'bg-rose-50 text-rose-600 border border-rose-200' 
+                                : item.daysRemaining <= 90 
+                                  ? 'bg-amber-50 text-amber-700 border border-amber-200' 
+                                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}>
+                              {item.daysRemaining > 0 ? `${item.daysRemaining} days left` : 'Due now'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-2 shrink-0">
+                        <span className="text-sm font-bold font-mono text-slate-900 tabular-nums">
+                          ${Number(item.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenItemHistoryModal(item)}
+                            className="text-[11px] px-2 py-1 rounded-md text-slate-600 hover:bg-slate-100 border border-slate-200 font-medium"
+                            title="View contract renewal history timeline"
+                          >
+                            History
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenRenewModal(item)}
+                            className="text-[11px] px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-xs"
+                          >
+                            Renew Contract
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Right 6 Cols: 90-Day Renewal & Action Radar + Cloud Infrastructure Snapshot */}
+            <div className="lg:col-span-6 space-y-6">
+              {/* 90-Day Renewal Watchlist Card */}
+              <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-amber-50 text-amber-600">
+                      <Clock size={16} />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-900">Upcoming Expirations Radar</h3>
+                  </div>
+                  <span className="text-xs font-mono font-semibold text-slate-500">
+                    Chronological Queue
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mb-3">
+                  Contracts requiring renewal processing, vendor renegotiation, or purchase order authorization.
+                </p>
+
+                <div className="space-y-2.5">
+                  {executiveMetrics.upcomingRenewals.slice(0, 5).map((item) => (
+                    <div 
+                      key={item.id}
+                      className="p-3 rounded-xl border border-slate-200 bg-slate-50/30 hover:bg-white hover:border-amber-300 transition-all flex items-center justify-between gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-slate-900 text-xs truncate">
+                            {item.name}
+                          </span>
+                          <span className="text-[10px] text-slate-500 shrink-0">
+                            ({item.site_name})
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500">
+                          <span>{item.provider}</span>
+                          <span>•</span>
+                          <span className="font-mono text-slate-700">{item.renewal_date ? item.renewal_date.slice(0, 10) : ''}</span>
+                          {item.daysRemaining !== null && (
+                            <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded ${
+                              item.daysRemaining <= 30
+                                ? 'bg-rose-100 text-rose-800'
+                                : item.daysRemaining <= 90
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {item.daysRemaining > 0 ? `${item.daysRemaining}d` : 'Today'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-bold font-mono text-slate-900">
+                          ${Number(item.cost).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenRenewModal(item)}
+                          className="text-[11px] px-2.5 py-1 rounded-md bg-amber-500 hover:bg-amber-600 text-white font-semibold shadow-xs"
+                        >
+                          Renew
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Cloud Compute Infrastructure & VMs Cluster Snapshot */}
+              <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-sky-50 text-sky-600">
+                      <Cpu size={16} />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-900">Cloud Compute & Virtualization Clusters</h3>
+                  </div>
+                  <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-100 flex items-center gap-1">
+                    <CheckCircle2 size={12} />
+                    Online & Redundant
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+                  {/* Cyfuture 18 VMs Cluster */}
+                  <div className="p-3 rounded-xl border border-sky-100 bg-sky-50/40">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-sky-950">Cyfuture Cloud Cluster</span>
+                      <span className="text-[10px] font-mono font-bold text-sky-700 bg-sky-100 px-1.5 py-0.5 rounded">
+                        18 Virtual Machines
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-1">
+                      16 VM Business Basic + 2 VM Anzer accounting hosts at Sakal Polyclinic. SoftEther VPN connected.
+                    </p>
+                    <div className="mt-2 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">Annual Compute Spend:</span>
+                      <span className="font-mono font-bold text-slate-900">$10,342.00 / yr</span>
+                    </div>
+                  </div>
+
+                  {/* VCLOUDIA VPC */}
+                  <div className="p-3 rounded-xl border border-indigo-100 bg-indigo-50/40">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-indigo-950">VCLOUDIA Local VPC</span>
+                      <span className="text-[10px] font-mono font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded">
+                        Private Cloud
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-1">
+                      Dedicated high-throughput Virtual Private Cloud local hosting for corporate Khema Global operations.
+                    </p>
+                    <div className="mt-2 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">Annual VPC Spend:</span>
+                      <span className="font-mono font-bold text-slate-900">$11,684.40 / yr</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Additional infrastructure indicators */}
+                <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500 gap-2">
+                  <span className="flex items-center gap-1.5 text-slate-600">
+                    <ShieldCheck size={13} className="text-emerald-500" />
+                    IDrive Daily Off-site Cloud Storage Backup active
+                  </span>
+                  <span className="flex items-center gap-1.5 text-slate-600">
+                    <Network size={13} className="text-sky-500" />
+                    Cross-campus SoftEther VPN tunnel verified
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeModuleTab === 'catalog' && (
+        <>
       {/* KPI Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Active Subscriptions */}
@@ -1846,7 +3237,24 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
 
                       {/* Actions */}
                       <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenRenewModal(item)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors border border-emerald-200/70 shadow-xs"
+                            title="Renew subscription contract"
+                          >
+                            <RotateCw size={12} className="text-emerald-600" />
+                            Renew
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenItemHistoryModal(item)}
+                            className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                            title="View renewal history logs"
+                          >
+                            <History size={14} />
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleOpenEditModal(item)}
@@ -1928,6 +3336,346 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
           </div>
         </div>
       </div>
+      </>
+      )}
+
+      {/* RENEWAL HISTORY & AUDIT LOG TAB VIEW */}
+      {activeModuleTab === 'renewals' && (
+        <div className="space-y-5 animate-in fade-in duration-150">
+          {/* Renewal KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Renewed Capital</p>
+                <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
+                  <DollarSign size={16} />
+                </div>
+              </div>
+              <div className="mt-2">
+                <span className="text-2xl font-bold text-slate-900 font-mono">
+                  ${renewalsTotalSpend.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="text-xs text-slate-400 font-medium"> USD</span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500 font-medium flex items-center gap-1 text-emerald-600">
+                <CheckCircle2 size={13} /> Recorded across all renewals
+              </p>
+            </div>
+
+            <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Renewal Events</p>
+                <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
+                  <History size={16} />
+                </div>
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-bold text-slate-900">{renewalsList.length}</span>
+                <span className="text-xs text-slate-400 font-medium">audit logs</span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500 font-medium">
+                Contract extension actions
+              </p>
+            </div>
+
+            <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Services Renewed</p>
+                <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
+                  <Cloud size={16} />
+                </div>
+              </div>
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="text-2xl font-bold text-slate-900">
+                  {new Set(renewalsList.map(r => r.subscription_id)).size}
+                </span>
+                <span className="text-xs text-slate-400 font-medium">of {subscriptions.length} active catalog items</span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500 font-medium">
+                Coverage across subscriptions
+              </p>
+            </div>
+
+            <div className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Latest Renewal Date</p>
+                <div className="p-2 rounded-lg bg-amber-50 text-amber-600">
+                  <Calendar size={16} />
+                </div>
+              </div>
+              <div className="mt-2">
+                <span className="text-lg font-bold text-slate-900 font-mono">
+                  {renewalsList.length > 0 && renewalsList[0].renewed_at
+                    ? new Date(renewalsList[0].renewed_at).toLocaleDateString()
+                    : 'None yet'}
+                </span>
+              </div>
+              <p className="mt-2 text-xs text-slate-500 font-medium truncate">
+                {renewalsList.length > 0 ? (renewalsList[0].subscription_name || 'Recent record') : 'Awaiting first contract renewal'}
+              </p>
+            </div>
+          </div>
+
+          {/* Filter Bar & Table Container */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            {/* Filter Bar */}
+            <div className="p-4 border-b border-slate-100 bg-white space-y-3">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {/* Search Input */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-2.5 text-slate-400" size={15} />
+                    <input
+                      type="text"
+                      placeholder="Search subscription, invoice, PO, operator..."
+                      value={renewalsSearch}
+                      onChange={e => setRenewalsSearch(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter') fetchRenewals(); }}
+                      className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    />
+                    {renewalsSearch && (
+                      <button
+                        type="button"
+                        onClick={() => { setRenewalsSearch(''); }}
+                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                      >
+                        <X size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Provider Filter */}
+                  <div>
+                    <select
+                      value={renewalsProviderFilter}
+                      onChange={e => setRenewalsProviderFilter(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-medium text-slate-700"
+                    >
+                      <option>All Providers</option>
+                      {availableProviders.map(p => (
+                        <option key={p} value={p}>{p}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Campus Filter */}
+                  <div>
+                    <select
+                      value={renewalsCampusFilter}
+                      onChange={e => setRenewalsCampusFilter(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 font-medium text-slate-700"
+                    >
+                      <option>All Sites</option>
+                      {sites.map(s => (
+                        <option key={s.id} value={s.site_name}>{s.site_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Actions: Refresh & Export */}
+                <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={fetchRenewals}
+                    disabled={loadingRenewals}
+                    className="gap-1.5 text-xs font-medium"
+                    title="Filter / Refresh list"
+                  >
+                    <RefreshCw size={13} className={loadingRenewals ? 'animate-spin text-indigo-600' : 'text-slate-500'} />
+                    Filter
+                  </Button>
+
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleExportRenewalsExcel}
+                    disabled={renewalsList.length === 0}
+                    className="gap-1.5 text-xs font-medium bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border-emerald-200/80"
+                    title="Export renewal audit logs to Excel"
+                  >
+                    <FileSpreadsheet size={13} className="text-emerald-600" />
+                    Export Excel
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Renewals Data Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50/75 text-slate-600 font-semibold select-none">
+                    <th className="py-3 px-4">Renewal Date & Period</th>
+                    <th className="py-3 px-3">Subscription & Provider</th>
+                    <th className="py-3 px-3">Campus / Site</th>
+                    <th className="py-3 px-3">Cost & Currency</th>
+                    <th className="py-3 px-3">Reference (Invoice / PO)</th>
+                    <th className="py-3 px-3">Handled By & Audit</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loadingRenewals ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center text-slate-400">
+                        <div className="flex flex-col items-center justify-center gap-2">
+                          <RefreshCw size={24} className="animate-spin text-indigo-600" />
+                          <span>Loading renewal history...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : renewalsList.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-12 text-center">
+                        <div className="max-w-md mx-auto text-center space-y-2">
+                          <History size={36} className="mx-auto text-slate-300" />
+                          <h4 className="text-sm font-bold text-slate-800">No Renewal Logs Found</h4>
+                          <p className="text-xs text-slate-500">
+                            No subscription renewals have been recorded yet matching this criteria. You can renew any active subscription directly from the Active Catalog.
+                          </p>
+                          <Button
+                            size="sm"
+                            onClick={() => setActiveModuleTab('catalog')}
+                            className="mt-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium gap-1.5"
+                          >
+                            <Cloud size={13} />
+                            Go to Active Subscriptions
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    renewalsList.map((log) => (
+                      <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                        {/* Renewal Date & Period */}
+                        <td className="py-3 px-4">
+                          <div>
+                            <div className="font-bold text-slate-800 font-mono flex items-center gap-1.5">
+                              <Calendar size={12} className="text-emerald-600" />
+                              {log.new_renewal_date ? log.new_renewal_date.slice(0, 10) : 'Extended'}
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5 flex items-center gap-1">
+                              <span className="font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded">
+                                +{log.renewal_period_months} Mo ({log.billing_cycle})
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              Prev: {log.previous_renewal_date ? log.previous_renewal_date.slice(0, 10) : 'N/A'}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Subscription & Provider */}
+                        <td className="py-3 px-3">
+                          <div>
+                            <div className="font-semibold text-slate-900">{log.subscription_name}</div>
+                            <span className="inline-block mt-0.5 px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/50">
+                              {log.provider}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Campus / Site */}
+                        <td className="py-3 px-3">
+                          <span className="inline-flex items-center gap-1 font-medium text-slate-700">
+                            <Building2 size={12} className="text-slate-400" />
+                            {log.campus}
+                          </span>
+                        </td>
+
+                        {/* Cost & Expense Link */}
+                        <td className="py-3 px-3">
+                          <div>
+                            <div className="font-mono font-bold text-slate-900">
+                              ${Number(log.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              <span className="text-[10px] text-slate-400 font-sans ml-1">{log.currency}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              Cycle: {log.billing_cycle}
+                            </div>
+                            {log.notes && log.notes.includes('IT Expense') && (
+                              <span className="inline-flex items-center gap-0.5 mt-0.5 text-[9px] font-semibold text-emerald-700 bg-emerald-50 px-1 py-0.2 rounded border border-emerald-200/60">
+                                <Check size={10} /> IT Expense
+                              </span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Reference / Invoice / PO */}
+                        <td className="py-3 px-3">
+                          <div className="space-y-0.5">
+                            <div className="text-[11px] text-slate-700">
+                              <span className="text-slate-400">Inv: </span>
+                              <span className="font-mono font-medium">{log.invoice_no || '—'}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-700">
+                              <span className="text-slate-400">PO: </span>
+                              <span className="font-mono font-medium">{log.po_no || '—'}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              {log.payment_method || 'Card'} • <span className="font-semibold text-emerald-600">{log.payment_status || 'Paid'}</span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Handled By & Audit */}
+                        <td className="py-3 px-3">
+                          <div>
+                            <div className="font-semibold text-slate-800">{log.renewed_by || 'IT Operations'}</div>
+                            <div className="text-[10px] text-slate-400">
+                              {log.renewed_at ? new Date(log.renewed_at).toLocaleString() : ''}
+                            </div>
+                            {log.notes && (
+                              <div className="text-[11px] text-slate-500 mt-1 max-w-xs truncate" title={log.notes}>
+                                {log.notes}
+                              </div>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {deletingRenewalId === log.id ? (
+                              <div className="flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteRenewal(log.id)}
+                                  className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold shadow-xs hover:bg-rose-700"
+                                >
+                                  Confirm
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingRenewalId(null)}
+                                  className="px-2 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px] hover:bg-slate-300"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setDeletingRenewalId(log.id)}
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                                title="Delete this renewal record"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* CREATE / EDIT MODAL */}
       {showModal && (
@@ -1948,13 +3696,32 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X size={18} />
-              </button>
+              <div className="flex items-center gap-2">
+                {editingId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const item = subscriptions.find(s => s.id === editingId);
+                      if (item) {
+                        setShowModal(false);
+                        handleOpenRenewModal(item);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-xs"
+                    title="Renew this contract immediately"
+                  >
+                    <RotateCw size={13} className="text-emerald-600" />
+                    Renew Contract
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             {/* Modal Form */}
@@ -3144,6 +4911,671 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
               >
                 {importSubmitting ? <RefreshCw size={13} className="animate-spin" /> : <Upload size={14} />}
                 Confirm & Restore {importParsedData.length > 0 ? `(${importParsedData.length})` : ''}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RENEWAL MODAL */}
+      {showRenewalModal && renewalTargetItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[92vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
+                  <RotateCw size={18} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">
+                    Renew Cloud Subscription
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Extend contract term, update renewal date, and record audit log
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRenewalModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-4 text-xs">
+              {renewalError && (
+                <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center gap-2">
+                  <AlertCircle size={16} className="shrink-0" />
+                  <span>{renewalError}</span>
+                </div>
+              )}
+
+              {/* Target Service Banner */}
+              <div className="bg-slate-50 rounded-xl p-4 border border-slate-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-sm text-slate-900">{renewalTargetItem.name}</span>
+                    <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-semibold text-[11px] border border-indigo-200/50">
+                      {renewalTargetItem.provider}
+                    </span>
+                  </div>
+                  <div className="text-slate-500 text-[11px] mt-1 flex items-center gap-3">
+                    <span>Campus: <strong className="text-slate-700">{renewalTargetItem.site_name}</strong></span>
+                    <span>•</span>
+                    <span>Current Status: <strong className="text-slate-700">{renewalTargetItem.status}</strong></span>
+                  </div>
+                </div>
+                <div className="text-right sm:text-right">
+                  <div className="text-[11px] text-slate-400">Current Expiry / Renewal</div>
+                  <div className="font-mono font-bold text-slate-800 text-xs">
+                    {renewalTargetItem.renewal_date || 'None set'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Renewal Duration Presets */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1.5">
+                  Renewal Period Preset
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {['+1 Month', '+3 Months', '+1 Year', '+2 Years', 'custom'].map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => handleDurationPresetSelect(preset)}
+                      className={`px-3 py-1.5 rounded-xl font-medium text-xs transition-all ${
+                        renewalDurationPreset === preset
+                          ? 'bg-emerald-600 text-white shadow-sm'
+                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {preset === 'custom' ? 'Custom Date' : preset}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Dates & Period Inputs */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    New Expiry / Renewal Date <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={renewalDateInput}
+                    onChange={e => {
+                      setRenewalDateInput(e.target.value);
+                      setRenewalDurationPreset('custom');
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Term Duration (Months)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={renewalPeriodMonths}
+                    onChange={e => {
+                      const m = Math.max(1, parseInt(e.target.value) || 1);
+                      setRenewalPeriodMonths(m);
+                      setRenewalDurationPreset('custom');
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Contract Billing Cycle
+                  </label>
+                  <select
+                    value={renewalBillingCycle}
+                    onChange={e => setRenewalBillingCycle(e.target.value as any)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  >
+                    {BILLING_CYCLES.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Cost & Payment Details */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Renewal Amount ($ USD) <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-slate-400 font-bold">$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={renewalCost}
+                      onChange={e => setRenewalCost(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full pl-7 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Payment Method
+                  </label>
+                  <select
+                    value={renewalPaymentMethod}
+                    onChange={e => setRenewalPaymentMethod(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  >
+                    {PAYMENT_METHODS.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Payment Status
+                  </label>
+                  <select
+                    value={renewalPaymentStatus}
+                    onChange={e => setRenewalPaymentStatus(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  >
+                    <option value="Paid">Paid</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Scheduled">Scheduled</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Reference & PO */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Invoice / Receipt No.
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. INV-2026-0891"
+                    value={renewalInvoiceNo}
+                    onChange={e => setRenewalInvoiceNo(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Purchase Order (PO) No.
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. PO-IT-2026-04"
+                    value={renewalPoNo}
+                    onChange={e => setRenewalPoNo(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Handled by & Notes */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="md:col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Handled / Renewed By
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. IT Operations Team, John Doe"
+                    value={renewalOperator}
+                    onChange={e => setRenewalOperator(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Renewal Notes & Audit Remarks
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. Renewed under annual discount agreement, tier upgraded to Enterprise..."
+                    value={renewalNotes}
+                    onChange={e => setRenewalNotes(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Linked IT Expenses Checkbox */}
+              <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-3">
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={renewalRecordExpense}
+                    onChange={e => setRenewalRecordExpense(e.target.checked)}
+                    className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 h-4 w-4 mt-0.5"
+                  />
+                  <div>
+                    <span className="font-semibold text-slate-800 block">
+                      Also record this renewal payment in IT Expenses ledger
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Creates an automated OpEx transaction linked to this subscription contract in the IT Expense Records ledger.
+                    </span>
+                  </div>
+                </label>
+
+                {renewalRecordExpense && (
+                  <div className="space-y-3 pt-2 border-t border-emerald-200/60">
+                    {autoDetectedOpex && (
+                      <div className="p-2.5 rounded-xl bg-emerald-100/80 border border-emerald-300/80 flex items-center justify-between text-xs text-emerald-950 shadow-2xs">
+                        <div className="flex items-center gap-2">
+                          <Sparkles size={15} className="text-emerald-600 shrink-0" />
+                          <span>
+                            Auto-matched with OpEx Planning: <strong>{autoDetectedOpex.raw_name || autoDetectedOpex.name}</strong> ({autoDetectedOpex.site})
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 uppercase tracking-wide">
+                          Synced
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          Fiscal Year (IT Expense Ledger)
+                        </label>
+                        <select
+                          value={renewalFiscalYear}
+                          onChange={e => {
+                            const fy = parseInt(e.target.value, 10);
+                            setRenewalFiscalYear(fy);
+                            fetchOpexBudgetItems(fy).then(items => {
+                              if (renewalTargetItem) {
+                                const matched = matchOpexPlan(renewalTargetItem, items);
+                                if (matched) {
+                                  setAutoDetectedOpex(matched);
+                                  setRenewalLinkedOpexId(matched.id);
+                                  if (matched.site) setRenewalExpenseCampus(matched.site);
+                                  if (matched.account_code) {
+                                    const found = masterAccountCodes.find(a => 
+                                      a.code.startsWith(matched.account_code) || 
+                                      matched.account_code.startsWith(a.code.split('-')[0].trim()) ||
+                                      a.name.toLowerCase() === (matched.category || '').toLowerCase()
+                                    );
+                                    if (found) setRenewalExpenseCategory(found.code);
+                                  }
+                                } else {
+                                  setAutoDetectedOpex(null);
+                                }
+                              }
+                            });
+                          }}
+                          className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                        >
+                          {[2026, 2027, 2028, 2029, 2030].map(y => (
+                            <option key={y} value={y}>FY {y} Budget Year</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block font-semibold text-slate-700">
+                            Expense Campus / Site
+                          </label>
+                          {autoDetectedOpex && (
+                            <span className="text-[10px] text-emerald-800 font-semibold bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                              <Sparkles size={10} className="text-emerald-600" />
+                              Auto-matched: {autoDetectedOpex.site}
+                            </span>
+                          )}
+                        </div>
+                        <select
+                          value={renewalExpenseCampus}
+                          onChange={e => setRenewalExpenseCampus(e.target.value)}
+                          className={`w-full px-3 py-2 rounded-xl text-xs font-semibold focus:outline-none transition-all shadow-xs ${
+                            autoDetectedOpex
+                              ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 ring-2 ring-emerald-500/20'
+                              : 'border border-emerald-300 bg-white text-slate-800 focus:ring-2 focus:ring-emerald-500/20'
+                          }`}
+                        >
+                          {sites.map(s => (
+                            <option key={s.id} value={s.site_name}>{s.site_name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block font-semibold text-slate-700">
+                            IT Expense Category / Account Code
+                          </label>
+                          {autoDetectedOpex ? (
+                            <span className="text-[10px] text-emerald-800 font-semibold bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300 flex items-center gap-1 shadow-2xs">
+                              <Sparkles size={10} className="text-emerald-600" />
+                              Auto-detected from OpEx
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-700 font-medium bg-emerald-100/70 px-1.5 py-0.5 rounded border border-emerald-200/60 flex items-center gap-1">
+                              <Check size={10} /> Synced with Master Codes
+                            </span>
+                          )}
+                        </div>
+                        <div className="relative">
+                          <select
+                            value={renewalExpenseCategory}
+                            onChange={e => setRenewalExpenseCategory(e.target.value)}
+                            className={`w-full px-3 py-2 text-xs rounded-xl font-semibold focus:outline-none shadow-xs appearance-none pr-8 cursor-pointer transition-all ${
+                              autoDetectedOpex
+                                ? 'border-2 border-emerald-500 bg-emerald-50/50 text-emerald-950 ring-2 ring-emerald-500/20'
+                                : 'border border-emerald-300 bg-white text-slate-800 focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500'
+                            }`}
+                          >
+                            {masterAccountCodes.map((acc: any) => (
+                              <option key={acc.id || acc.code} value={acc.code}>
+                                {acc.code} {acc.name && !acc.code.includes(acc.name) ? `(${acc.name})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={14} className="absolute right-3 top-2.5 text-emerald-600 pointer-events-none" />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1">
+                          OpEx Budget Item Link (S-Operation)
+                        </label>
+                        <div className="relative">
+                          <select
+                            value={renewalLinkedOpexId}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setRenewalLinkedOpexId(val);
+                              if (val === 'auto') {
+                                if (renewalTargetItem) {
+                                  const fallbackSite = renewalTargetItem.site_name && renewalTargetItem.site_name !== 'All Sites' ? renewalTargetItem.site_name : 'K1';
+                                  setRenewalExpenseCampus(fallbackSite);
+                                }
+                                setAutoDetectedOpex(null);
+                              } else {
+                                const selected = opexBudgetItems.find(o => o.id === val);
+                                if (selected) {
+                                  if (selected.site) setRenewalExpenseCampus(selected.site);
+                                  if (selected.account_code) {
+                                    const found = masterAccountCodes.find(a => 
+                                      a.code.startsWith(selected.account_code) || 
+                                      selected.account_code.startsWith(a.code.split('-')[0].trim()) ||
+                                      a.name.toLowerCase() === (selected.category || '').toLowerCase()
+                                    );
+                                    if (found) setRenewalExpenseCategory(found.code);
+                                  }
+                                  setAutoDetectedOpex(selected);
+                                }
+                              }
+                            }}
+                            className="w-full px-3 py-2 text-xs rounded-xl border border-emerald-300 bg-white text-slate-800 font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 shadow-xs appearance-none pr-8 cursor-pointer"
+                          >
+                            <option value="auto">
+                              ✨ Auto-create & Link OpEx Plan Item ({renewalTargetItem.name})
+                            </option>
+                            {opexBudgetItems.map((o) => (
+                              <option key={o.id} value={o.id}>
+                                {o.raw_name || o.name} ({o.site})
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={14} className="absolute right-3 top-2.5 text-emerald-600 pointer-events-none" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-[11px] text-emerald-800 bg-emerald-100/60 p-2.5 rounded-xl border border-emerald-200/80 flex items-center gap-2">
+                      <CheckCircle2 size={15} className="text-emerald-600 shrink-0" />
+                      <span>
+                        Posts directly to <strong>IT Expenses Ledger</strong> and establishes a live link with <strong>OpEx S-Operation Planning</strong> in FY {renewalFiscalYear}, updating monthly actuals.
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 px-6 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between">
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                onClick={() => setShowRenewalModal(false)}
+                disabled={renewalSubmitting}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                onClick={handleExecuteRenewal}
+                disabled={renewalSubmitting}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5 shadow-sm"
+              >
+                {renewalSubmitting ? (
+                  <RefreshCw size={13} className="animate-spin" />
+                ) : (
+                  <RotateCw size={13} />
+                )}
+                Confirm & Record Renewal
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SINGLE SUBSCRIPTION RENEWAL HISTORY MODAL */}
+      {showItemHistoryModal && itemHistorySub && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2.5">
+                <div className="h-9 w-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                  <History size={18} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-800">
+                    Renewal History & Audit Logs
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {itemHistorySub.name} • {itemHistorySub.provider} ({itemHistorySub.site_name})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowItemHistoryModal(false);
+                  setItemHistorySub(null);
+                  setItemHistoryLogs([]);
+                }}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="p-6 space-y-4 text-xs">
+              {/* Summary Strip */}
+              <div className="grid grid-cols-3 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/70 text-center">
+                <div>
+                  <div className="text-[11px] text-slate-400">Total Renewals</div>
+                  <div className="text-base font-bold text-slate-800">{itemHistoryLogs.length}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-400">Total Spend</div>
+                  <div className="text-base font-bold text-emerald-600 font-mono">
+                    ${itemHistoryLogs.reduce((acc, curr) => acc + (Number(curr.cost) || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] text-slate-400">Current Expiry</div>
+                  <div className="text-base font-bold text-slate-800 font-mono">
+                    {itemHistorySub.renewal_date || 'N/A'}
+                  </div>
+                </div>
+              </div>
+
+              {loadingItemHistory ? (
+                <div className="py-12 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
+                  <RefreshCw size={24} className="animate-spin text-indigo-600" />
+                  <span>Loading renewal history...</span>
+                </div>
+              ) : itemHistoryLogs.length === 0 ? (
+                <div className="py-10 text-center text-slate-400 border border-dashed border-slate-200 rounded-xl">
+                  <Clock size={32} className="mx-auto text-slate-300 mb-2" />
+                  <p className="font-medium text-slate-600">No renewal logs recorded yet</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Click the Renew button to record contract renewals for this subscription.</p>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setShowItemHistoryModal(false);
+                      handleOpenRenewModal(itemHistorySub);
+                    }}
+                    className="mt-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5"
+                  >
+                    <RotateCw size={13} />
+                    Renew Now
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {itemHistoryLogs.map((log, index) => (
+                    <div
+                      key={log.id}
+                      className="p-4 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-all shadow-xs space-y-2"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-emerald-100 text-emerald-700 font-bold flex items-center justify-center text-[10px]">
+                            {itemHistoryLogs.length - index}
+                          </span>
+                          <span className="font-bold text-slate-800 text-sm">
+                            Renewed to {log.new_renewal_date ? log.new_renewal_date.slice(0, 10) : 'Extended'}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-600">
+                            +{log.renewal_period_months} Mo ({log.billing_cycle})
+                          </span>
+                        </div>
+                        <div className="text-right flex items-center gap-2">
+                          <span className="font-mono font-bold text-sm text-emerald-700">
+                            ${Number(log.cost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {log.currency}
+                          </span>
+                          {deletingRenewalId === log.id ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteRenewal(log.id)}
+                                className="px-2 py-0.5 rounded bg-rose-600 text-white text-[10px] font-bold"
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setDeletingRenewalId(null)}
+                                className="px-2 py-0.5 rounded bg-slate-200 text-slate-700 text-[10px]"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setDeletingRenewalId(log.id)}
+                              className="text-slate-300 hover:text-rose-600 p-1 rounded transition-colors"
+                              title="Delete renewal entry"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+                        <div>
+                          <span className="text-slate-400">Previous Expiry: </span>
+                          <span className="font-mono text-slate-700">{log.previous_renewal_date ? log.previous_renewal_date.slice(0, 10) : 'N/A'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Invoice: </span>
+                          <span className="font-mono text-slate-700">{log.invoice_no || '—'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">PO: </span>
+                          <span className="font-mono text-slate-700">{log.po_no || '—'}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400">Payment: </span>
+                          <span className="text-slate-700">{log.payment_method || '—'} ({log.payment_status || 'Paid'})</span>
+                        </div>
+                      </div>
+
+                      {log.notes && (
+                        <div className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                          <span className="font-semibold text-slate-700">Notes: </span>
+                          {log.notes}
+                        </div>
+                      )}
+
+                      <div className="text-[10px] text-slate-400 flex items-center justify-between pt-1">
+                        <span>Recorded by: <strong className="text-slate-600">{log.renewed_by || 'IT Admin'}</strong></span>
+                        <span>{log.renewed_at ? new Date(log.renewed_at).toLocaleString() : ''}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-4 px-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+              <Button
+                variant="secondary"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  setShowItemHistoryModal(false);
+                  setItemHistorySub(null);
+                  setItemHistoryLogs([]);
+                }}
+              >
+                Close
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                onClick={() => {
+                  setShowItemHistoryModal(false);
+                  handleOpenRenewModal(itemHistorySub);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5"
+              >
+                <RotateCw size={13} />
+                Renew Again
               </Button>
             </div>
           </div>

@@ -24,9 +24,10 @@ import {
   setupTelegramAlertRoutes 
 } from './telegramAlertService';
 import { setupItBudgetRoutes } from './itBudgetServer';
-import { setupItExpenseRoutes } from './itExpenseServer';
+import { setupItExpenseRoutes, syncExpensesToBudget } from './itExpenseServer';
 import { setupAssetRoutes } from './assetServer';
 import { setupItAssetRoutes } from './itAssetServer';
+import { setupItMeetingRoutes } from './itMeetingServer';
 import { GoogleGenAI } from '@google/genai';
 import { GEMINI_CONFIG } from './src/config/geminiConfig';
 
@@ -309,6 +310,61 @@ const uploadDir = path.join(process.cwd(), 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({ dest: 'uploads/' });
+
+const ALLOWED_MIME_EXT: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/svg+xml': '.svg',
+};
+
+let userProfileColumnsEnsured = false;
+async function ensureUserProfileColumns(db: any) {
+  if (userProfileColumnsEnsured) return;
+  try {
+    await db.query('ALTER TABLE users ADD COLUMN avatar_url TEXT NULL').catch(() => {});
+    await db.query("ALTER TABLE users ADD COLUMN timezone VARCHAR(100) DEFAULT 'UTC-8 (Pacific Time)'").catch(() => {});
+    userProfileColumnsEnsured = true;
+  } catch {
+    // Ignore schema alter issues on read-only replicas
+  }
+}
+
+function mapUserToClient(row: any) {
+  if (!row) return null;
+  const avatarUrl = row.avatar_url || null;
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.full_name || row.display_name || (row.email ? row.email.split('@')[0] : 'User'),
+    full_name: row.full_name || '',
+    display_name: row.display_name || '',
+    avatarUrl,
+    avatar_url: avatarUrl,
+    timezone: row.timezone || 'UTC-8 (Pacific Time)',
+    role: row.role || 'user',
+    status: row.status || 'Active',
+    can_access_welcome: row.can_access_welcome !== undefined ? Boolean(row.can_access_welcome) : true,
+    can_access_it: Boolean(row.can_access_it),
+    can_access_pro: Boolean(row.can_access_pro)
+  };
+}
+
+function safeDeleteLocalUpload(filePath?: string | null) {
+  if (!filePath || typeof filePath !== 'string' || !filePath.startsWith('/uploads/')) return;
+  const relName = filePath.replace(/^\/uploads\//, '');
+  if (!relName || relName.includes('..') || relName.includes('/') || relName.includes('\\')) return;
+  const fullPath = path.join(uploadDir, relName);
+  if (fs.existsSync(fullPath)) {
+    try {
+      fs.unlinkSync(fullPath);
+    } catch (e) {
+      console.warn('Could not delete old upload:', e);
+    }
+  }
+}
 
 function mapDbToNote(row: any) {
   let tags = row.tags;
@@ -687,18 +743,22 @@ async function startServer() {
         return res.status(400).json({ error: 'Email already in use.' });
       }
       
+      await ensureUserProfileColumns(db);
       const id = crypto.randomUUID();
       await db.query(
         'INSERT INTO users (id, email, password, full_name, display_name) VALUES (?, ?, ?, ?, ?)',
         [id, email, hashedPassword, full_name, display_name]
       );
-      
-      const user = { 
-        id, 
-        email, 
+      const [createdRows]: any = await db.query('SELECT * FROM users WHERE id = ?', [id]);
+      const user = mapUserToClient(createdRows?.[0]) || {
+        id,
+        email,
         name: full_name || display_name,
         full_name,
         display_name,
+        avatarUrl: null,
+        avatar_url: null,
+        timezone: 'UTC-8 (Pacific Time)',
         role: 'user',
         can_access_welcome: true,
         can_access_it: false,
@@ -720,6 +780,7 @@ async function startServer() {
       if (!db) {
          return res.status(500).json({ error: 'Database could not be initialized.'});
       }
+      await ensureUserProfileColumns(db);
       const [rows]: any = await db.query('SELECT * FROM users WHERE email = ?', [email]);
       if (rows.length === 0) return res.status(400).json({ error: 'Invalid email or password' });
       
@@ -730,18 +791,7 @@ async function startServer() {
         return res.status(403).json({ error: 'This user account is currently inactive. Please contact the administrator.' });
       }
       
-      const user = { 
-        id: rows[0].id, 
-        email: rows[0].email, 
-        name: rows[0].full_name || rows[0].display_name,
-        full_name: rows[0].full_name,
-        display_name: rows[0].display_name,
-        role: rows[0].role,
-        status: rows[0].status || 'Active',
-        can_access_welcome: rows[0].can_access_welcome,
-        can_access_it: rows[0].can_access_it,
-        can_access_pro: rows[0].can_access_pro
-      };
+      const user = mapUserToClient(rows[0])!;
       const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
       res.json({ user, token });
     } catch (e: any) {
@@ -845,8 +895,10 @@ async function startServer() {
       const email = payload.email?.trim()?.toLowerCase();
       const full_name = payload.name;
       const display_name = payload.given_name;
+      const picture = payload.picture || null;
 
       const db = getDb();
+      await ensureUserProfileColumns(db);
       let [rows]: any = await db.query('SELECT * FROM users WHERE email = ?', [email]);
       let user;
 
@@ -855,32 +907,29 @@ async function startServer() {
         const randomPassword = crypto.randomBytes(16).toString('hex');
         const hashedPassword = await bcrypt.hash(randomPassword, 10);
         await db.query(
-          'INSERT INTO users (id, email, password, full_name, display_name) VALUES (?, ?, ?, ?, ?)',
-          [id, email, hashedPassword, full_name, display_name || full_name]
+          'INSERT INTO users (id, email, password, full_name, display_name, avatar_url) VALUES (?, ?, ?, ?, ?, ?)',
+          [id, email, hashedPassword, full_name, display_name || full_name, picture]
         );
-        user = { 
-          id, 
-          email, 
+        const [newRows]: any = await db.query('SELECT * FROM users WHERE id = ?', [id]);
+        user = mapUserToClient(newRows?.[0]) || {
+          id,
+          email,
           name: full_name,
           full_name,
           display_name: display_name || full_name,
+          avatarUrl: picture,
+          avatar_url: picture,
           role: 'user',
           can_access_welcome: true,
           can_access_it: false,
           can_access_pro: false
         };
       } else {
-        user = { 
-          id: rows[0].id, 
-          email: rows[0].email, 
-          name: rows[0].full_name || rows[0].display_name,
-          full_name: rows[0].full_name,
-          display_name: rows[0].display_name,
-          role: rows[0].role,
-          can_access_welcome: rows[0].can_access_welcome,
-          can_access_it: rows[0].can_access_it,
-          can_access_pro: rows[0].can_access_pro
-        };
+        if (!rows[0].avatar_url && picture) {
+          await db.query('UPDATE users SET avatar_url = ? WHERE id = ?', [picture, rows[0].id]).catch(() => {});
+          rows[0].avatar_url = picture;
+        }
+        user = mapUserToClient(rows[0])!;
       }
 
       const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
@@ -909,9 +958,10 @@ async function startServer() {
   app.get('/api/auth/me', authenticateToken, async (req: any, res) => {
      try {
        const db = getDb();
+       await ensureUserProfileColumns(db);
        const [rows]: any = await db.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
        if (rows && rows.length > 0) {
-         res.json({ user: rows[0] });
+         res.json({ user: mapUserToClient(rows[0]) });
        } else {
          res.status(401).json({ error: "User session expired or not found" });
        }
@@ -920,15 +970,73 @@ async function startServer() {
      }
   });
 
+  const handleUpdateCurrentUserProfile = async (req: any, res: any) => {
+    try {
+      const db = getDb();
+      await ensureUserProfileColumns(db);
+
+      const [existingRows]: any = await db.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
+      if (!existingRows || existingRows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      const existing = existingRows[0];
+
+      const rawFullName = req.body.fullName !== undefined ? req.body.fullName : req.body.full_name;
+      const rawDisplayName = req.body.displayName !== undefined ? req.body.displayName : req.body.display_name;
+      const rawTimezone = req.body.timezone;
+      const hasAvatarField = req.body.avatarUrl !== undefined || req.body.avatar_url !== undefined;
+      const rawAvatar = req.body.avatarUrl !== undefined ? req.body.avatarUrl : req.body.avatar_url;
+
+      const updateFields: string[] = [];
+      const params: any[] = [];
+
+      if (rawFullName !== undefined) {
+        updateFields.push('full_name = ?');
+        params.push(typeof rawFullName === 'string' ? rawFullName.trim() : rawFullName);
+      }
+      if (rawDisplayName !== undefined) {
+        updateFields.push('display_name = ?');
+        params.push(typeof rawDisplayName === 'string' ? rawDisplayName.trim() : rawDisplayName);
+      }
+      if (rawTimezone !== undefined) {
+        updateFields.push('timezone = ?');
+        params.push(rawTimezone);
+      }
+      if (hasAvatarField) {
+        const normalizedAvatar = rawAvatar && typeof rawAvatar === 'string' && rawAvatar.trim() ? rawAvatar.trim() : null;
+        if (existing.avatar_url && existing.avatar_url !== normalizedAvatar) {
+          safeDeleteLocalUpload(existing.avatar_url);
+        }
+        updateFields.push('avatar_url = ?');
+        params.push(normalizedAvatar);
+      }
+
+      if (updateFields.length > 0) {
+        params.push(req.user.id);
+        await db.query(`UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`, params);
+      }
+
+      const [updatedRows]: any = await db.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
+      res.json({ success: true, user: mapUserToClient(updatedRows[0]) });
+    } catch (e: any) {
+      console.error('Error updating current user profile:', e);
+      res.status(500).json({ error: e.message || 'Failed to update profile' });
+    }
+  };
+
+  app.put('/api/auth/me', authenticateToken, handleUpdateCurrentUserProfile);
+  app.put('/api/users/me', authenticateToken, handleUpdateCurrentUserProfile);
+
   app.get('/api/users', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
+      await ensureUserProfileColumns(db);
       await db.query('ALTER TABLE users ADD COLUMN role VARCHAR(50) DEFAULT "user"').catch(e => {});
       await db.query('ALTER TABLE users ADD COLUMN can_access_welcome BOOLEAN DEFAULT TRUE').catch(e => {});
       await db.query('ALTER TABLE users ADD COLUMN can_access_it BOOLEAN DEFAULT FALSE').catch(e => {});
       await db.query('ALTER TABLE users ADD COLUMN can_access_pro BOOLEAN DEFAULT FALSE').catch(e => {});
       await db.query('ALTER TABLE users ADD COLUMN status VARCHAR(50) DEFAULT "Active"').catch(e => {});
-      const [rows] = await db.query('SELECT id, email, full_name, display_name, role, COALESCE(status, "Active") as status, can_access_welcome, can_access_it, can_access_pro FROM users ORDER BY created_at DESC');
+      const [rows] = await db.query('SELECT id, email, full_name, display_name, avatar_url, timezone, role, COALESCE(status, "Active") as status, can_access_welcome, can_access_it, can_access_pro FROM users ORDER BY created_at DESC');
       res.json(rows);
     } catch(e: any) {
       res.status(500).json({ error: e.message });
@@ -1444,28 +1552,30 @@ async function startServer() {
 
   // Storage Route
   app.post('/api/upload', authenticateToken, upload.single('file'), (req: any, res: any) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const fileOriginalName = req.file.originalname;
-    // To preserve extension
-    const ext = path.extname(fileOriginalName);
-    const newFileName = `${req.file.filename}${ext}`;
-    const newPath = path.join(uploadDir, newFileName);
-    fs.renameSync(req.file.path, newPath);
-    
-    // In production you would want bucket paths, here we just host statically
-    const url = `/uploads/${newFileName}`;
-    res.json({ url, path: url });
+    try {
+      if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+      if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+      const fileOriginalName = req.file.originalname || '';
+      let ext = path.extname(fileOriginalName);
+      if (!ext && req.file.mimetype && ALLOWED_MIME_EXT[req.file.mimetype]) {
+        ext = ALLOWED_MIME_EXT[req.file.mimetype];
+      }
+      const newFileName = `${req.file.filename}${ext}`;
+      const newPath = path.join(uploadDir, newFileName);
+      fs.renameSync(req.file.path, newPath);
+
+      const url = `/uploads/${newFileName}`;
+      res.json({ url, path: url });
+    } catch (e: any) {
+      console.error('Upload error:', e);
+      res.status(500).json({ error: e.message || 'Failed to upload file' });
+    }
   });
 
   app.delete('/api/upload', authenticateToken, async (req: any, res: any) => {
     try {
       const { path: filePath } = req.body;
-      if (filePath && filePath.startsWith('/uploads/')) {
-        const fullPath = path.join(process.cwd(), filePath);
-        if (fs.existsSync(fullPath)) {
-          fs.unlinkSync(fullPath);
-        }
-      }
+      safeDeleteLocalUpload(filePath);
       res.json({ success: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1741,6 +1851,27 @@ async function startServer() {
           is_default TINYINT(1) DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`,
+        `CREATE TABLE IF NOT EXISTS it_cloud_subscription_renewals (
+          id VARCHAR(36) PRIMARY KEY,
+          subscription_id VARCHAR(36) NOT NULL,
+          subscription_name VARCHAR(150) NOT NULL,
+          provider VARCHAR(100) NOT NULL,
+          campus VARCHAR(100) DEFAULT 'All Sites',
+          previous_renewal_date DATE,
+          new_renewal_date DATE NOT NULL,
+          billing_cycle VARCHAR(50) DEFAULT 'Annually',
+          renewal_period_months INT DEFAULT 12,
+          cost DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+          currency VARCHAR(10) DEFAULT 'USD',
+          invoice_no VARCHAR(100) DEFAULT '',
+          po_no VARCHAR(100) DEFAULT '',
+          payment_method VARCHAR(100) DEFAULT 'Credit Card',
+          payment_status VARCHAR(50) DEFAULT 'Paid',
+          recorded_expense_id VARCHAR(36) DEFAULT NULL,
+          renewed_by VARCHAR(100) DEFAULT 'IT Operations',
+          notes TEXT,
+          renewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`,
         `CREATE TABLE IF NOT EXISTS it_asset_history (id VARCHAR(36) PRIMARY KEY, asset_id VARCHAR(36), action VARCHAR(100), performed_by VARCHAR(100), old_assignee VARCHAR(100), new_assignee VARCHAR(100), old_status VARCHAR(50), new_status VARCHAR(50), old_site VARCHAR(100), new_site VARCHAR(100), old_location VARCHAR(100), new_location VARCHAR(100), notes TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`
       ];
 
@@ -1766,10 +1897,15 @@ async function startServer() {
       await db.query('ALTER TABLE it_asset_history ADD COLUMN old_location VARCHAR(150)').catch(() => {});
       await db.query('ALTER TABLE it_asset_history ADD COLUMN new_location VARCHAR(150)').catch(() => {});
 
-      // Insert default sites if empty
+      // Insert default sites if completely empty
       const [sites]: any = await db.query('SELECT COUNT(*) as c FROM it_sites');
-      if (sites[0].c === 0) {
-        await db.query(`INSERT INTO it_sites (id, site_name, status) VALUES ('1', 'Main Hospital', 'Active'), ('2', 'North Clinic', 'Active'), ('3', 'South Clinic', 'Active')`);
+      if (sites && sites[0] && sites[0].c === 0) {
+        await db.query(`INSERT INTO it_sites (id, site_name, code, location, status) VALUES 
+          ('${crypto.randomUUID()}', 'K1', 'K1', 'Khema Toul Kork', 'Active'),
+          ('${crypto.randomUUID()}', 'K2', 'K2', 'Khema Chamkar Mon', 'Active'),
+          ('${crypto.randomUUID()}', 'KG', 'KG', 'Khema Global Central', 'Active'),
+          ('${crypto.randomUUID()}', 'Sakal', 'SK', 'Sakal Polyclinic', 'Active')
+        `).catch(() => {});
       }
 
       // Insert default categories if empty
@@ -1857,11 +1993,49 @@ async function startServer() {
     }
   });
 
-  // --- IT SITES CRUD API ---
+  // --- IT SITES / KHEMA CAMPUS CRUD API ---
   app.get('/api/sites', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      const [rows] = await db.query('SELECT * FROM it_sites ORDER BY site_name');
+      // Ensure it_sites table exists and has code column
+      await db.query(`
+        CREATE TABLE IF NOT EXISTS it_sites (
+          id VARCHAR(36) PRIMARY KEY,
+          site_name VARCHAR(100) UNIQUE,
+          code VARCHAR(50),
+          location VARCHAR(150),
+          status VARCHAR(50) DEFAULT 'Active'
+        )
+      `).catch(() => {});
+      await db.query('ALTER TABLE it_sites ADD COLUMN code VARCHAR(50)').catch(() => {});
+
+      // Seed core Khema campuses ONLY IF it_sites is completely empty
+      const [existingCount]: any = await db.query('SELECT COUNT(*) as c FROM it_sites').catch(() => [[{ c: 0 }]]);
+      const currentSiteCount = existingCount && existingCount[0] ? existingCount[0].c : 0;
+      if (currentSiteCount === 0) {
+        const coreCampuses = [
+          { name: 'K1', code: 'K1', location: 'Khema Toul Kork', status: 'Active' },
+          { name: 'K2', code: 'K2', location: 'Khema Chamkar Mon', status: 'Active' },
+          { name: 'KG', code: 'KG', location: 'Khema Global Central', status: 'Active' },
+          { name: 'KB', code: 'KB', location: 'Khema Boeung Keng Kang', status: 'Active' },
+          { name: 'Sakal', code: 'SK', location: 'Sakal Polyclinic', status: 'Active' }
+        ];
+        for (const c of coreCampuses) {
+          await db.query(
+            'INSERT IGNORE INTO it_sites (id, site_name, code, location, status) VALUES (?, ?, ?, ?, ?)',
+            [crypto.randomUUID(), c.name, c.code, c.location, c.status]
+          ).catch(() => {});
+        }
+      }
+
+      // Query sites with linked expense transaction counts
+      const [rows]: any = await db.query(`
+        SELECT s.*,
+          COALESCE((SELECT COUNT(*) FROM it_expense_transactions e WHERE e.site_name = s.site_name OR e.site_name = s.code), 0) AS expense_count,
+          COALESCE((SELECT SUM(e.amount) FROM it_expense_transactions e WHERE e.site_name = s.site_name OR e.site_name = s.code), 0) AS total_expense_amount
+        FROM it_sites s
+        ORDER BY s.site_name ASC
+      `);
       res.json(rows);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1871,13 +2045,28 @@ async function startServer() {
   app.post('/api/sites', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      const { site_name, location, status } = req.body;
+      const { site_name, code, location, status } = req.body;
+      if (!site_name || !site_name.trim()) {
+        return res.status(400).json({ error: 'Campus name is required' });
+      }
+      const trimmedName = site_name.trim();
+      const trimmedCode = (code || trimmedName).trim();
       const id = crypto.randomUUID();
+
       await db.query(
-        'INSERT INTO it_sites (id, site_name, location, status) VALUES (?, ?, ?, ?)',
-        [id, site_name, location || '', status || 'Active']
+        'INSERT INTO it_sites (id, site_name, code, location, status) VALUES (?, ?, ?, ?, ?)',
+        [id, trimmedName, trimmedCode, location ? location.trim() : '', status || 'Active']
       );
-      res.json({ id, site_name, location, status: status || 'Active' });
+
+      res.json({
+        id,
+        site_name: trimmedName,
+        code: trimmedCode,
+        location: location ? location.trim() : '',
+        status: status || 'Active',
+        expense_count: 0,
+        total_expense_amount: 0
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1886,12 +2075,52 @@ async function startServer() {
   app.put('/api/sites/:id', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      const { site_name, location, status } = req.body;
+      const { site_name, code, location, status, old_site_name, sync_expenses = true } = req.body;
+      const { id } = req.params;
+
+      if (!site_name || !site_name.trim()) {
+        return res.status(400).json({ error: 'Campus name is required' });
+      }
+
+      // Check current site name before update
+      const [currentSite]: any = await db.query('SELECT site_name, code FROM it_sites WHERE id = ?', [id]);
+      const prevName = old_site_name || (currentSite.length > 0 ? currentSite[0].site_name : null);
+      const prevCode = currentSite.length > 0 ? currentSite[0].code : null;
+      const trimmedNewName = site_name.trim();
+      const trimmedCode = (code || trimmedNewName).trim();
+
       await db.query(
-        'UPDATE it_sites SET site_name = ?, location = ?, status = ? WHERE id = ?',
-        [site_name, location || '', status, req.params.id]
+        'UPDATE it_sites SET site_name = ?, code = ?, location = ?, status = ? WHERE id = ?',
+        [trimmedNewName, trimmedCode, location ? location.trim() : '', status || 'Active', id]
       );
-      res.json({ success: true });
+
+      let updatedExpenses = 0;
+      // Synchronize all existing relevant expense records if name was modified
+      if (sync_expenses && prevName && prevName !== trimmedNewName) {
+        const [updateResult]: any = await db.query(
+          'UPDATE it_expense_transactions SET site_name = ? WHERE site_name = ? OR site_name = ?',
+          [trimmedNewName, prevName, prevCode]
+        ).catch((err: any) => {
+          console.warn('[Campus CRUD] Error updating expenses site_name:', err.message);
+          return [{ affectedRows: 0 }];
+        });
+        updatedExpenses = updateResult?.affectedRows || 0;
+
+        // Also update other related IT tables if present
+        await db.query('UPDATE it_assets SET site_name = ? WHERE site_name = ?', [trimmedNewName, prevName]).catch(() => {});
+        await db.query('UPDATE it_infrastructure SET site_name = ? WHERE site_name = ?', [trimmedNewName, prevName]).catch(() => {});
+        await db.query('UPDATE it_staffing SET site_name = ? WHERE site_name = ?', [trimmedNewName, prevName]).catch(() => {});
+      }
+
+      res.json({
+        success: true,
+        id,
+        site_name: trimmedNewName,
+        code: trimmedCode,
+        location: location ? location.trim() : '',
+        status: status || 'Active',
+        updatedExpenses
+      });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1900,8 +2129,48 @@ async function startServer() {
   app.delete('/api/sites/:id', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
-      await db.query('DELETE FROM it_sites WHERE id = ?', [req.params.id]);
-      res.json({ success: true });
+      const { id } = req.params;
+      const { reassign_to } = req.body || {};
+
+      // Match site by ID or site_name or code
+      const [currentSite]: any = await db.query(
+        'SELECT id, site_name, code, location FROM it_sites WHERE id = ? OR site_name = ? OR code = ?',
+        [id, id, id]
+      );
+      const targetSiteName = reassign_to || 'All Sites';
+      let reassignedCount = 0;
+
+      if (currentSite && currentSite.length > 0) {
+        const targetId = currentSite[0].id;
+        const deletedName = currentSite[0].site_name;
+        const deletedCode = currentSite[0].code;
+        const deletedLoc = currentSite[0].location;
+
+        // Reassign any existing expense transactions so they are not orphaned
+        const [updateRes]: any = await db.query(
+          'UPDATE it_expense_transactions SET site_name = ? WHERE site_name = ? OR site_name = ?',
+          [targetSiteName, deletedName, deletedCode]
+        ).catch(() => [{ affectedRows: 0 }]);
+        reassignedCount = updateRes?.affectedRows || 0;
+
+        // Also clean up any matching business units in it_business_units
+        await db.query(
+          'DELETE FROM it_business_units WHERE bu_name = ? OR bu_name = ? OR bu_name LIKE ?',
+          [deletedName, deletedLoc, `%${deletedName}%`]
+        ).catch(() => {});
+
+        // Delete from it_sites
+        await db.query('DELETE FROM it_sites WHERE id = ?', [targetId]);
+        res.json({ 
+          success: true, 
+          reassigned_expenses_count: reassignedCount,
+          message: `Campus "${deletedName}" deleted and linked expenses reassigned to ${targetSiteName}` 
+        });
+      } else {
+        // Fallback: delete directly in case id was passed directly
+        await db.query('DELETE FROM it_sites WHERE id = ? OR site_name = ?', [id, id]);
+        res.json({ success: true, reassigned_expenses_count: 0, message: `Campus deleted` });
+      }
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -2279,6 +2548,299 @@ async function startServer() {
 
       const [updatedRow]: any = await db.query('SELECT * FROM it_cloud_subscriptions WHERE id = ?', [id]);
       res.json(updatedRow[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- RENEW CLOUD / HIS SUBSCRIPTION ---
+  app.post('/api/cloud-subscriptions/:id/renew', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const {
+        new_renewal_date,
+        renewal_period_months,
+        cost,
+        currency,
+        billing_cycle,
+        invoice_no,
+        po_no,
+        payment_method,
+        payment_status,
+        renewed_by,
+        notes,
+        record_expense,
+        expense_category,
+        expense_campus
+      } = req.body;
+
+      if (!id || id === 'undefined' || id === 'null') {
+        return res.status(400).json({ error: 'Valid subscription ID is required' });
+      }
+
+      if (!new_renewal_date) {
+        return res.status(400).json({ error: 'Target renewal date is required' });
+      }
+
+      const [existing]: any = await db.query('SELECT * FROM it_cloud_subscriptions WHERE id = ?', [id]);
+      if (!existing || existing.length === 0) {
+        return res.status(404).json({ error: 'Subscription not found' });
+      }
+
+      const sub = existing[0];
+      const previousRenewalDate = sub.renewal_date || null;
+      const renewedCost = cost !== undefined && cost !== null && cost !== '' ? parseFloat(cost) : parseFloat(sub.cost || 0);
+      const renewedCurrency = currency || sub.currency || 'USD';
+      const renewedBillingCycle = billing_cycle || sub.billing_cycle || 'Annually';
+      const periodMonths = parseInt(renewal_period_months, 10) || 12;
+      const operatorName = renewed_by || req.user?.username || req.user?.email || 'IT Operations';
+
+      const renewalId = crypto.randomUUID();
+      let recordedExpenseId: string | null = null;
+
+      // Optional: Auto-record expense into it_expense_transactions and link to it_opex_plan
+      if (record_expense) {
+        try {
+          const expenseId = crypto.randomUUID();
+          const todayIso = new Date().toISOString().split('T')[0];
+          // Use provided fiscal_year, or year of today's payment date (e.g. 2026), NOT future expiration date
+          const targetFy = req.body.fiscal_year ? parseInt(req.body.fiscal_year, 10) : (new Date(todayIso).getFullYear() || 2026);
+          const campus = expense_campus || sub.site_name || 'All Sites';
+          const acctCode = expense_category || '630105 - Cloud & SaaS Licenses';
+          const acctName = acctCode.includes('-') ? acctCode.split('-').slice(1).join('-').trim() : 'Cloud & SaaS Licenses';
+          const expenseDesc = `Subscription Renewal: ${sub.name}${sub.plan_tier ? ` (${sub.plan_tier})` : ''}`;
+
+          let opexPlanId = (req.body.linked_opex_id && req.body.linked_opex_id !== 'auto') ? req.body.linked_opex_id : null;
+          let opexPlanName = req.body.linked_opex_name || null;
+
+          // 1. If no specific OpEx item ID provided, search if matching OpEx item already exists in it_opex_plan
+          if (!opexPlanId) {
+            const [existingOpex]: any = await db.query(
+              `SELECT id, description FROM it_opex_plan 
+               WHERE fiscal_year = ? AND (site = ? OR ? = 'All Sites' OR site = 'All Sites')
+               AND (description LIKE ? OR description LIKE ? OR justification LIKE ?)
+               LIMIT 1`,
+              [targetFy, campus, campus, `%${sub.name}%`, `%${sub.provider}%`, `%${sub.name}%`]
+            );
+
+            if (existingOpex && existingOpex.length > 0) {
+              opexPlanId = existingOpex[0].id;
+              opexPlanName = existingOpex[0].description;
+            }
+          }
+
+          // 2. If still no OpEx plan item, create one in it_opex_plan for this fiscal year so it is fully posted & linked
+          if (!opexPlanId) {
+            opexPlanId = crypto.randomUUID();
+            opexPlanName = `${sub.name}${sub.plan_tier ? ` (${sub.plan_tier})` : ''}`;
+
+            // Get next item_no for this fiscal year
+            const [maxItemNo]: any = await db.query(
+              'SELECT COALESCE(MAX(item_no), 0) + 1 AS next_no FROM it_opex_plan WHERE fiscal_year = ?',
+              [targetFy]
+            );
+            const nextNo = maxItemNo[0]?.next_no || 1;
+
+            // Initialize monthly spending with planned and actual
+            const MONTH_KEYS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+            const monthlySpending: Record<string, { planned: number; actual: number }> = {};
+            MONTH_KEYS.forEach(m => { monthlySpending[m] = { planned: 0, actual: 0 }; });
+            const paymentMonthIdx = new Date(todayIso).getMonth();
+            const paymentMonthKey = MONTH_KEYS[paymentMonthIdx] || 'jan';
+            monthlySpending[paymentMonthKey].planned = renewedCost;
+            monthlySpending[paymentMonthKey].actual = renewedCost;
+
+            await db.query(
+              `INSERT INTO it_opex_plan 
+              (id, fiscal_year, item_no, account_code, account_name, description, justification, site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price, annual_cost, monthly_spending, budget_classification)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'IT', ?, ?, ?, 1, ?, ?, ?, 'Planned')`,
+              [
+                opexPlanId,
+                targetFy,
+                nextNo,
+                acctCode,
+                acctName,
+                opexPlanName,
+                `Cloud & HIS Subscription Renewal for ${sub.name} (${sub.provider})`,
+                campus === 'All Sites' ? (sub.site_name || 'K1') : campus,
+                operatorName,
+                renewedBillingCycle || 'Annual',
+                new_renewal_date,
+                renewedCost,
+                renewedCost,
+                JSON.stringify(monthlySpending)
+              ]
+            );
+          }
+
+          // 3. Insert into it_expense_transactions linked to the OpEx item!
+          await db.query(`INSERT INTO it_expense_transactions 
+            (id, fiscal_year, expense_date, invoice_no, po_no, vendor_name, description, budget_type, linked_budget_id, linked_item_name, site_name, category, amount, payment_status, payment_method, payment_date, receipt_url, notes, budget_classification, settlement_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'OpEx', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Planned', 'Settled')`,
+            [
+              expenseId,
+              targetFy,
+              todayIso,
+              invoice_no || null,
+              po_no || null,
+              sub.provider,
+              expenseDesc,
+              opexPlanId,
+              opexPlanName,
+              campus === 'All Sites' ? (sub.site_name || 'K1') : campus,
+              acctCode,
+              renewedCost,
+              payment_status || 'Paid',
+              payment_method || sub.payment_method || 'Credit Card',
+              todayIso,
+              null,
+              `Cloud & HIS License renewal logged for term through ${new_renewal_date}. ${notes || ''}`.trim()
+            ]
+          );
+
+          // 4. Synchronize expense transaction into it_opex_plan monthly actuals!
+          await syncExpensesToBudget(db, 'OpEx', opexPlanId, targetFy);
+
+          recordedExpenseId = expenseId;
+        } catch (err: any) {
+          console.error('Failed to auto-record OpEx expense during renewal:', err);
+        }
+      }
+
+      // Record Renewal Log
+      await db.query(
+        `INSERT INTO it_cloud_subscription_renewals 
+        (id, subscription_id, subscription_name, provider, campus, previous_renewal_date, new_renewal_date, billing_cycle, renewal_period_months, cost, currency, invoice_no, po_no, payment_method, payment_status, recorded_expense_id, renewed_by, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          renewalId,
+          sub.id,
+          sub.name,
+          sub.provider,
+          sub.site_name || 'All Sites',
+          previousRenewalDate,
+          new_renewal_date,
+          renewedBillingCycle,
+          periodMonths,
+          renewedCost,
+          renewedCurrency,
+          invoice_no || '',
+          po_no || '',
+          payment_method || sub.payment_method || 'Credit Card',
+          payment_status || 'Paid',
+          recordedExpenseId,
+          operatorName,
+          notes || ''
+        ]
+      );
+
+      // Update Subscription in it_cloud_subscriptions
+      await db.query(
+        `UPDATE it_cloud_subscriptions SET 
+          renewal_date = ?, 
+          status = 'Active', 
+          cost = ?, 
+          billing_cycle = ?,
+          payment_method = ?,
+          updated_at = CURRENT_TIMESTAMP 
+        WHERE id = ?`,
+        [
+          new_renewal_date,
+          renewedCost,
+          renewedBillingCycle,
+          payment_method || sub.payment_method || 'Credit Card',
+          sub.id
+        ]
+      );
+
+      const [updatedRows]: any = await db.query('SELECT * FROM it_cloud_subscriptions WHERE id = ?', [sub.id]);
+      const [renewalRows]: any = await db.query('SELECT * FROM it_cloud_subscription_renewals WHERE id = ?', [renewalId]);
+
+      res.status(200).json({
+        success: true,
+        message: `Successfully renewed "${sub.name}" through ${new_renewal_date}`,
+        subscription: updatedRows[0],
+        renewal: renewalRows[0],
+        expense_id: recordedExpenseId
+      });
+    } catch (e: any) {
+      console.error('Subscription renewal error:', e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- GET ALL RENEWAL LOGS (ACROSS ALL SUBSCRIPTIONS) ---
+  app.get('/api/cloud-subscriptions/renewals', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const { subscription_id, provider, campus, search, limit } = req.query;
+
+      let query = 'SELECT * FROM it_cloud_subscription_renewals WHERE 1=1';
+      const params: any[] = [];
+
+      if (subscription_id) {
+        query += ' AND subscription_id = ?';
+        params.push(subscription_id);
+      }
+      if (provider && provider !== 'All Providers') {
+        query += ' AND provider = ?';
+        params.push(provider);
+      }
+      if (campus && campus !== 'All Sites') {
+        query += ' AND campus = ?';
+        params.push(campus);
+      }
+      if (search && search.trim()) {
+        const s = `%${search.trim()}%`;
+        query += ' AND (subscription_name LIKE ? OR provider LIKE ? OR invoice_no LIKE ? OR po_no LIKE ? OR renewed_by LIKE ? OR notes LIKE ?)';
+        params.push(s, s, s, s, s, s);
+      }
+
+      query += ' ORDER BY renewed_at DESC, new_renewal_date DESC';
+      const lim = parseInt(limit, 10) || 200;
+      query += ` LIMIT ${lim}`;
+
+      const [rows]: any = await db.query(query, params);
+
+      // Summary statistics
+      let totalRenewedSpend = 0;
+      (rows || []).forEach((r: any) => {
+        totalRenewedSpend += Number(r.cost) || 0;
+      });
+
+      res.json({
+        renewals: rows || [],
+        count: (rows || []).length,
+        totalRenewedSpend
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- GET RENEWAL LOGS FOR SPECIFIC SUBSCRIPTION ---
+  app.get('/api/cloud-subscriptions/:id/renewals', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const [rows]: any = await db.query(
+        'SELECT * FROM it_cloud_subscription_renewals WHERE subscription_id = ? ORDER BY renewed_at DESC, new_renewal_date DESC',
+        [id]
+      );
+      res.json(rows || []);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- DELETE SPECIFIC RENEWAL LOG ENTRY ---
+  app.delete('/api/cloud-subscriptions/renewals/:renewalId', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      const { renewalId } = req.params;
+      await db.query('DELETE FROM it_cloud_subscription_renewals WHERE id = ?', [renewalId]);
+      res.json({ success: true, message: 'Renewal log entry deleted', id: renewalId });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -2774,6 +3336,9 @@ async function startServer() {
   // Initialize IT Expense & Transaction Tracking linked with CapEx & OpEx
   setupItExpenseRoutes(app, authenticateToken, getDb);
 
+  // Initialize IT Meeting Scheduling & Telegram Group Alerts
+  setupItMeetingRoutes(app, authenticateToken, getDb);
+
   // Initialize Telegram GoDaddy MySQL Disconnection Alert routes & Heartbeat Monitor
   setupTelegramAlertRoutes(app, authenticateToken);
   startRemoteDatabaseHeartbeat(getDb, async (isReachable, latencyMs) => {
@@ -2797,7 +3362,10 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -2809,14 +3377,21 @@ async function startServer() {
     });
   }
 
-  const isNamedPipeOrSocket = typeof PORT === 'string' && isNaN(Number(PORT));
-  const server = isNamedPipeOrSocket
-    ? app.listen(PORT, () => {
-        console.log(`Server running on socket ${PORT}`);
-      })
-    : app.listen(Number(PORT), "0.0.0.0", () => {
-        console.log(`Server running on port ${PORT}`);
+  // Port 3000 is required for AI Studio iframe & proxy
+  const server = app.listen(3000, "0.0.0.0", () => {
+    console.log(`Server running on port 3000`);
+  });
+
+  const secondaryPort = process.env.PORT ? Number(process.env.PORT) : null;
+  if (secondaryPort && secondaryPort !== 3000 && !isNaN(secondaryPort)) {
+    try {
+      app.listen(secondaryPort, "0.0.0.0", () => {
+        console.log(`Also listening on port ${secondaryPort}`);
       });
+    } catch (e: any) {
+      console.warn(`Could not bind to alternate port ${secondaryPort}:`, e?.message || e);
+    }
+  }
 
   server.on('listening', () => {
     // Non-blocking background verification of local MariaDB replica daemon (if local standalone mode)
