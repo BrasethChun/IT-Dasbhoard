@@ -1,5 +1,23 @@
 import { Express, Request, Response } from 'express';
 import crypto from 'crypto';
+import {
+  BU_MASTER_LIST,
+  DEPT_DEFINITIONS,
+  ASSET_TYPES_MASTER,
+  BUSINESS_LINES_MASTER,
+  COA_SUMMARY_2027,
+  HISTORICAL_UNIT_PRICE_CATALOG,
+  normalizeBuCanonical,
+  normalizeDepartmentCode,
+  findAssetTypeMeta,
+  findCoaByCode,
+  findCoaByName,
+  extractGlCodeNumber,
+  normalizeCapexStatus,
+  normalizeCapexStage,
+  monthLabelToIndex,
+  indexToMonthLabel
+} from './src/data/itBudget2027MasterData';
 
 export interface MonthlyPhasing {
   planned: number;
@@ -169,14 +187,32 @@ export async function initItBudgetTables(db: any) {
       INDEX idx_opex_site (site)
     )`);
 
-    // Ensure fiscal_year column exists if table was created previously without it
+    // Ensure 2027 CapEx & OpEx columns exist without disturbing legacy rows
     try {
       const [capexCols]: any = await db.query('DESCRIBE it_capex_plan');
-      const hasCapexFy = capexCols.some((c: any) => c.Field === 'fiscal_year');
-      if (!hasCapexFy) {
+      const hasCapexCol = (name: string) => capexCols.some((c: any) => c.Field === name);
+      if (!hasCapexCol('fiscal_year')) {
         await db.query('ALTER TABLE it_capex_plan ADD COLUMN fiscal_year INT NOT NULL DEFAULT 2027 AFTER id');
         await db.query('ALTER TABLE it_capex_plan ADD INDEX idx_capex_fy (fiscal_year)');
         await db.query('UPDATE it_capex_plan SET fiscal_year = 2027 WHERE fiscal_year IS NULL OR fiscal_year = 0');
+      }
+      if (!hasCapexCol('specifications')) {
+        await db.query('ALTER TABLE it_capex_plan ADD COLUMN specifications TEXT AFTER description');
+      }
+      if (!hasCapexCol('asset_owner')) {
+        await db.query("ALTER TABLE it_capex_plan ADD COLUMN asset_owner VARCHAR(50) DEFAULT 'IT' AFTER asset_type");
+      }
+      if (!hasCapexCol('asset_supervisor')) {
+        await db.query("ALTER TABLE it_capex_plan ADD COLUMN asset_supervisor VARCHAR(50) DEFAULT 'ITO' AFTER asset_owner");
+      }
+      if (!hasCapexCol('expected_start_month')) {
+        await db.query("ALTER TABLE it_capex_plan ADD COLUMN expected_start_month VARCHAR(20) DEFAULT 'Jan' AFTER complete_date");
+      }
+      if (!hasCapexCol('expected_complete_month')) {
+        await db.query("ALTER TABLE it_capex_plan ADD COLUMN expected_complete_month VARCHAR(20) DEFAULT 'Dec' AFTER expected_start_month");
+      }
+      if (!hasCapexCol('stage_tag')) {
+        await db.query("ALTER TABLE it_capex_plan ADD COLUMN stage_tag VARCHAR(50) DEFAULT 'Planning' AFTER status");
       }
     } catch (e: any) {
       console.warn('[IT Budget] Capex column check:', e.message);
@@ -184,23 +220,86 @@ export async function initItBudgetTables(db: any) {
 
     try {
       const [opexCols]: any = await db.query('DESCRIBE it_opex_plan');
-      const hasOpexFy = opexCols.some((c: any) => c.Field === 'fiscal_year');
-      if (!hasOpexFy) {
+      const hasOpexCol = (name: string) => opexCols.some((c: any) => c.Field === name);
+      if (!hasOpexCol('fiscal_year')) {
         await db.query('ALTER TABLE it_opex_plan ADD COLUMN fiscal_year INT NOT NULL DEFAULT 2027 AFTER id');
         await db.query('ALTER TABLE it_opex_plan ADD INDEX idx_opex_fy (fiscal_year)');
         await db.query('UPDATE it_opex_plan SET fiscal_year = 2027 WHERE fiscal_year IS NULL OR fiscal_year = 0');
       }
-      if (!opexCols.some((c: any) => c.Field === 'budget_classification')) {
+      if (!hasOpexCol('remark')) {
+        await db.query('ALTER TABLE it_opex_plan ADD COLUMN remark TEXT AFTER description');
+      }
+      if (!hasOpexCol('budget_classification')) {
         await db.query("ALTER TABLE it_opex_plan ADD COLUMN budget_classification VARCHAR(50) DEFAULT 'Planned'");
       }
-      if (!opexCols.some((c: any) => c.Field === 'unplanned_reason')) {
+      if (!hasOpexCol('unplanned_reason')) {
         await db.query("ALTER TABLE it_opex_plan ADD COLUMN unplanned_reason VARCHAR(255) DEFAULT ''");
       }
-      if (!opexCols.some((c: any) => c.Field === 'approval_ref')) {
+      if (!hasOpexCol('approval_ref')) {
         await db.query("ALTER TABLE it_opex_plan ADD COLUMN approval_ref VARCHAR(100) DEFAULT ''");
       }
     } catch (e: any) {
       console.warn('[IT Budget] Opex column check:', e.message);
+    }
+
+    // GL Actuals Ledger Table (COA Details)
+    await db.query(`CREATE TABLE IF NOT EXISTS it_gl_actuals (
+      id VARCHAR(36) PRIMARY KEY,
+      fiscal_year INT NOT NULL DEFAULT 2027,
+      posting_date DATE NOT NULL,
+      external_document_no VARCHAR(120) DEFAULT '',
+      document_no VARCHAR(120) DEFAULT '',
+      gl_account_no VARCHAR(50) NOT NULL,
+      gl_account_name VARCHAR(180) NOT NULL,
+      item_value_desc VARCHAR(255) DEFAULT '',
+      description VARCHAR(255) NOT NULL,
+      amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+      bu_code VARCHAR(50) NOT NULL DEFAULT 'K1',
+      source VARCHAR(50) DEFAULT 'COA Details',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_gl_fy (fiscal_year),
+      INDEX idx_gl_bu (bu_code),
+      INDEX idx_gl_acct (gl_account_no),
+      INDEX idx_gl_date (posting_date)
+    )`);
+
+    // Historical Unit Price Benchmark Catalog Table (Est. Unit Price)
+    await db.query(`CREATE TABLE IF NOT EXISTS it_unit_price_catalog (
+      id VARCHAR(36) PRIMARY KEY,
+      asset_category VARCHAR(100) NOT NULL,
+      capex_code VARCHAR(100) DEFAULT '',
+      item_name VARCHAR(255) NOT NULL,
+      vendor VARCHAR(150) DEFAULT '',
+      brand_model VARCHAR(255) DEFAULT '',
+      posting_date DATE NULL,
+      qty INT DEFAULT 1,
+      unit_price DECIMAL(15,2) DEFAULT 0.00,
+      total_amount DECIMAL(15,2) DEFAULT 0.00,
+      remark TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_upc_cat (asset_category)
+    )`);
+
+    try {
+      const [upcCount]: any = await db.query('SELECT COUNT(*) as c FROM it_unit_price_catalog');
+      if ((upcCount[0]?.c || 0) === 0) {
+        for (const item of HISTORICAL_UNIT_PRICE_CATALOG) {
+          await db.query(
+            `INSERT IGNORE INTO it_unit_price_catalog
+             (id, asset_category, capex_code, item_name, vendor, brand_model, posting_date, qty, unit_price, total_amount, remark)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              item.id, item.asset_category, item.capex_code, item.item_name,
+              item.vendor, item.brand_model, item.posting_date || null,
+              item.qty, item.unit_price, item.total_amount, item.remark
+            ]
+          );
+        }
+      }
+    } catch (e: any) {
+      console.warn('[IT Budget] Unit price catalog seed warning:', e.message);
     }
 
     // Master Account Codes Table for OpEx Services
@@ -216,28 +315,28 @@ export async function initItBudgetTables(db: any) {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )`);
 
-    // Seed master account codes if table is empty
+    // Ensure all 17 official 2027 COA Summary accounts are seeded without deleting legacy codes
     try {
-      const [codeCount]: any = await db.query('SELECT COUNT(*) as c FROM it_account_codes');
-      if ((codeCount[0]?.c || 0) === 0) {
-        const defaultCodes = [
-          { code: '630104 - Other Outside Services', name: 'Other Outside Services', description: 'External vendor contracts, technical maintenance SLAs, IT service retainers', sort: 1 },
-          { code: '630103 - Rent - Non-Medical equipment', name: 'Rent - Non-Medical equipment', description: 'Printers, POS terminals, scanners, and hardware leases', sort: 2 },
-          { code: '630102 - Communication & Internet', name: 'Communication & Internet', description: 'Fiber internet lines, backup links, VoIP trunking, SIM cards', sort: 3 },
-          { code: '630105 - Cloud & SaaS Licenses', name: 'Cloud & SaaS Licenses', description: 'AWS/GCP/Azure hosting, Office 365, Antivirus, backup SaaS', sort: 4 },
-          { code: '630106 - Software Maintenance & Support', name: 'Software Maintenance & Support', description: 'HIS/LIS/PACS database maintenance and support agreements', sort: 5 },
-          { code: '630107 - Hardware Maintenance & Repairs', name: 'Hardware Maintenance & Repairs', description: 'UPS batteries replacement, spare parts, computer repair services', sort: 6 }
-        ];
-        for (const item of defaultCodes) {
+      const [existingCodes]: any = await db.query('SELECT code FROM it_account_codes');
+      const existingSet = new Set(existingCodes.map((r: any) => extractGlCodeNumber(r.code)));
+      for (const coa of COA_SUMMARY_2027) {
+        if (!existingSet.has(coa.account_code)) {
           await db.query(
             `INSERT IGNORE INTO it_account_codes (id, code, name, description, category, sort_order)
-             VALUES (?, ?, ?, ?, 'OpEx', ?)`,
-            [crypto.randomUUID(), item.code, item.name, item.description, item.sort]
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [
+              crypto.randomUUID(),
+              coa.account_code,
+              coa.account_name,
+              `Official 2027 OPEX COA Account (${coa.account_code} — ${coa.account_name})`,
+              coa.category,
+              coa.sort_order
+            ]
           );
         }
       }
     } catch (e: any) {
-      console.warn('[IT Budget] Account codes seed warning:', e.message);
+      console.warn('[IT Budget] COA Summary seed warning:', e.message);
     }
 
     // Persistent System Metadata Table to prevent auto-resetting deleted data on reboot/refresh
@@ -554,13 +653,52 @@ export async function seedItBudgetDefaults(db: any, fiscalYear: number = 2027) {
 }
 
 export function normalizeBudgetSite(site?: string): string | null {
-  if (!site || site === 'All Sites' || site === 'All') return null;
-  const s = site.toLowerCase().trim();
-  if (s === 'k1' || s.includes('tk') || s.includes('toul') || s.includes('north')) return 'K1';
-  if (s === 'k2' || s.includes('bkk') || s.includes('south') || s.includes('boeung')) return 'K2';
-  if (s === 'kg' || s.includes('global') || s.includes('main')) return 'KG';
-  if (s === 'sakal' || s.includes('2004')) return 'Sakal';
-  return site;
+  if (!site || site === 'All Sites' || site === 'All' || site === 'All BUs') return null;
+  const canonical = normalizeBuCanonical(site);
+  if (canonical === 'All Sites') return null;
+  return canonical;
+}
+
+function buildBuFilterSql(colName: string, site: string | undefined, params: any[]): string {
+  const canonical = normalizeBudgetSite(site);
+  if (!canonical) return '';
+  if (canonical === 'K3') {
+    params.push('K3', 'Sakal', 'Sakal 2004', 'K3 / Sakal');
+    return ` AND ${colName} IN (?, ?, ?, ?)`;
+  }
+  if (canonical === 'Sakal Lab') {
+    params.push('Sakal Lab', 'Sakal Laboratory', 'SL');
+    return ` AND ${colName} IN (?, ?, ?)`;
+  }
+  if (canonical === 'K1') {
+    params.push('K1', 'Khema TK', 'TK');
+    return ` AND ${colName} IN (?, ?, ?)`;
+  }
+  if (canonical === 'K2') {
+    params.push('K2', 'Khema BKK', 'BKK');
+    return ` AND ${colName} IN (?, ?, ?)`;
+  }
+  if (canonical === 'KG') {
+    params.push('KG', 'Khema Global', 'Global');
+    return ` AND ${colName} IN (?, ?, ?)`;
+  }
+  params.push(site);
+  return ` AND ${colName} = ?`;
+}
+
+function resolveCoaPair(accountCode?: string, accountName?: string): { code: string; name: string } {
+  const byCode = findCoaByCode(accountCode);
+  if (byCode) return { code: byCode.account_code, name: byCode.account_name };
+  const byName = findCoaByName(accountName);
+  if (byName) return { code: byName.account_code, name: byName.account_name };
+  const cleanCode = extractGlCodeNumber(accountCode) || (accountCode || '630104').trim();
+  const cleanName = (accountName || (accountCode && accountCode.includes('-') ? accountCode.split('-').slice(1).join('-').trim() : '') || 'Other Outside Services').trim();
+  return { code: cleanCode, name: cleanName };
+}
+
+function deriveExpectedMonth(val?: string | null, fallback: string = 'Jan'): string {
+  const idx = monthLabelToIndex(val);
+  return idx >= 0 ? indexToMonthLabel(idx) : fallback;
 }
 
 export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb: () => any) {
@@ -573,58 +711,70 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
     try {
       const db = getDb();
       const site = req.query.site as string;
-      const fiscalYear = parseInt(req.query.fiscal_year as string, 10) || 2026;
+      const fiscalYear = parseInt(req.query.fiscal_year as string, 10) || 2027;
 
       let whereCapex = 'WHERE fiscal_year = ?';
       let whereOpex = 'WHERE fiscal_year = ?';
+      let whereGl = 'WHERE fiscal_year = ?';
       const paramsCapex: any[] = [fiscalYear];
       const paramsOpex: any[] = [fiscalYear];
+      const paramsGl: any[] = [fiscalYear];
 
-      const mappedSite = normalizeBudgetSite(site);
-      if (mappedSite) {
-        whereCapex += ' AND (site = ? OR site = ?)';
-        paramsCapex.push(mappedSite, site);
-        whereOpex += ' AND (site = ? OR site = ?)';
-        paramsOpex.push(mappedSite, site);
-      }
+      whereCapex += buildBuFilterSql('site', site, paramsCapex);
+      whereOpex += buildBuFilterSql('site', site, paramsOpex);
+      whereGl += buildBuFilterSql('bu_code', site, paramsGl);
 
       const [capexRows]: any = await db.query(`SELECT * FROM it_capex_plan ${whereCapex}`, paramsCapex);
       const [opexRows]: any = await db.query(`SELECT * FROM it_opex_plan ${whereOpex}`, paramsOpex);
+      const [glRows]: any = await db.query(`SELECT * FROM it_gl_actuals ${whereGl}`, paramsGl).catch(() => [[]]);
 
       // Available years list across tables
       const [yearRowsCapex]: any = await db.query('SELECT DISTINCT fiscal_year FROM it_capex_plan');
       const [yearRowsOpex]: any = await db.query('SELECT DISTINCT fiscal_year FROM it_opex_plan');
+      const [yearRowsGl]: any = await db.query('SELECT DISTINCT fiscal_year FROM it_gl_actuals').catch(() => [[]]);
       const yearSet = new Set<number>([2026, 2027, 2028, 2029, 2030]);
       yearRowsCapex.forEach((r: any) => r.fiscal_year && yearSet.add(r.fiscal_year));
       yearRowsOpex.forEach((r: any) => r.fiscal_year && yearSet.add(r.fiscal_year));
+      yearRowsGl.forEach((r: any) => r.fiscal_year && yearSet.add(r.fiscal_year));
       const availableYears = Array.from(yearSet).sort((a, b) => a - b);
 
-      // Total CapEx Planned vs Actual
       let totalCapexRequested = 0;
       let totalCapexApproved = 0;
       let totalCapexInProgress = 0;
       let totalCapexCompleted = 0;
       let totalCapexActual = 0;
 
-      const capexByAssetType: Record<string, { planned: number; actual: number }> = {};
-      const capexBySite: Record<string, { planned: number; actual: number }> = { 
-        K1: { planned: 0, actual: 0 }, 
-        K2: { planned: 0, actual: 0 }, 
-        KG: { planned: 0, actual: 0 }, 
-        Sakal: { planned: 0, actual: 0 }, 
-        'All Sites': { planned: 0, actual: 0 } 
+      const capexByAssetType: Record<string, { planned: number; actual: number; count: number }> = {};
+      const capexByStatus: Record<string, { planned: number; actual: number; count: number }> = {
+        'In Progress': { planned: 0, actual: 0, count: 0 },
+        'Complete': { planned: 0, actual: 0, count: 0 },
+        'Cancelled': { planned: 0, actual: 0, count: 0 }
       };
+      const capexByStage: Record<string, { planned: number; actual: number; count: number }> = {
+        'Estimate': { planned: 0, actual: 0, count: 0 },
+        'Agreement': { planned: 0, actual: 0, count: 0 },
+        'Bill': { planned: 0, actual: 0, count: 0 },
+        'Planning': { planned: 0, actual: 0, count: 0 }
+      };
+      const capexQuarterly = { q1: 0, q2: 0, q3: 0, q4: 0, total: 0 };
 
-      // Monthly cash flow buckets (Jan - Dec)
+      const BU_KEYS = ['K1', 'K2', 'KG', 'K3', 'Sakal Lab', 'All Sites'];
+      const capexBySite: Record<string, { planned: number; actual: number; count: number }> = {};
+      const opexBySite: Record<string, { planned: number; actual: number; glActual: number; count: number }> = {};
+      BU_KEYS.forEach(k => {
+        capexBySite[k] = { planned: 0, actual: 0, count: 0 };
+        opexBySite[k] = { planned: 0, actual: 0, glActual: 0, count: 0 };
+      });
+
       const monthlyCashFlow: Record<string, {
         planned_capex: number;
         actual_capex: number;
         planned_opex: number;
         actual_opex: number;
+        gl_actual_opex: number;
         planned_total: number;
         actual_total: number;
         variance: number;
-        sites: Record<string, { planned: number; actual: number }>;
       }> = {};
 
       MONTH_KEYS.forEach(m => {
@@ -633,33 +783,37 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
           actual_capex: 0,
           planned_opex: 0,
           actual_opex: 0,
+          gl_actual_opex: 0,
           planned_total: 0,
           actual_total: 0,
-          variance: 0,
-          sites: { 
-            K1: { planned: 0, actual: 0 }, 
-            K2: { planned: 0, actual: 0 }, 
-            KG: { planned: 0, actual: 0 }, 
-            Sakal: { planned: 0, actual: 0 }, 
-            'All Sites': { planned: 0, actual: 0 } 
-          }
+          variance: 0
         };
       });
 
       capexRows.forEach((row: any) => {
         const reqAmt = parseFloat(row.requested_amount) || 0;
         totalCapexRequested += reqAmt;
-        if (row.status === 'Approved') totalCapexApproved += reqAmt;
-        if (row.status === 'In Progress') totalCapexInProgress += reqAmt;
-        if (row.status === 'Completed') totalCapexCompleted += reqAmt;
+        const normStatus = normalizeCapexStatus(row.status);
+        const normStage = normalizeCapexStage(row.stage_tag, row.status);
+        if (normStatus === 'In Progress') totalCapexInProgress += reqAmt;
+        if (normStatus === 'Complete') totalCapexCompleted += reqAmt;
+        if (row.status === 'Approved' || normStage === 'Agreement') totalCapexApproved += reqAmt;
 
         const asset = row.asset_type || 'Other';
-        if (!capexByAssetType[asset]) capexByAssetType[asset] = { planned: 0, actual: 0 };
+        if (!capexByAssetType[asset]) capexByAssetType[asset] = { planned: 0, actual: 0, count: 0 };
         capexByAssetType[asset].planned += reqAmt;
+        capexByAssetType[asset].count += 1;
 
-        const rowSite = row.site || 'Other';
-        if (!capexBySite[rowSite]) capexBySite[rowSite] = { planned: 0, actual: 0 };
-        capexBySite[rowSite].planned += reqAmt;
+        capexByStatus[normStatus].planned += reqAmt;
+        capexByStatus[normStatus].count += 1;
+
+        capexByStage[normStage].planned += reqAmt;
+        capexByStage[normStage].count += 1;
+
+        const rowBu = normalizeBuCanonical(row.site) || 'All Sites';
+        if (!capexBySite[rowBu]) capexBySite[rowBu] = { planned: 0, actual: 0, count: 0 };
+        capexBySite[rowBu].planned += reqAmt;
+        capexBySite[rowBu].count += 1;
 
         let spending: YearMonthlySpending;
         try {
@@ -668,23 +822,26 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
           spending = createEmptyMonthlySpending();
         }
 
+        const q = computeQuarterlyFromMonthly(spending);
+        capexQuarterly.q1 += q.q1;
+        capexQuarterly.q2 += q.q2;
+        capexQuarterly.q3 += q.q3;
+        capexQuarterly.q4 += q.q4;
+        capexQuarterly.total += q.total;
+
         MONTH_KEYS.forEach(m => {
-          const planAmt = spending?.[m]?.planned || 0;
-          const actAmt = spending?.[m]?.actual || 0;
+          const planAmt = Number(spending?.[m]?.planned) || 0;
+          const actAmt = Number(spending?.[m]?.actual) || 0;
           totalCapexActual += actAmt;
           capexByAssetType[asset].actual += actAmt;
-          capexBySite[rowSite].actual += actAmt;
+          capexByStatus[normStatus].actual += actAmt;
+          capexByStage[normStage].actual += actAmt;
+          capexBySite[rowBu].actual += actAmt;
 
-          if (monthlyCashFlow[m]) {
-            monthlyCashFlow[m].planned_capex += planAmt;
-            monthlyCashFlow[m].actual_capex += actAmt;
-            monthlyCashFlow[m].planned_total += planAmt;
-            monthlyCashFlow[m].actual_total += actAmt;
-            if (monthlyCashFlow[m].sites[rowSite]) {
-              monthlyCashFlow[m].sites[rowSite].planned += planAmt;
-              monthlyCashFlow[m].sites[rowSite].actual += actAmt;
-            }
-          }
+          monthlyCashFlow[m].planned_capex += planAmt;
+          monthlyCashFlow[m].actual_capex += actAmt;
+          monthlyCashFlow[m].planned_total += planAmt;
+          monthlyCashFlow[m].actual_total += actAmt;
         });
       });
 
@@ -695,14 +852,7 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
       let totalUnplannedOpexActual = 0;
       let unplannedOpexCount = 0;
 
-      const opexByAccount: Record<string, { planned: number; actual: number }> = {};
-      const opexBySite: Record<string, { planned: number; actual: number }> = { 
-        K1: { planned: 0, actual: 0 }, 
-        K2: { planned: 0, actual: 0 }, 
-        KG: { planned: 0, actual: 0 }, 
-        Sakal: { planned: 0, actual: 0 }, 
-        'All Sites': { planned: 0, actual: 0 } 
-      };
+      const opexByAccount: Record<string, { code: string; name: string; planned: number; actual: number; glActual: number; count: number }> = {};
       const upcomingRenewals: any[] = [];
       const now = new Date();
 
@@ -716,13 +866,18 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
           unplannedOpexCount += 1;
         }
 
-        const acct = row.account_code || 'Other';
-        if (!opexByAccount[acct]) opexByAccount[acct] = { planned: 0, actual: 0 };
-        opexByAccount[acct].planned += annual;
+        const coa = resolveCoaPair(row.account_code, row.account_name);
+        const acctKey = `${coa.code} — ${coa.name}`;
+        if (!opexByAccount[acctKey]) {
+          opexByAccount[acctKey] = { code: coa.code, name: coa.name, planned: 0, actual: 0, glActual: 0, count: 0 };
+        }
+        opexByAccount[acctKey].planned += annual;
+        opexByAccount[acctKey].count += 1;
 
-        const rowSite = row.site || 'Other';
-        if (!opexBySite[rowSite]) opexBySite[rowSite] = { planned: 0, actual: 0 };
-        opexBySite[rowSite].planned += annual;
+        const rowBu = normalizeBuCanonical(row.site) || 'All Sites';
+        if (!opexBySite[rowBu]) opexBySite[rowBu] = { planned: 0, actual: 0, glActual: 0, count: 0 };
+        opexBySite[rowBu].planned += annual;
+        opexBySite[rowBu].count += 1;
 
         let spending: YearMonthlySpending;
         try {
@@ -732,28 +887,21 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
         }
 
         MONTH_KEYS.forEach(m => {
-          const planAmt = spending?.[m]?.planned || 0;
-          const actAmt = spending?.[m]?.actual || 0;
+          const planAmt = Number(spending?.[m]?.planned) || 0;
+          const actAmt = Number(spending?.[m]?.actual) || 0;
           totalAnnualOpexActual += actAmt;
           if (isUnplanned) {
             totalUnplannedOpexActual += actAmt;
           }
-          opexByAccount[acct].actual += actAmt;
-          opexBySite[rowSite].actual += actAmt;
+          opexByAccount[acctKey].actual += actAmt;
+          opexBySite[rowBu].actual += actAmt;
 
-          if (monthlyCashFlow[m]) {
-            monthlyCashFlow[m].planned_opex += planAmt;
-            monthlyCashFlow[m].actual_opex += actAmt;
-            monthlyCashFlow[m].planned_total += planAmt;
-            monthlyCashFlow[m].actual_total += actAmt;
-            if (monthlyCashFlow[m].sites[rowSite]) {
-              monthlyCashFlow[m].sites[rowSite].planned += planAmt;
-              monthlyCashFlow[m].sites[rowSite].actual += actAmt;
-            }
-          }
+          monthlyCashFlow[m].planned_opex += planAmt;
+          monthlyCashFlow[m].actual_opex += actAmt;
+          monthlyCashFlow[m].planned_total += planAmt;
+          monthlyCashFlow[m].actual_total += actAmt;
         });
 
-        // Renewal alerts check
         if (row.renewal_date) {
           const renewDate = new Date(row.renewal_date);
           const diffMs = renewDate.getTime() - now.getTime();
@@ -773,51 +921,82 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
         }
       });
 
-      // Calculate monthly variances
+      // Aggregate GL Actuals (COA Details) for FY
+      let totalGlActual = 0;
+      const glByBU: Record<string, number> = {};
+      const glByAccount: Record<string, { code: string; name: string; amount: number; count: number }> = {};
+
+      (glRows as any[]).forEach((gl: any) => {
+        const amt = parseFloat(gl.amount) || 0;
+        totalGlActual += amt;
+        const rowBu = normalizeBuCanonical(gl.bu_code) || 'All Sites';
+        glByBU[rowBu] = (glByBU[rowBu] || 0) + amt;
+        if (!opexBySite[rowBu]) opexBySite[rowBu] = { planned: 0, actual: 0, glActual: 0, count: 0 };
+        opexBySite[rowBu].glActual += amt;
+
+        const coa = resolveCoaPair(gl.gl_account_no, gl.gl_account_name);
+        const acctKey = `${coa.code} — ${coa.name}`;
+        if (!glByAccount[acctKey]) glByAccount[acctKey] = { code: coa.code, name: coa.name, amount: 0, count: 0 };
+        glByAccount[acctKey].amount += amt;
+        glByAccount[acctKey].count += 1;
+
+        if (!opexByAccount[acctKey]) {
+          opexByAccount[acctKey] = { code: coa.code, name: coa.name, planned: 0, actual: 0, glActual: 0, count: 0 };
+        }
+        opexByAccount[acctKey].glActual += amt;
+
+        if (gl.posting_date) {
+          const dt = new Date(gl.posting_date);
+          if (!isNaN(dt.getTime())) {
+            const mKey = MONTH_KEYS[dt.getMonth()];
+            if (mKey && monthlyCashFlow[mKey]) {
+              monthlyCashFlow[mKey].gl_actual_opex += amt;
+            }
+          }
+        }
+      });
+
       MONTH_KEYS.forEach(m => {
         monthlyCashFlow[m].variance = monthlyCashFlow[m].planned_total - monthlyCashFlow[m].actual_total;
       });
 
-      // Site total blend (CapEx + OpEx)
-      const totalBySite: Record<string, { 
-        planned: number; 
-        actual: number; 
-        variance: number;
-        capex_planned: number; 
-        capex_actual: number;
-        opex_planned: number; 
-        opex_actual: number;
-      }> = {};
-
-      ['K1', 'K2', 'KG', 'Sakal', 'All Sites'].forEach(s => {
+      // Site total blend (normalized K3 / Sakal unified + legacy Sakal alias)
+      const totalBySite: Record<string, any> = {};
+      ['K1', 'K2', 'KG', 'K3', 'Sakal Lab', 'All Sites'].forEach(s => {
         const cp = capexBySite[s]?.planned || 0;
         const ca = capexBySite[s]?.actual || 0;
         const op = opexBySite[s]?.planned || 0;
         const oa = opexBySite[s]?.actual || 0;
+        const gl = opexBySite[s]?.glActual || 0;
+        const effectiveOpexAct = gl > 0 ? gl : oa;
         const planned = cp + op;
-        const actual = ca + oa;
-        totalBySite[s] = {
+        const actual = ca + effectiveOpexAct;
+        const label = s === 'K3' ? 'K3 / Sakal' : s;
+        totalBySite[label] = {
+          bu_code: s,
           planned,
           actual,
           variance: planned - actual,
           capex_planned: cp,
           capex_actual: ca,
           opex_planned: op,
-          opex_actual: oa
+          opex_actual: oa,
+          gl_actual: gl
         };
       });
 
+      const effectiveOpexActual = totalGlActual > 0 ? totalGlActual : totalAnnualOpexActual;
       const totalFiscalBudget = totalCapexRequested + totalAnnualOpex;
-      const totalFiscalActual = totalCapexActual + totalAnnualOpexActual;
+      const totalFiscalActual = totalCapexActual + effectiveOpexActual;
       const totalFiscalVariance = totalFiscalBudget - totalFiscalActual;
 
-      // Transform monthly cash flow into chart-ready array
       const cashFlowChartData = MONTH_KEYS.map(m => ({
         month: m.toUpperCase(),
         planned_capex: Math.round(monthlyCashFlow[m].planned_capex),
         actual_capex: Math.round(monthlyCashFlow[m].actual_capex),
         planned_opex: Math.round(monthlyCashFlow[m].planned_opex),
         actual_opex: Math.round(monthlyCashFlow[m].actual_opex),
+        gl_actual_opex: Math.round(monthlyCashFlow[m].gl_actual_opex),
         planned_total: Math.round(monthlyCashFlow[m].planned_total),
         actual_total: Math.round(monthlyCashFlow[m].actual_total),
         variance: Math.round(monthlyCashFlow[m].variance)
@@ -838,16 +1017,32 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
         totalCapexVariance: totalCapexRequested - totalCapexActual,
         totalAnnualOpex,
         totalAnnualOpexActual,
-        totalAnnualOpexVariance: totalAnnualOpex - totalAnnualOpexActual,
+        totalGlActual,
+        effectiveOpexActual,
+        totalAnnualOpexVariance: totalAnnualOpex - effectiveOpexActual,
         totalUnplannedOpexPlanned,
         totalUnplannedOpexActual,
         unplannedOpexCount,
         capexCount: capexRows.length,
         opexCount: opexRows.length,
+        glEntryCount: (glRows as any[]).length,
         upcomingRenewals: upcomingRenewals.sort((a, b) => a.daysRemaining - b.daysRemaining),
         capexByAssetType,
+        capexByStatus,
+        capexByStage,
+        capexByBU: capexBySite,
+        capexQuarterly,
         opexByAccount,
+        opexByBU: opexBySite,
+        glByBU,
+        glByAccount,
         totalBySite,
+        totals: {
+          planned_capex: totalCapexRequested,
+          actual_capex: totalCapexActual,
+          planned_opex: totalAnnualOpex,
+          actual_opex: effectiveOpexActual
+        },
         cashFlowChartData
       });
     } catch (e: any) {
@@ -859,46 +1054,67 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
   app.get('/api/it-budget/capex', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = getDb();
-      const { site, asset_type, status, search, fiscal_year } = req.query as any;
+      const { site, asset_type, department, status, stage_tag, search, fiscal_year } = req.query as any;
       const fy = parseInt(fiscal_year, 10) || 2027;
 
       let sql = 'SELECT * FROM it_capex_plan WHERE fiscal_year = ?';
       const params: any[] = [fy];
 
-      if (site && site !== 'All Sites') {
-        const mapped = normalizeBudgetSite(site);
-        sql += ' AND (site = ? OR site = ?)';
-        params.push(mapped || site, site);
-      }
+      sql += buildBuFilterSql('site', site, params);
+
       if (asset_type && asset_type !== 'All Types') {
         sql += ' AND asset_type = ?';
         params.push(asset_type);
       }
-      if (status && status !== 'All Statuses') {
-        sql += ' AND status = ?';
-        params.push(status);
+      if (department && department !== 'All Departments') {
+        sql += ' AND department = ?';
+        params.push(department);
+      }
+      if (stage_tag && stage_tag !== 'All Stages') {
+        sql += ' AND stage_tag = ?';
+        params.push(stage_tag);
       }
       if (search && search.trim()) {
-        sql += ' AND (description LIKE ? OR capex_code LIKE ? OR justification LIKE ?)';
-        params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
+        sql += ' AND (description LIKE ? OR specifications LIKE ? OR capex_code LIKE ? OR justification LIKE ? OR pic LIKE ?)';
+        const q = `%${search.trim()}%`;
+        params.push(q, q, q, q, q);
       }
 
       sql += ' ORDER BY item_no ASC, created_at DESC';
       const [rows] = await db.query(sql, params);
 
-      // Parse JSON columns and enrich rollups
-      const parsed = (rows as any[]).map(r => {
+      let parsed = (rows as any[]).map(r => {
         let monthly = r.monthly_spending;
         try { if (typeof monthly === 'string') monthly = JSON.parse(monthly); } catch {}
         if (!monthly || typeof monthly !== 'object') monthly = createEmptyMonthlySpending();
-        
+
         const rollups = computeQuarterlyFromMonthly(monthly);
-        return { 
-          ...r, 
-          monthly_spending: monthly, 
-          quarterly_spending: rollups 
+        const assetMeta = findAssetTypeMeta(r.asset_type);
+        const normStatus = normalizeCapexStatus(r.status);
+        const normStage = normalizeCapexStage(r.stage_tag, r.status);
+        const expectedStart = deriveExpectedMonth(r.expected_start_month || r.start_date, 'Jan');
+        const expectedComplete = deriveExpectedMonth(r.expected_complete_month || r.complete_date, expectedStart);
+
+        return {
+          ...r,
+          bu: normalizeBuCanonical(r.site) || r.site,
+          department: normalizeDepartmentCode(r.department),
+          asset_owner: r.asset_owner || assetMeta?.asset_owner || 'IT',
+          asset_supervisor: r.asset_supervisor || assetMeta?.asset_supervisor || 'ITO',
+          specifications: r.specifications || '',
+          expected_start_month: expectedStart,
+          expected_complete_month: expectedComplete,
+          status: normStatus,
+          stage_tag: normStage,
+          monthly_spending: monthly,
+          quarterly_spending: rollups
         };
       });
+
+      if (status && status !== 'All Statuses') {
+        const target = normalizeCapexStatus(status);
+        parsed = parsed.filter(item => item.status === target || item.status === status);
+      }
 
       res.json(parsed);
     } catch (e: any) {
@@ -910,9 +1126,10 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
     try {
       const db = getDb();
       const {
-        fiscal_year, item_no, description, asset_type, site, pic, cost_center, project_owner,
-        department, qty, capex_code, unit_price, start_date, complete_date,
-        status, justification, monthly_spending
+        fiscal_year, item_no, description, specifications, asset_type, asset_owner, asset_supervisor,
+        site, pic, cost_center, project_owner, department, qty, capex_code, unit_price,
+        start_date, complete_date, expected_start_month, expected_complete_month,
+        status, stage_tag, justification, monthly_spending
       } = req.body;
 
       if (!description?.trim()) {
@@ -921,32 +1138,37 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
 
       const fy = parseInt(fiscal_year, 10) || 2027;
       const id = crypto.randomUUID();
-      const numQty = parseInt(qty, 10) || 1;
+      const numQty = parseFloat(qty) || 1;
       const numPrice = parseFloat(unit_price) || 0;
-      const requested_amount = numQty * numPrice;
+      const requested_amount = Math.round(numQty * numPrice * 100) / 100;
+      const normBu = normalizeBuCanonical(site) || 'K1';
+      const normDept = normalizeDepartmentCode(department || 'IT');
+      const meta = findAssetTypeMeta(asset_type);
+      const finalOwner = asset_owner || meta?.asset_owner || 'IT';
+      const finalSupervisor = asset_supervisor || meta?.asset_supervisor || 'ITO';
+      const normStatus = normalizeCapexStatus(status || 'In Progress');
+      const normStage = normalizeCapexStage(stage_tag, status);
+      const expStart = deriveExpectedMonth(expected_start_month || start_date, 'Jan');
+      const expComplete = deriveExpectedMonth(expected_complete_month || complete_date, expStart);
 
-      // Handle monthly phasing
       let spending = monthly_spending;
       if (!spending || typeof spending !== 'object') {
         spending = createEmptyMonthlySpending();
-        if (start_date) {
-          const d = new Date(start_date);
-          if (!isNaN(d.getTime())) {
-            const m = MONTH_KEYS[d.getMonth()] || 'jan';
-            spending[m] = { planned: requested_amount, actual: 0 };
-          }
-        }
+        const mKey = MONTH_KEYS[Math.max(0, monthLabelToIndex(expStart))] || 'jan';
+        spending[mKey] = { planned: requested_amount, actual: 0 };
       }
       const quarterly = computeQuarterlyFromMonthly(spending);
 
       await db.query(`INSERT INTO it_capex_plan 
-        (id, fiscal_year, item_no, description, asset_type, site, pic, cost_center, project_owner, department, qty, capex_code, unit_price, requested_amount, start_date, complete_date, status, justification, monthly_spending, quarterly_spending)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, fiscal_year, item_no, description, specifications, asset_type, asset_owner, asset_supervisor, site, pic, cost_center, project_owner, department, qty, capex_code, unit_price, requested_amount, start_date, complete_date, expected_start_month, expected_complete_month, status, stage_tag, justification, monthly_spending, quarterly_spending)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          id, fy, item_no || 1, description.trim(), asset_type || 'Hardware', site || 'K1', pic || 'Braseth',
-          cost_center || 'IT', project_owner || 'Braseth', department || 'IT Department', numQty,
-          capex_code || `Capex#${fy}-${String(Math.floor(Math.random() * 900) + 100)}`,
-          numPrice, requested_amount, start_date || null, complete_date || null, status || 'Planned',
+          id, fy, item_no || 1, description.trim(), specifications || '', asset_type || 'Computer',
+          finalOwner, finalSupervisor, normBu, pic || 'Braseth', cost_center || 'IT',
+          project_owner || pic || 'Braseth', normDept, numQty,
+          capex_code || `${normBu === 'Sakal Lab' ? 'SKPH' : normBu}000${String(Math.floor(Math.random() * 900) + 100)}`,
+          numPrice, requested_amount, start_date || null, complete_date || null,
+          expStart, expComplete, normStatus, normStage,
           justification || '', JSON.stringify(spending), JSON.stringify(quarterly)
         ]
       );
@@ -962,14 +1184,24 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
       const db = getDb();
       const { id } = req.params;
       const {
-        fiscal_year, item_no, description, asset_type, site, pic, cost_center, project_owner,
-        department, qty, capex_code, unit_price, start_date, complete_date,
-        status, justification, monthly_spending
+        fiscal_year, item_no, description, specifications, asset_type, asset_owner, asset_supervisor,
+        site, pic, cost_center, project_owner, department, qty, capex_code, unit_price,
+        start_date, complete_date, expected_start_month, expected_complete_month,
+        status, stage_tag, justification, monthly_spending
       } = req.body;
 
-      const numQty = parseInt(qty, 10) || 1;
+      const numQty = parseFloat(qty) || 1;
       const numPrice = parseFloat(unit_price) || 0;
-      const requested_amount = numQty * numPrice;
+      const requested_amount = Math.round(numQty * numPrice * 100) / 100;
+      const normBu = normalizeBuCanonical(site) || site || 'K1';
+      const normDept = normalizeDepartmentCode(department || 'IT');
+      const meta = findAssetTypeMeta(asset_type);
+      const finalOwner = asset_owner || meta?.asset_owner || 'IT';
+      const finalSupervisor = asset_supervisor || meta?.asset_supervisor || 'ITO';
+      const normStatus = normalizeCapexStatus(status);
+      const normStage = normalizeCapexStage(stage_tag, status);
+      const expStart = deriveExpectedMonth(expected_start_month || start_date, 'Jan');
+      const expComplete = deriveExpectedMonth(expected_complete_month || complete_date, expStart);
 
       let spending = monthly_spending;
       if (!spending || typeof spending !== 'object') {
@@ -978,17 +1210,20 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
       const quarterly = computeQuarterlyFromMonthly(spending);
 
       await db.query(`UPDATE it_capex_plan SET
-        fiscal_year = COALESCE(?, fiscal_year), item_no = ?, description = ?, asset_type = ?, site = ?, pic = ?,
+        fiscal_year = COALESCE(?, fiscal_year), item_no = ?, description = ?, specifications = ?,
+        asset_type = ?, asset_owner = ?, asset_supervisor = ?, site = ?, pic = ?,
         cost_center = ?, project_owner = ?, department = ?, qty = ?, capex_code = ?,
         unit_price = ?, requested_amount = ?, start_date = ?, complete_date = ?,
-        status = ?, justification = ?, monthly_spending = ?, quarterly_spending = ?
+        expected_start_month = ?, expected_complete_month = ?,
+        status = ?, stage_tag = ?, justification = ?, monthly_spending = ?, quarterly_spending = ?
         WHERE id = ?`,
         [
           fiscal_year ? parseInt(fiscal_year, 10) : null,
-          item_no || 1, description, asset_type, site, pic,
-          cost_center, project_owner, department, numQty, capex_code,
+          item_no || 1, description, specifications || '', asset_type, finalOwner, finalSupervisor,
+          normBu, pic, cost_center, project_owner || pic, normDept, numQty, capex_code,
           numPrice, requested_amount, start_date || null, complete_date || null,
-          status, justification || '', JSON.stringify(spending), JSON.stringify(quarterly), id
+          expStart, expComplete, normStatus, normStage, justification || '',
+          JSON.stringify(spending), JSON.stringify(quarterly), id
         ]
       );
 
@@ -1013,28 +1248,35 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
   app.get('/api/it-budget/opex', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = getDb();
-      const { site, account_code, search, fiscal_year, budget_classification } = req.query as any;
+      const { site, account_code, cost_center, pic, search, fiscal_year, budget_classification } = req.query as any;
       const fy = parseInt(fiscal_year, 10) || 2027;
 
       let sql = 'SELECT * FROM it_opex_plan WHERE fiscal_year = ?';
       const params: any[] = [fy];
 
-      if (site && site !== 'All Sites') {
-        const mapped = normalizeBudgetSite(site);
-        sql += ' AND (site = ? OR site = ?)';
-        params.push(mapped || site, site);
-      }
+      sql += buildBuFilterSql('site', site, params);
+
       if (account_code && account_code !== 'All Accounts') {
-        sql += ' AND account_code = ?';
-        params.push(account_code);
+        const sixDigit = extractGlCodeNumber(account_code);
+        sql += ' AND (account_code = ? OR account_code LIKE ?)';
+        params.push(account_code, `${sixDigit}%`);
+      }
+      if (cost_center && cost_center !== 'All Cost Centers') {
+        sql += ' AND cost_center = ?';
+        params.push(cost_center);
+      }
+      if (pic && pic !== 'All PICs') {
+        sql += ' AND pic = ?';
+        params.push(pic);
       }
       if (budget_classification && budget_classification !== 'All') {
         sql += ' AND budget_classification = ?';
         params.push(budget_classification);
       }
       if (search && search.trim()) {
-        sql += ' AND (description LIKE ? OR justification LIKE ? OR account_name LIKE ? OR approval_ref LIKE ? OR unplanned_reason LIKE ?)';
-        params.push(`%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`, `%${search.trim()}%`);
+        sql += ' AND (description LIKE ? OR remark LIKE ? OR justification LIKE ? OR account_name LIKE ? OR account_code LIKE ? OR approval_ref LIKE ? OR unplanned_reason LIKE ?)';
+        const q = `%${search.trim()}%`;
+        params.push(q, q, q, q, q, q, q);
       }
 
       sql += ' ORDER BY item_no ASC, created_at DESC';
@@ -1045,8 +1287,13 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
         try { if (typeof monthly === 'string') monthly = JSON.parse(monthly); } catch {}
         if (!monthly || typeof monthly !== 'object') monthly = createEmptyMonthlySpending();
         const rollups = computeQuarterlyFromMonthly(monthly);
-        return { 
-          ...r, 
+        const coa = resolveCoaPair(r.account_code, r.account_name);
+        return {
+          ...r,
+          account_code: coa.code,
+          account_name: coa.name,
+          remark: r.remark || r.justification || '',
+          bu_canonical: normalizeBuCanonical(r.site) || r.site,
           monthly_spending: monthly,
           quarterly_spending: rollups
         };
@@ -1062,7 +1309,7 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
     try {
       const db = getDb();
       const {
-        fiscal_year, item_no, account_code, account_name, description, justification,
+        fiscal_year, item_no, account_code, account_name, description, remark, justification,
         site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price,
         monthly_spending, autoSmartSpread, budget_classification, unplanned_reason, approval_ref
       } = req.body;
@@ -1073,9 +1320,11 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
 
       const fy = parseInt(fiscal_year, 10) || 2027;
       const id = crypto.randomUUID();
-      const numQty = parseInt(qty, 10) || 1;
+      const numQty = parseFloat(qty) || 1;
       const numPrice = parseFloat(unit_price) || 0;
       const cycle = billing_cycle || 'Annual';
+      const coa = resolveCoaPair(account_code, account_name);
+      const normBu = normalizeBuCanonical(site) === 'K3' ? 'Sakal' : (normalizeBuCanonical(site) || 'K1');
 
       let spending = monthly_spending;
       if (autoSmartSpread || !spending) {
@@ -1084,18 +1333,19 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
 
       let annual_cost = 0;
       if (spending && typeof spending === 'object') {
-        annual_cost = MONTH_KEYS.reduce((acc, m) => acc + (spending[m]?.planned || 0), 0);
+        annual_cost = Math.round(MONTH_KEYS.reduce((acc, m) => acc + (Number(spending[m]?.planned) || 0), 0) * 100) / 100;
       } else {
-        annual_cost = cycle === 'Monthly' ? numPrice * 12 : numPrice * numQty;
+        annual_cost = cycle === 'Monthly' ? numPrice * numQty * 12 : numPrice * numQty;
       }
 
+      const finalRemark = (remark ?? justification ?? '').trim();
+
       await db.query(`INSERT INTO it_opex_plan 
-        (id, fiscal_year, item_no, account_code, account_name, description, justification, site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price, annual_cost, monthly_spending, budget_classification, unplanned_reason, approval_ref)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        (id, fiscal_year, item_no, account_code, account_name, description, remark, justification, site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price, annual_cost, monthly_spending, budget_classification, unplanned_reason, approval_ref)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
-          id, fy, item_no || 1, account_code || '630104 - Other Outside Services',
-          account_name || 'Other Outside Services', description.trim(), justification || '',
-          site || 'K1', cost_center || 'IT', pic || 'Braseth', cycle, renewal_date || null,
+          id, fy, item_no || 1, coa.code, coa.name, description.trim(), finalRemark, finalRemark,
+          normBu, cost_center || 'IT', pic || 'Braseth', cycle, renewal_date || null,
           numQty, numPrice, annual_cost, JSON.stringify(spending),
           budget_classification || 'Planned', unplanned_reason || '', approval_ref || ''
         ]
@@ -1112,14 +1362,16 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
       const db = getDb();
       const { id } = req.params;
       const {
-        fiscal_year, item_no, account_code, account_name, description, justification,
+        fiscal_year, item_no, account_code, account_name, description, remark, justification,
         site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price,
         monthly_spending, autoSmartSpread, budget_classification, unplanned_reason, approval_ref
       } = req.body;
 
-      const numQty = parseInt(qty, 10) || 1;
+      const numQty = parseFloat(qty) || 1;
       const numPrice = parseFloat(unit_price) || 0;
       const cycle = billing_cycle || 'Annual';
+      const coa = resolveCoaPair(account_code, account_name);
+      const normBu = normalizeBuCanonical(site) === 'K3' ? 'Sakal' : (normalizeBuCanonical(site) || site || 'K1');
 
       let spending = monthly_spending;
       if (autoSmartSpread) {
@@ -1141,22 +1393,24 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
 
       let annual_cost = 0;
       if (spending && typeof spending === 'object') {
-        annual_cost = MONTH_KEYS.reduce((acc, m) => acc + (spending[m]?.planned || 0), 0);
+        annual_cost = Math.round(MONTH_KEYS.reduce((acc, m) => acc + (Number(spending[m]?.planned) || 0), 0) * 100) / 100;
       } else {
-        annual_cost = cycle === 'Monthly' ? numPrice * 12 : numPrice * numQty;
+        annual_cost = cycle === 'Monthly' ? numPrice * numQty * 12 : numPrice * numQty;
       }
+
+      const finalRemark = (remark ?? justification ?? '').trim();
 
       await db.query(`UPDATE it_opex_plan SET
         fiscal_year = COALESCE(?, fiscal_year), item_no = ?, account_code = ?, account_name = ?,
-        description = ?, justification = ?, site = ?, cost_center = ?, pic = ?,
+        description = ?, remark = ?, justification = ?, site = ?, cost_center = ?, pic = ?,
         billing_cycle = ?, renewal_date = ?, qty = ?, unit_price = ?,
         annual_cost = ?, monthly_spending = ?,
         budget_classification = ?, unplanned_reason = ?, approval_ref = ?
         WHERE id = ?`,
         [
           fiscal_year ? parseInt(fiscal_year, 10) : null,
-          item_no || 1, account_code, account_name, description, justification || '',
-          site, cost_center, pic, cycle, renewal_date || null, numQty, numPrice,
+          item_no || 1, coa.code, coa.name, description, finalRemark, finalRemark,
+          normBu, cost_center, pic, cycle, renewal_date || null, numQty, numPrice,
           annual_cost, JSON.stringify(spending),
           budget_classification || 'Planned', unplanned_reason || '', approval_ref || '',
           id
@@ -1476,12 +1730,15 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
           const scaledRequestedAmount = Math.round((parseFloat(c.requested_amount) || 0) * multiplier * 100) / 100;
 
           await db.query(`INSERT INTO it_capex_plan 
-            (id, fiscal_year, item_no, description, asset_type, site, pic, cost_center, project_owner, department, qty, capex_code, unit_price, requested_amount, start_date, complete_date, status, justification, monthly_spending, quarterly_spending)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, fiscal_year, item_no, description, specifications, asset_type, asset_owner, asset_supervisor, site, pic, cost_center, project_owner, department, qty, capex_code, unit_price, requested_amount, start_date, complete_date, expected_start_month, expected_complete_month, status, stage_tag, justification, monthly_spending, quarterly_spending)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              crypto.randomUUID(), toYear, c.item_no, c.description, c.asset_type, c.site, c.pic,
-              c.cost_center, c.project_owner, c.department, c.qty, `Capex#${toYear}-${c.item_no}`,
-              scaledUnitPrice, scaledRequestedAmount, null, null, 'Planned', c.justification,
+              crypto.randomUUID(), toYear, c.item_no, c.description, c.specifications || '', c.asset_type,
+              c.asset_owner || 'IT', c.asset_supervisor || 'ITO', c.site, c.pic,
+              c.cost_center, c.project_owner, normalizeDepartmentCode(c.department), c.qty, c.capex_code || `Capex#${toYear}-${c.item_no}`,
+              scaledUnitPrice, scaledRequestedAmount, null, null,
+              c.expected_start_month || 'Jan', c.expected_complete_month || 'Dec',
+              'In Progress', 'Planning', c.justification || '',
               JSON.stringify(monthly), JSON.stringify(rollups)
             ]
           );
@@ -1515,11 +1772,11 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
           const scaledAnnualCost = Math.round((parseFloat(o.annual_cost) || 0) * multiplier * 100) / 100;
 
           await db.query(`INSERT INTO it_opex_plan 
-            (id, fiscal_year, item_no, account_code, account_name, description, justification, site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price, annual_cost, monthly_spending)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            (id, fiscal_year, item_no, account_code, account_name, description, remark, justification, site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price, annual_cost, monthly_spending)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               crypto.randomUUID(), toYear, o.item_no, o.account_code, o.account_name, o.description,
-              o.justification, o.site, o.cost_center, o.pic, o.billing_cycle, null, o.qty, scaledUnitPrice,
+              o.remark || o.justification || '', o.justification || '', o.site, o.cost_center, o.pic, o.billing_cycle, null, o.qty, scaledUnitPrice,
               scaledAnnualCost, JSON.stringify(monthly)
             ]
           );
@@ -1555,11 +1812,11 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
     }
   });
 
-  // --- 7. BULK SYNC / IMPORT ---
+  // --- 7. BULK SYNC / IMPORT (2027 CAPEX + OPEX + GL ACTUALS) ---
   app.post('/api/it-budget/bulk-sync', authenticateToken, async (req: Request, res: Response) => {
     try {
       const db = getDb();
-      const { capexItems, opexItems, replaceExisting, fiscal_year } = req.body;
+      const { capexItems, opexItems, glActuals, replaceExisting, fiscal_year } = req.body;
       const fy = parseInt(fiscal_year, 10) || 2027;
 
       if (replaceExisting) {
@@ -1569,33 +1826,51 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
         if (Array.isArray(opexItems) && opexItems.length > 0) {
           await db.query('DELETE FROM it_opex_plan WHERE fiscal_year = ?', [fy]);
         }
+        if (Array.isArray(glActuals) && glActuals.length > 0) {
+          await db.query('DELETE FROM it_gl_actuals WHERE fiscal_year = ?', [fy]);
+        }
       }
 
       let importedCapex = 0;
       let importedOpex = 0;
+      let importedGl = 0;
 
       if (Array.isArray(capexItems)) {
         for (const c of capexItems) {
           if (!c.description?.trim()) continue;
           const id = c.id || crypto.randomUUID();
           const itemFy = parseInt(c.fiscal_year, 10) || fy;
-          const qty = parseInt(c.qty, 10) || 1;
+          const qty = parseFloat(c.qty) || 1;
           const unit_price = parseFloat(c.unit_price) || 0;
-          const requested_amount = parseFloat(c.requested_amount) || (qty * unit_price);
+          const requested_amount = Math.round((parseFloat(c.requested_amount) || (qty * unit_price)) * 100) / 100;
           const spending = c.monthly_spending || createEmptyMonthlySpending();
           const quarterly = computeQuarterlyFromMonthly(spending);
+          const normBu = normalizeBuCanonical(c.site || c.bu) || 'K1';
+          const normDept = normalizeDepartmentCode(c.department || 'IT');
+          const meta = findAssetTypeMeta(c.asset_type);
+          const normStatus = normalizeCapexStatus(c.status);
+          const normStage = normalizeCapexStage(c.stage_tag, c.status);
+          const expStart = deriveExpectedMonth(c.expected_start_month || c.start_date, 'Jan');
+          const expComplete = deriveExpectedMonth(c.expected_complete_month || c.complete_date, expStart);
 
           await db.query(`INSERT INTO it_capex_plan 
-            (id, fiscal_year, item_no, description, asset_type, site, pic, cost_center, project_owner, department, qty, capex_code, unit_price, requested_amount, start_date, complete_date, status, justification, monthly_spending, quarterly_spending)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE description = VALUES(description), asset_type = VALUES(asset_type), site = VALUES(site),
+            (id, fiscal_year, item_no, description, specifications, asset_type, asset_owner, asset_supervisor, site, pic, cost_center, project_owner, department, qty, capex_code, unit_price, requested_amount, start_date, complete_date, expected_start_month, expected_complete_month, status, stage_tag, justification, monthly_spending, quarterly_spending)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE description = VALUES(description), specifications = VALUES(specifications),
+              asset_type = VALUES(asset_type), asset_owner = VALUES(asset_owner), asset_supervisor = VALUES(asset_supervisor),
+              site = VALUES(site), department = VALUES(department), cost_center = VALUES(cost_center), pic = VALUES(pic),
               qty = VALUES(qty), unit_price = VALUES(unit_price), requested_amount = VALUES(requested_amount),
+              expected_start_month = VALUES(expected_start_month), expected_complete_month = VALUES(expected_complete_month),
+              status = VALUES(status), stage_tag = VALUES(stage_tag),
               monthly_spending = VALUES(monthly_spending), quarterly_spending = VALUES(quarterly_spending)`,
             [
-              id, itemFy, c.item_no || 1, c.description.trim(), c.asset_type || 'Hardware', c.site || 'K1',
-              c.pic || 'Braseth', c.cost_center || 'IT', c.project_owner || 'Braseth', c.department || 'IT Department',
-              qty, c.capex_code || `Capex#${itemFy}`, unit_price, requested_amount, c.start_date || null,
-              c.complete_date || null, c.status || 'Planned', c.justification || '',
+              id, itemFy, c.item_no || importedCapex + 1, c.description.trim(), c.specifications || '',
+              c.asset_type || 'Computer', c.asset_owner || meta?.asset_owner || 'IT',
+              c.asset_supervisor || meta?.asset_supervisor || 'ITO', normBu,
+              c.pic || 'Braseth', c.cost_center || 'IT', c.project_owner || c.pic || 'Braseth', normDept,
+              qty, c.capex_code || `${normBu === 'Sakal Lab' ? 'SKPH' : normBu}000${importedCapex + 1}`,
+              unit_price, requested_amount, c.start_date || null, c.complete_date || null,
+              expStart, expComplete, normStatus, normStage, c.justification || '',
               JSON.stringify(spending), JSON.stringify(quarterly)
             ]
           );
@@ -1608,27 +1883,55 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
           if (!o.description?.trim()) continue;
           const id = o.id || crypto.randomUUID();
           const itemFy = parseInt(o.fiscal_year, 10) || fy;
-          const qty = parseInt(o.qty, 10) || 1;
+          const qty = parseFloat(o.qty) || 1;
           const unit_price = parseFloat(o.unit_price) || 0;
           const cycle = o.billing_cycle || 'Annual';
           const spending = o.monthly_spending || applySmartSpread(cycle, o.renewal_date, unit_price, qty);
-          const annual_cost = parseFloat(o.annual_cost) || MONTH_KEYS.reduce((acc, m) => acc + (spending[m]?.planned || 0), 0);
+          const annual_cost = Math.round((parseFloat(o.annual_cost) || MONTH_KEYS.reduce((acc, m) => acc + (Number(spending[m]?.planned) || 0), 0)) * 100) / 100;
+          const coa = resolveCoaPair(o.account_code, o.account_name);
+          const normBu = normalizeBuCanonical(o.site || o.bu) === 'K3' ? 'Sakal' : (normalizeBuCanonical(o.site || o.bu) || 'K1');
+          const finalRemark = (o.remark || o.justification || '').trim();
 
           await db.query(`INSERT INTO it_opex_plan 
-            (id, fiscal_year, item_no, account_code, account_name, description, justification, site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price, annual_cost, monthly_spending)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON DUPLICATE KEY UPDATE description = VALUES(description), account_code = VALUES(account_code),
-              account_name = VALUES(account_name), site = VALUES(site), billing_cycle = VALUES(billing_cycle),
-              renewal_date = VALUES(renewal_date), qty = VALUES(qty), unit_price = VALUES(unit_price),
+            (id, fiscal_year, item_no, account_code, account_name, description, remark, justification, site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price, annual_cost, monthly_spending)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE description = VALUES(description), remark = VALUES(remark),
+              account_code = VALUES(account_code), account_name = VALUES(account_name),
+              site = VALUES(site), cost_center = VALUES(cost_center), pic = VALUES(pic),
+              billing_cycle = VALUES(billing_cycle), renewal_date = VALUES(renewal_date),
+              qty = VALUES(qty), unit_price = VALUES(unit_price),
               annual_cost = VALUES(annual_cost), monthly_spending = VALUES(monthly_spending)`,
             [
-              id, itemFy, o.item_no || 1, o.account_code || '630104 - Other Outside Services',
-              o.account_name || 'Other Outside Services', o.description.trim(), o.justification || '',
-              o.site || 'K1', o.cost_center || 'IT', o.pic || 'Braseth', cycle, o.renewal_date || null,
-              qty, unit_price, annual_cost, JSON.stringify(spending)
+              id, itemFy, o.item_no || importedOpex + 1, coa.code, coa.name, o.description.trim(),
+              finalRemark, finalRemark, normBu, o.cost_center || 'IT', o.pic || 'Braseth',
+              cycle, o.renewal_date || null, qty, unit_price, annual_cost, JSON.stringify(spending)
             ]
           );
           importedOpex++;
+        }
+      }
+
+      if (Array.isArray(glActuals)) {
+        for (const g of glActuals) {
+          const amt = parseFloat(g.amount);
+          if (!g.description?.trim() && isNaN(amt)) continue;
+          const id = g.id || crypto.randomUUID();
+          const itemFy = parseInt(g.fiscal_year, 10) || fy;
+          const coa = resolveCoaPair(g.gl_account_no, g.gl_account_name);
+          const normBu = normalizeBuCanonical(g.bu_code) || 'K1';
+          const postingDate = g.posting_date ? String(g.posting_date).slice(0, 10) : `${itemFy}-01-01`;
+
+          await db.query(
+            `INSERT INTO it_gl_actuals
+             (id, fiscal_year, posting_date, external_document_no, document_no, gl_account_no, gl_account_name, item_value_desc, description, amount, bu_code, source)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              id, itemFy, postingDate, g.external_document_no || '', g.document_no || '',
+              coa.code, coa.name, g.item_value_desc || '', (g.description || g.item_value_desc || coa.name).trim(),
+              isNaN(amt) ? 0 : amt, normBu, g.source || 'COA Details'
+            ]
+          );
+          importedGl++;
         }
       }
 
@@ -1636,7 +1939,244 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
         success: true,
         importedCapex,
         importedOpex,
-        message: `Successfully synchronized ${importedCapex} CapEx items and ${importedOpex} OpEx items for FY ${fy}!`
+        importedGl,
+        message: `Successfully synchronized ${importedCapex} CapEx, ${importedOpex} OpEx, and ${importedGl} GL Actual lines for FY ${fy}!`
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- 8. MASTER REFERENCE TABLES & UNIT PRICE CATALOG ---
+  app.get('/api/it-budget/master-data', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const [unitPrices]: any = await db.query(
+        'SELECT * FROM it_unit_price_catalog ORDER BY asset_category ASC, posting_date DESC'
+      ).catch(() => [HISTORICAL_UNIT_PRICE_CATALOG]);
+      const [accountCodes]: any = await db.query(
+        'SELECT * FROM it_account_codes ORDER BY sort_order ASC, code ASC'
+      ).catch(() => [[]]);
+
+      res.json({
+        businessUnits: BU_MASTER_LIST,
+        departments: DEPT_DEFINITIONS,
+        assetTypes: ASSET_TYPES_MASTER,
+        businessLines: BUSINESS_LINES_MASTER,
+        coaSummary: COA_SUMMARY_2027,
+        accountCodes,
+        unitPriceCatalog: unitPrices
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/it-budget/unit-price-catalog', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const { asset_category, capex_code, item_name, vendor, brand_model, posting_date, qty, unit_price, remark } = req.body;
+      if (!item_name?.trim()) return res.status(400).json({ error: 'Item Name is required' });
+      const id = crypto.randomUUID();
+      const nQty = parseFloat(qty) || 1;
+      const nPrice = parseFloat(unit_price) || 0;
+      const total_amount = Math.round(nQty * nPrice * 100) / 100;
+      await db.query(
+        `INSERT INTO it_unit_price_catalog (id, asset_category, capex_code, item_name, vendor, brand_model, posting_date, qty, unit_price, total_amount, remark)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, asset_category || 'Computer', capex_code || '', item_name.trim(), vendor || '', brand_model || '', posting_date || null, nQty, nPrice, total_amount, remark || '']
+      );
+      const [created]: any = await db.query('SELECT * FROM it_unit_price_catalog WHERE id = ?', [id]);
+      res.status(201).json(created[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete('/api/it-budget/unit-price-catalog/:id', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      await db.query('DELETE FROM it_unit_price_catalog WHERE id = ?', [req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- 9. GL ACTUALS LEDGER (COA DETAILS) & PLAN VS ACTUAL ---
+  app.get('/api/it-budget/gl-actuals', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const { fiscal_year, site, gl_account_no, month, search } = req.query as any;
+      const fy = parseInt(fiscal_year, 10) || 2027;
+
+      let sql = 'SELECT * FROM it_gl_actuals WHERE fiscal_year = ?';
+      const params: any[] = [fy];
+
+      sql += buildBuFilterSql('bu_code', site, params);
+
+      if (gl_account_no && gl_account_no !== 'All Accounts') {
+        const six = extractGlCodeNumber(gl_account_no);
+        sql += ' AND (gl_account_no = ? OR gl_account_no LIKE ?)';
+        params.push(gl_account_no, `${six}%`);
+      }
+      if (month && month !== 'All') {
+        const idx = monthLabelToIndex(month);
+        if (idx >= 0) {
+          sql += ' AND MONTH(posting_date) = ?';
+          params.push(idx + 1);
+        }
+      }
+      if (search && search.trim()) {
+        const q = `%${search.trim()}%`;
+        sql += ' AND (description LIKE ? OR item_value_desc LIKE ? OR external_document_no LIKE ? OR document_no LIKE ? OR gl_account_name LIKE ?)';
+        params.push(q, q, q, q, q);
+      }
+
+      sql += ' ORDER BY posting_date DESC, created_at DESC';
+      const [rows]: any = await db.query(sql, params);
+
+      const normalized = rows.map((r: any) => ({
+        ...r,
+        bu_canonical: normalizeBuCanonical(r.bu_code) || r.bu_code,
+        posting_date: r.posting_date ? new Date(r.posting_date).toISOString().slice(0, 10) : ''
+      }));
+      res.json(normalized);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/it-budget/gl-actuals', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const {
+        fiscal_year, posting_date, external_document_no, document_no,
+        gl_account_no, gl_account_name, item_value_desc, description, amount, bu_code
+      } = req.body;
+
+      if (!description?.trim() && !item_value_desc?.trim()) {
+        return res.status(400).json({ error: 'Description is required' });
+      }
+      const fy = parseInt(fiscal_year, 10) || 2027;
+      const coa = resolveCoaPair(gl_account_no, gl_account_name);
+      const normBu = normalizeBuCanonical(bu_code) || 'K1';
+      const id = crypto.randomUUID();
+      const pDate = posting_date ? String(posting_date).slice(0, 10) : `${fy}-01-01`;
+
+      await db.query(
+        `INSERT INTO it_gl_actuals
+         (id, fiscal_year, posting_date, external_document_no, document_no, gl_account_no, gl_account_name, item_value_desc, description, amount, bu_code, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Manual GL')`,
+        [
+          id, fy, pDate, external_document_no || '', document_no || '',
+          coa.code, coa.name, item_value_desc || '', (description || item_value_desc || '').trim(),
+          parseFloat(amount) || 0, normBu
+        ]
+      );
+      const [created]: any = await db.query('SELECT * FROM it_gl_actuals WHERE id = ?', [id]);
+      res.status(201).json(created[0]);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/it-budget/gl-actuals/bulk', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const { fiscal_year, entries, replaceExisting } = req.body;
+      const fy = parseInt(fiscal_year, 10) || 2027;
+      if (!Array.isArray(entries)) {
+        return res.status(400).json({ error: 'entries array is required' });
+      }
+      if (replaceExisting) {
+        await db.query('DELETE FROM it_gl_actuals WHERE fiscal_year = ?', [fy]);
+      }
+      let inserted = 0;
+      for (const g of entries) {
+        const amt = parseFloat(g.amount);
+        if (!g.description?.trim() && !g.item_value_desc?.trim() && isNaN(amt)) continue;
+        const coa = resolveCoaPair(g.gl_account_no, g.gl_account_name);
+        const normBu = normalizeBuCanonical(g.bu_code) || 'K1';
+        const pDate = g.posting_date ? String(g.posting_date).slice(0, 10) : `${fy}-01-01`;
+        await db.query(
+          `INSERT INTO it_gl_actuals
+           (id, fiscal_year, posting_date, external_document_no, document_no, gl_account_no, gl_account_name, item_value_desc, description, amount, bu_code, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'COA Details')`,
+          [
+            crypto.randomUUID(), fy, pDate, g.external_document_no || '', g.document_no || '',
+            coa.code, coa.name, g.item_value_desc || '', (g.description || g.item_value_desc || coa.name).trim(),
+            isNaN(amt) ? 0 : amt, normBu
+          ]
+        );
+        inserted++;
+      }
+      res.json({ success: true, inserted, message: `Imported ${inserted} GL Actuals lines into FY ${fy} COA Details.` });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete('/api/it-budget/gl-actuals/:id', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      await db.query('DELETE FROM it_gl_actuals WHERE id = ?', [req.params.id]);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/it-budget/gl-actuals/sync-to-opex', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const fy = parseInt(req.body.fiscal_year, 10) || 2027;
+      const [glRows]: any = await db.query('SELECT * FROM it_gl_actuals WHERE fiscal_year = ?', [fy]);
+      const [opexRows]: any = await db.query('SELECT * FROM it_opex_plan WHERE fiscal_year = ?', [fy]);
+
+      // Group GL actuals by canonical BU + 6-digit GL account + monthKey
+      const glBucket: Record<string, Record<string, number>> = {};
+      glRows.forEach((g: any) => {
+        const bu = normalizeBuCanonical(g.bu_code) || 'All Sites';
+        const code = extractGlCodeNumber(g.gl_account_no);
+        const dt = g.posting_date ? new Date(g.posting_date) : null;
+        if (!dt || isNaN(dt.getTime())) return;
+        const mKey = MONTH_KEYS[dt.getMonth()];
+        const key = `${bu}::${code}`;
+        if (!glBucket[key]) glBucket[key] = {};
+        glBucket[key][mKey] = (glBucket[key][mKey] || 0) + (parseFloat(g.amount) || 0);
+      });
+
+      // Distribute bucket sums onto first matching OPEX plan row per BU + Account
+      const appliedKeys = new Set<string>();
+      let updatedOpex = 0;
+
+      for (const row of opexRows) {
+        const bu = normalizeBuCanonical(row.site) || 'All Sites';
+        const code = extractGlCodeNumber(row.account_code);
+        const key = `${bu}::${code}`;
+        const bucket = glBucket[key];
+        if (!bucket || appliedKeys.has(key)) continue;
+
+        let spending = row.monthly_spending;
+        try { if (typeof spending === 'string') spending = JSON.parse(spending); } catch {}
+        if (!spending) spending = createEmptyMonthlySpending();
+
+        MONTH_KEYS.forEach(m => {
+          if (bucket[m] !== undefined) {
+            spending[m] = { ...(spending[m] || { planned: 0, actual: 0 }), actual: Math.round(bucket[m] * 100) / 100 };
+          }
+        });
+        await db.query('UPDATE it_opex_plan SET monthly_spending = ? WHERE id = ?', [JSON.stringify(spending), row.id]);
+        appliedKeys.add(key);
+        updatedOpex++;
+      }
+
+      res.json({
+        success: true,
+        glEntries: glRows.length,
+        updatedOpex,
+        message: `Synced ${glRows.length} GL actual entries across ${updatedOpex} matching OPEX plan lines for FY ${fy}.`
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

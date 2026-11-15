@@ -1,19 +1,48 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  DollarSign, TrendingUp, Calendar, AlertCircle, CheckCircle2, Clock, 
-  Filter, Search, Plus, Edit2, Trash2, Download, Upload, RefreshCw, 
-  FileSpreadsheet, ArrowUpRight, ArrowDownRight, Layers, ShieldCheck, 
-  ExternalLink, ChevronDown, ChevronRight, X, AlertTriangle, Building2,
-  PieChart as PieChartIcon, BarChart3, CheckSquare, Sparkles, FileText,
-  Printer, Monitor, Laptop, Video, Server, Network, Copy, ArrowRightLeft,
-  SlidersHorizontal, Check, Info, RotateCcw, Tag, Calculator
+import {
+  DollarSign, TrendingUp, Calendar, AlertCircle, CheckCircle2, Clock,
+  Search, Plus, Edit2, Trash2, Download, Upload, RefreshCw,
+  FileSpreadsheet, Layers, ShieldCheck, ChevronDown, ChevronRight, X,
+  AlertTriangle, Building2, PieChart as PieChartIcon, BarChart3,
+  Copy, SlidersHorizontal, RotateCcw, Tag, Calculator, BookOpen, Database,
+  Sparkles, Receipt
 } from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
-  ResponsiveContainer, PieChart, Pie, Cell, Legend, LineChart, Line 
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
+  ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
-import * as XLSX from 'xlsx';
 import { Button } from '../../components/ui/Button';
+import {
+  ALL_BU_FILTER_OPTIONS,
+  ASSET_TYPES_MASTER,
+  CAPEX_STAGE_TAGS,
+  CAPEX_STATUSES_2027,
+  COA_SUMMARY_2027,
+  DEPT_DEFINITIONS,
+  HISTORICAL_UNIT_PRICE_CATALOG,
+  MONTH_KEYS,
+  MONTH_LABELS,
+  UnitPriceCatalogItem,
+  distributeAmountAcrossMonths,
+  extractGlCodeNumber,
+  findCoaByCode,
+  formatBuDisplayLabel,
+  normalizeBuCanonical,
+  normalizeCapexStage,
+  normalizeCapexStatus,
+  normalizeDepartmentCode
+} from '../../src/data/itBudget2027MasterData';
+import {
+  BudgetExportMode,
+  exportCapexTemplateWorkbook,
+  exportOpexTemplateWorkbook,
+  parseBudgetWorkbook
+} from '../../src/utils/budgetExcel2027';
+import { MasterDataTab } from '../../components/budget/MasterDataTab';
+import { GlActualsTab, GlActualItem } from '../../components/budget/GlActualsTab';
+import { CapexEditModal } from '../../components/budget/CapexEditModal';
+import { OpexEditModal, OpexAccountCodeItem } from '../../components/budget/OpexEditModal';
+import { AccountCodesMasterModal } from '../../components/budget/AccountCodesMasterModal';
 
 // --- INTERFACES ---
 export interface CapExItem {
@@ -21,8 +50,12 @@ export interface CapExItem {
   fiscal_year: number;
   item_no: number;
   description: string;
+  specifications?: string;
   asset_type: string;
+  asset_owner?: string;
+  asset_supervisor?: string;
   site: string;
+  bu?: string;
   pic: string;
   cost_center: string;
   project_owner: string;
@@ -33,7 +66,10 @@ export interface CapExItem {
   requested_amount: number;
   start_date: string | null;
   complete_date: string | null;
-  status: 'Planned' | 'Pending Approval' | 'Approved' | 'In Progress' | 'Completed' | 'Cancelled';
+  expected_start_month?: string;
+  expected_complete_month?: string;
+  status: 'In Progress' | 'Complete' | 'Cancelled' | string;
+  stage_tag?: 'Estimate' | 'Agreement' | 'Bill' | 'Planning' | string;
   justification: string;
   monthly_spending: Record<string, { planned: number; actual: number }>;
   quarterly_spending: {
@@ -51,11 +87,13 @@ export interface OpExItem {
   account_code: string;
   account_name: string;
   description: string;
+  remark?: string;
   justification: string;
   site: string;
+  bu_canonical?: string;
   cost_center: string;
   pic: string;
-  billing_cycle: 'Monthly' | 'Annual' | 'Quarterly';
+  billing_cycle: 'Monthly' | 'Annual' | 'Quarterly' | string;
   renewal_date: string | null;
   qty: number;
   unit_price: number;
@@ -70,6 +108,8 @@ export interface OpExItem {
     variance: { q1: number; q2: number; q3: number; q4: number; total: number };
   };
 }
+
+export type OpexAccountCode = OpexAccountCodeItem;
 
 interface ExecutiveSummaryData {
   fiscalYear: number;
@@ -86,12 +126,15 @@ interface ExecutiveSummaryData {
   totalCapexVariance: number;
   totalAnnualOpex: number;
   totalAnnualOpexActual: number;
+  totalGlActual?: number;
+  effectiveOpexActual?: number;
   totalAnnualOpexVariance: number;
   totalUnplannedOpexPlanned?: number;
   totalUnplannedOpexActual?: number;
   unplannedOpexCount?: number;
   capexCount: number;
   opexCount: number;
+  glEntryCount?: number;
   upcomingRenewals: Array<{
     id: string;
     description: string;
@@ -102,9 +145,13 @@ interface ExecutiveSummaryData {
     daysRemaining: number;
     isCritical: boolean;
   }>;
-  capexByAssetType: Record<string, { planned: number; actual: number }>;
-  opexByAccount: Record<string, { planned: number; actual: number }>;
+  capexByAssetType: Record<string, { planned: number; actual: number; count?: number }>;
+  capexByStatus?: Record<string, { planned: number; actual: number; count: number }>;
+  capexByStage?: Record<string, { planned: number; actual: number; count: number }>;
+  capexQuarterly?: { q1: number; q2: number; q3: number; q4: number; total: number };
+  opexByAccount: Record<string, { code?: string; name?: string; planned: number; actual: number; glActual?: number; count?: number }>;
   totalBySite: Record<string, {
+    bu_code?: string;
     planned: number;
     actual: number;
     variance: number;
@@ -112,6 +159,7 @@ interface ExecutiveSummaryData {
     capex_actual: number;
     opex_planned: number;
     opex_actual: number;
+    gl_actual?: number;
   }>;
   cashFlowChartData: Array<{
     month: string;
@@ -119,53 +167,39 @@ interface ExecutiveSummaryData {
     actual_capex: number;
     planned_opex: number;
     actual_opex: number;
+    gl_actual_opex?: number;
     planned_total: number;
     actual_total: number;
     variance: number;
   }>;
 }
 
-const MONTH_KEYS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'] as const;
-const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-const DEFAULT_ASSET_TYPES = ['Printer', 'Computer', 'Laptop', 'CCTV', 'Network', 'Server', 'Storage', 'Software / System', 'Other'];
-const SITES = ['All Sites', 'K1', 'K2', 'KG', 'Sakal'];
-const CAPEX_STATUSES = ['Planned', 'Pending Approval', 'Approved', 'In Progress', 'Completed', 'Cancelled'];
-const OPEX_ACCOUNT_CODES = [
-  { code: '630104 - Other Outside Services', name: 'Other Outside Services' },
-  { code: '630103 - Rent - Non-Medical equipment', name: 'Rent - Non-Medical equipment' },
-  { code: '630102 - Communication & Internet', name: 'Communication & Internet' },
-  { code: '630105 - Cloud & SaaS Licenses', name: 'Cloud & SaaS Licenses' },
-  { code: 'Custom', name: 'Other Outside Service / Custom' }
-];
-
-export interface OpexAccountCode {
-  id?: string;
-  code: string;
-  name: string;
-  description?: string;
-  category?: string;
-  is_active?: boolean | number;
-  sort_order?: number;
-}
-
-export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
-  // Navigation & Sub-tabs (Persisted across refreshes)
-  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'capex' | 'opex' | 'sync'>(() => {
-    return (localStorage.getItem('khema_capex_subtab') as any) || 'overview';
+const CHART_PALETTE = ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#64748b'];
+const fmtUsd = (val: number | undefined | null) =>
+  (Math.round((Number(val) || 0) * 100) / 100).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
   });
-  
-  // Primary Annual Fiscal Year state (Starts from 2026, persisted across refreshes)
+
+export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
+  // Navigation & Sub-tabs
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'capex' | 'opex' | 'gl-actuals' | 'master-data' | 'sync'>(() => {
+    const saved = localStorage.getItem('khema_capex_subtab');
+    const valid = ['overview', 'capex', 'opex', 'gl-actuals', 'master-data', 'sync'];
+    return (saved && valid.includes(saved) ? saved : 'overview') as any;
+  });
+
+  // Primary Fiscal Year (Defaults to FY 2027; preserves existing years)
   const [selectedFiscalYear, setSelectedFiscalYear] = useState<number>(() => {
     const saved = localStorage.getItem('khema_capex_fiscal_year');
-    return saved ? parseInt(saved, 10) || 2026 : 2026;
+    return saved ? parseInt(saved, 10) || 2027 : 2027;
   });
   const [availableYears, setAvailableYears] = useState<number[]>([2026, 2027, 2028, 2029, 2030]);
   const [showCloneYearModal, setShowCloneYearModal] = useState(false);
-  const [cloneTargetYear, setCloneTargetYear] = useState<number>(2027);
+  const [cloneTargetYear, setCloneTargetYear] = useState<number>(2028);
   const [cloneOverwrite, setCloneOverwrite] = useState(false);
 
-  // Dedicated Fiscal Year Planning Rollover & Copy State (Sync & Template tab)
+  // Fiscal Year Rollover State (Sync & Template tab)
   const [rolloverSourceYear, setRolloverSourceYear] = useState<number>(selectedFiscalYear);
   const [rolloverTargetYear, setRolloverTargetYear] = useState<number>(selectedFiscalYear + 1);
   const [rolloverCopyCapex, setRolloverCopyCapex] = useState<boolean>(true);
@@ -185,123 +219,54 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     setRolloverTargetYear(selectedFiscalYear + 1);
   }, [selectedFiscalYear]);
 
-  // Dynamic asset categories synced from IT Asset Management
-  const [assetCategories, setAssetCategories] = useState<string[]>([]);
-
   // Global Site Filter & Search
   const [selectedSite, setSelectedSite] = useState<string>('All Sites');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  
-  // Data State
+
+  // Core Data State
   const [summaryData, setSummaryData] = useState<ExecutiveSummaryData | null>(null);
   const [capexItems, setCapexItems] = useState<CapExItem[]>([]);
   const [opexItems, setOpexItems] = useState<OpExItem[]>([]);
+  const [glActuals, setGlActuals] = useState<GlActualItem[]>([]);
+  const [unitPriceCatalog, setUnitPriceCatalog] = useState<UnitPriceCatalogItem[]>(HISTORICAL_UNIT_PRICE_CATALOG);
+  const [accountCodes, setAccountCodes] = useState<OpexAccountCodeItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [importWarnings, setImportWarnings] = useState<string[]>([]);
+
+  // Overview analytics toggle
+  const [overviewBreakdownMode, setOverviewBreakdownMode] = useState<'capex_asset' | 'capex_status' | 'opex_coa'>('capex_asset');
 
   // CapEx specific filters & expanded state
   const [capexAssetFilter, setCapexAssetFilter] = useState<string>('All Types');
+  const [capexDeptFilter, setCapexDeptFilter] = useState<string>('All Departments');
   const [capexStatusFilter, setCapexStatusFilter] = useState<string>('All Statuses');
+  const [capexStageFilter, setCapexStageFilter] = useState<string>('All Stages');
   const [expandedCapexId, setExpandedCapexId] = useState<string | null>(null);
   const [showPortfolioPhasingTotal, setShowPortfolioPhasingTotal] = useState<boolean>(false);
 
   // OpEx specific filters & settings
   const [opexAccountFilter, setOpexAccountFilter] = useState<string>('All Accounts');
+  const [opexCostCenterFilter, setOpexCostCenterFilter] = useState<string>('All Cost Centers');
+  const [opexPicFilter, setOpexPicFilter] = useState<string>('All PICs');
   const [opexClassificationFilter, setOpexClassificationFilter] = useState<'All' | 'Planned' | 'Unplanned'>('All');
-  const [smartSpreadEnabled, setSmartSpreadEnabled] = useState<boolean>(true);
   const [viewMode, setViewMode] = useState<'side-by-side' | 'planned-only' | 'actual-only'>('side-by-side');
 
   // Modals
   const [showCapexModal, setShowCapexModal] = useState<boolean>(false);
   const [editingCapexItem, setEditingCapexItem] = useState<CapExItem | null>(null);
+  const [preselectedBenchmark, setPreselectedBenchmark] = useState<UnitPriceCatalogItem | null>(null);
   const [showOpexModal, setShowOpexModal] = useState<boolean>(false);
   const [editingOpexItem, setEditingOpexItem] = useState<OpExItem | null>(null);
-  const [accountCodes, setAccountCodes] = useState<OpexAccountCode[]>([]);
   const [showAccountCodesModal, setShowAccountCodesModal] = useState<boolean>(false);
   const [isSyncingExpenses, setIsSyncingExpenses] = useState<boolean>(false);
+  const [exportMode, setExportMode] = useState<BudgetExportMode>('both');
   const [deleteConfirmItem, setDeleteConfirmItem] = useState<{ id: string; name: string; type: 'capex' | 'opex' | 'restore-defaults' } | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
-  const effectiveAccountCodes = useMemo(() => {
-    return accountCodes.length > 0 ? accountCodes : OPEX_ACCOUNT_CODES;
-  }, [accountCodes]);
-
-  const capexStatusCounts = useMemo(() => {
-    let approved = 0;
-    let inProgress = 0;
-    let completed = 0;
-    let pending = 0;
-    capexItems.forEach(item => {
-      const s = (item.status || '').toLowerCase();
-      if (s === 'completed') completed++;
-      else if (s === 'in progress') inProgress++;
-      else if (s === 'approved') approved++;
-      else pending++;
-    });
-    return { approved, inProgress, completed, pending, total: capexItems.length };
-  }, [capexItems]);
-
-  const strategicDomainData = useMemo(() => {
-    const list: Array<{ name: string; value: number; color: string }> = [];
-    const opexMap = summaryData?.opexByAccount || {};
-    const capexMap = summaryData?.capexByAssetType || {};
-
-    let cloudVal = 0;
-    let outsideVal = 0;
-    let telecomVal = 0;
-    let rentVal = 0;
-    let otherOpexVal = 0;
-
-    Object.entries(opexMap).forEach(([acc, val]) => {
-      const lower = acc.toLowerCase();
-      const amount = val.planned || 0;
-      if (lower.includes('cloud') || lower.includes('saas') || lower.includes('630105')) cloudVal += amount;
-      else if (lower.includes('outside') || lower.includes('service') || lower.includes('support') || lower.includes('630104')) outsideVal += amount;
-      else if (lower.includes('communication') || lower.includes('internet') || lower.includes('data') || lower.includes('630102') || lower.includes('690101')) telecomVal += amount;
-      else if (lower.includes('rent') || lower.includes('630103')) rentVal += amount;
-      else otherOpexVal += amount;
-    });
-
-    let hardwareCap = 0;
-    let infraCap = 0;
-    Object.entries(capexMap).forEach(([type, val]) => {
-      const lower = type.toLowerCase();
-      const amount = val.planned || 0;
-      if (lower.includes('network') || lower.includes('server') || lower.includes('cctv') || lower.includes('infra')) infraCap += amount;
-      else hardwareCap += amount;
-    });
-
-    if (cloudVal > 0) list.push({ name: 'Cloud & SaaS Licenses', value: cloudVal, color: '#6366f1' });
-    if (outsideVal > 0) list.push({ name: 'IT Support & Outsourced', value: outsideVal, color: '#10b981' });
-    if (hardwareCap > 0) list.push({ name: 'Workstations & Endpoints', value: hardwareCap, color: '#3b82f6' });
-    if (telecomVal > 0) list.push({ name: 'Telecom & ISP Data', value: telecomVal, color: '#0ea5e9' });
-    if (rentVal > 0) list.push({ name: 'Equipment Lease & Rent', value: rentVal, color: '#8b5cf6' });
-    if (infraCap > 0) list.push({ name: 'Network & Security Infra', value: infraCap, color: '#f59e0b' });
-    if (otherOpexVal > 0) list.push({ name: 'Other Operations', value: otherOpexVal, color: '#64748b' });
-
-    return list.sort((a, b) => b.value - a.value);
-  }, [summaryData]);
-
-  const fetchAccountCodes = async () => {
-    try {
-      const res = await fetch('/api/it-budget/account-codes', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAccountCodes(data);
-      }
-    } catch (e: any) {
-      console.error('Error fetching account codes:', e);
-    }
-  };
-
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage({ text, type });
-    setTimeout(() => setToastMessage(null), 4500);
+    setTimeout(() => setToastMessage(null), 5000);
   };
 
   const getAuthHeaders = () => ({
@@ -309,13 +274,50 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     'Content-Type': 'application/json'
   });
 
-  // Fetch summary data
+  const effectiveAccountCodes = useMemo(() => {
+    if (accountCodes.length > 0) return accountCodes;
+    return COA_SUMMARY_2027.map(c => ({
+      code: c.account_code,
+      name: c.account_name,
+      category: c.category,
+      sort_order: c.sort_order,
+      is_active: 1
+    }));
+  }, [accountCodes]);
+
+  const fetchAccountCodes = async () => {
+    try {
+      const res = await fetch('/api/it-budget/account-codes', { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setAccountCodes(data);
+      }
+    } catch (e) {
+      console.error('Error fetching account codes:', e);
+    }
+  };
+
+  const fetchMasterData = async () => {
+    try {
+      const res = await fetch('/api/it-budget/master-data', { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.unitPriceCatalog) && data.unitPriceCatalog.length > 0) {
+          setUnitPriceCatalog(data.unitPriceCatalog);
+        }
+        if (Array.isArray(data.accountCodes) && data.accountCodes.length > 0) {
+          setAccountCodes(data.accountCodes);
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching master data:', e);
+    }
+  };
+
   const fetchSummary = async (fy: number = selectedFiscalYear, site: string = selectedSite) => {
     try {
       const siteParam = site !== 'All Sites' ? `&site=${encodeURIComponent(site)}` : '';
-      const res = await fetch(`/api/it-budget/summary?fiscal_year=${fy}${siteParam}`, {
-        headers: getAuthHeaders()
-      });
+      const res = await fetch(`/api/it-budget/summary?fiscal_year=${fy}${siteParam}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setSummaryData(data);
@@ -323,37 +325,45 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
           setAvailableYears(data.availableYears);
         }
       }
-    } catch (e: any) {
+    } catch (e) {
       console.error('Error fetching summary:', e);
     }
   };
 
-  // Fetch CapEx data
-  const fetchCapex = async (fy: number = selectedFiscalYear, site: string = selectedSite, asset: string = capexAssetFilter, status: string = capexStatusFilter, q: string = searchQuery) => {
+  const fetchCapex = async (
+    fy: number = selectedFiscalYear,
+    site: string = selectedSite,
+    asset: string = capexAssetFilter,
+    dept: string = capexDeptFilter,
+    status: string = capexStatusFilter,
+    stage: string = capexStageFilter,
+    q: string = searchQuery
+  ) => {
     try {
       const params = new URLSearchParams({ fiscal_year: String(fy) });
       if (site !== 'All Sites') params.append('site', site);
       if (asset !== 'All Types') params.append('asset_type', asset);
+      if (dept !== 'All Departments') params.append('department', dept);
       if (status !== 'All Statuses') params.append('status', status);
+      if (stage !== 'All Stages') params.append('stage_tag', stage);
       if (q) params.append('search', q);
 
-      const res = await fetch(`/api/it-budget/capex?${params.toString()}`, {
-        headers: getAuthHeaders()
-      });
+      const res = await fetch(`/api/it-budget/capex?${params.toString()}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setCapexItems(data);
       }
-    } catch (e: any) {
+    } catch (e) {
       console.error('Error fetching capex items:', e);
     }
   };
 
-  // Fetch OpEx data
   const fetchOpex = async (
-    fy: number = selectedFiscalYear, 
-    site: string = selectedSite, 
-    acct: string = opexAccountFilter, 
+    fy: number = selectedFiscalYear,
+    site: string = selectedSite,
+    acct: string = opexAccountFilter,
+    cc: string = opexCostCenterFilter,
+    pic: string = opexPicFilter,
     q: string = searchQuery,
     classification: string = opexClassificationFilter
   ) => {
@@ -361,68 +371,43 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
       const params = new URLSearchParams({ fiscal_year: String(fy) });
       if (site !== 'All Sites') params.append('site', site);
       if (acct !== 'All Accounts') params.append('account_code', acct);
+      if (cc !== 'All Cost Centers') params.append('cost_center', cc);
+      if (pic !== 'All PICs') params.append('pic', pic);
       if (classification && classification !== 'All') params.append('budget_classification', classification);
       if (q) params.append('search', q);
 
-      const res = await fetch(`/api/it-budget/opex?${params.toString()}`, {
-        headers: getAuthHeaders()
-      });
+      const res = await fetch(`/api/it-budget/opex?${params.toString()}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         setOpexItems(data);
       }
-    } catch (e: any) {
+    } catch (e) {
       console.error('Error fetching opex items:', e);
     }
   };
 
-  // Fetch asset categories synced from IT Asset Management
-  const fetchAssetCategories = async () => {
+  const fetchGlActuals = async (fy: number = selectedFiscalYear, site: string = selectedSite) => {
     try {
-      const res = await fetch('/api/it-assets/config', {
-        headers: getAuthHeaders()
-      });
+      const params = new URLSearchParams({ fiscal_year: String(fy) });
+      if (site !== 'All Sites') params.append('site', site);
+      const res = await fetch(`/api/it-budget/gl-actuals?${params.toString()}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
-        const cats = (data.categories || [])
-          .map((c: any) => c.category_name || c.name)
-          .filter(Boolean);
-        if (cats.length > 0) {
-          setAssetCategories(cats);
-          return;
-        }
+        setGlActuals(Array.isArray(data) ? data : []);
       }
     } catch (e) {
-      console.warn('Could not fetch asset categories from /api/it-assets/config:', e);
-    }
-
-    try {
-      const res = await fetch('/api/asset-categories', {
-        headers: getAuthHeaders()
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const cats = (Array.isArray(data) ? data : [])
-          .map((c: any) => c.category_name || c.name)
-          .filter(Boolean);
-        if (cats.length > 0) {
-          setAssetCategories(cats);
-        }
-      }
-    } catch (e) {
-      console.warn('Could not fetch fallback asset categories:', e);
+      console.error('Error fetching GL actuals:', e);
     }
   };
 
-  // Initial & Filter Load
   const loadAll = async () => {
     setLoading(true);
     await Promise.all([
       fetchSummary(selectedFiscalYear, selectedSite),
-      fetchCapex(selectedFiscalYear, selectedSite, capexAssetFilter, capexStatusFilter, searchQuery),
-      fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery, opexClassificationFilter),
-      fetchAssetCategories(),
-      fetchAccountCodes()
+      fetchCapex(selectedFiscalYear, selectedSite, capexAssetFilter, capexDeptFilter, capexStatusFilter, capexStageFilter, searchQuery),
+      fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, opexCostCenterFilter, opexPicFilter, searchQuery, opexClassificationFilter),
+      fetchGlActuals(selectedFiscalYear, selectedSite),
+      fetchMasterData()
     ]);
     setLoading(false);
   };
@@ -432,14 +417,82 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
   }, [selectedFiscalYear, selectedSite]);
 
   useEffect(() => {
-    fetchCapex(selectedFiscalYear, selectedSite, capexAssetFilter, capexStatusFilter, searchQuery);
-  }, [capexAssetFilter, capexStatusFilter, searchQuery]);
+    fetchCapex(selectedFiscalYear, selectedSite, capexAssetFilter, capexDeptFilter, capexStatusFilter, capexStageFilter, searchQuery);
+  }, [capexAssetFilter, capexDeptFilter, capexStatusFilter, capexStageFilter, searchQuery]);
 
   useEffect(() => {
-    fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery, opexClassificationFilter);
-  }, [opexAccountFilter, searchQuery, opexClassificationFilter]);
+    fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, opexCostCenterFilter, opexPicFilter, searchQuery, opexClassificationFilter);
+  }, [opexAccountFilter, opexCostCenterFilter, opexPicFilter, searchQuery, opexClassificationFilter]);
 
-  // Sync actuals from it_expenses table
+  // Unique Cost Centers & PICs from current OpEx items for dynamic filter dropdowns
+  const opexCostCenterOptions = useMemo(() => {
+    const set = new Set<string>(['IT']);
+    opexItems.forEach(o => o.cost_center && set.add(o.cost_center));
+    return ['All Cost Centers', ...Array.from(set).sort()];
+  }, [opexItems]);
+
+  const opexPicOptions = useMemo(() => {
+    const set = new Set<string>(['Braseth']);
+    opexItems.forEach(o => o.pic && set.add(o.pic));
+    return ['All PICs', ...Array.from(set).sort()];
+  }, [opexItems]);
+
+  // CapEx Status Counts (2027 Taxonomy)
+  const capexStatusCounts = useMemo(() => {
+    let inProgress = 0;
+    let complete = 0;
+    let cancelled = 0;
+    let mismatchCount = 0;
+
+    capexItems.forEach(item => {
+      const s = normalizeCapexStatus(item.status);
+      if (s === 'Complete') complete++;
+      else if (s === 'Cancelled') cancelled++;
+      else inProgress++;
+
+      const mPlanned = MONTH_KEYS.reduce((acc, m) => acc + (Number(item.monthly_spending?.[m]?.planned) || 0), 0);
+      if (Math.abs(mPlanned - (Number(item.requested_amount) || 0)) > 0.01) {
+        mismatchCount++;
+      }
+    });
+    return { inProgress, complete, cancelled, mismatchCount, total: capexItems.length };
+  }, [capexItems]);
+
+  // Breakdown Donut / List Data
+  const overviewBreakdownData = useMemo(() => {
+    if (overviewBreakdownMode === 'capex_status') {
+      const map = summaryData?.capexByStatus || {};
+      return CAPEX_STATUSES_2027.map((st, idx) => ({
+        name: st,
+        value: Math.round((map[st]?.planned || 0) * 100) / 100,
+        count: map[st]?.count || 0,
+        color: st === 'Complete' ? '#10b981' : st === 'Cancelled' ? '#f43f5e' : CHART_PALETTE[idx]
+      })).filter(d => d.value > 0 || d.count > 0);
+    }
+    if (overviewBreakdownMode === 'opex_coa') {
+      const map: ExecutiveSummaryData['opexByAccount'] = summaryData?.opexByAccount ?? {};
+      return Object.entries(map)
+        .map(([name, val], idx) => ({
+          name,
+          value: Math.round((val.planned || 0) * 100) / 100,
+          actual: Math.round(((val.glActual || 0) > 0 ? (val.glActual || 0) : (val.actual || 0)) * 100) / 100,
+          color: CHART_PALETTE[idx % CHART_PALETTE.length]
+        }))
+        .filter(d => d.value > 0 || d.actual > 0)
+        .sort((a, b) => b.value - a.value);
+    }
+    const map: ExecutiveSummaryData['capexByAssetType'] = summaryData?.capexByAssetType ?? {};
+    return Object.entries(map)
+      .map(([name, val], idx) => ({
+        name,
+        value: Math.round((val.planned || 0) * 100) / 100,
+        color: CHART_PALETTE[idx % CHART_PALETTE.length]
+      }))
+      .filter(d => d.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [summaryData, overviewBreakdownMode]);
+
+  // Sync actuals from it_expenses + GL actuals
   const handleSyncExpenses = async () => {
     try {
       setIsSyncingExpenses(true);
@@ -450,7 +503,7 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
       });
       const data = await res.json();
       if (res.ok) {
-        showToast(data.message || `Actuals synchronized from it_expenses for FY ${selectedFiscalYear}!`, 'success');
+        showToast(data.message || `Synchronized actuals for FY ${selectedFiscalYear}`, 'success');
         await loadAll();
       } else {
         showToast(data.error || 'Failed to synchronize expenses', 'error');
@@ -462,7 +515,7 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     }
   };
 
-  // Clone/Roll over fiscal year (Modal action)
+  // Clone/Roll over fiscal year (Modal)
   const handleCloneYear = async () => {
     try {
       const res = await fetch('/api/it-budget/clone-year', {
@@ -488,39 +541,49 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     }
   };
 
-  // Aggregated totals and statistics for CapEx Planner grid
+  // CapEx Dynamic Totals (Filtered Items) + Stage/Status Rollups
   const capexTotals = useMemo(() => {
     let totalQty = 0;
-    let totalPlanned = 0;
+    let totalEstCost = 0;
+    let totalMonthlyPlanned = 0;
     let totalActual = 0;
-    const statusCounts: Record<string, number> = {};
+    const statusTotals: Record<string, { count: number; amount: number }> = {
+      'In Progress': { count: 0, amount: 0 },
+      'Complete': { count: 0, amount: 0 },
+      'Cancelled': { count: 0, amount: 0 }
+    };
+    const stageTotals: Record<string, { count: number; amount: number }> = {
+      'Estimate': { count: 0, amount: 0 },
+      'Agreement': { count: 0, amount: 0 },
+      'Bill': { count: 0, amount: 0 },
+      'Planning': { count: 0, amount: 0 }
+    };
 
-    const monthlyPlanned: Record<string, number> = {
-      jan: 0, feb: 0, mar: 0, apr: 0, may: 0, jun: 0,
-      jul: 0, aug: 0, sep: 0, oct: 0, nov: 0, dec: 0
-    };
-    const monthlyActual: Record<string, number> = {
-      jan: 0, feb: 0, mar: 0, apr: 0, may: 0, jun: 0,
-      jul: 0, aug: 0, sep: 0, oct: 0, nov: 0, dec: 0
-    };
+    const monthlyPlanned: Record<string, number> = {};
+    const monthlyActual: Record<string, number> = {};
+    MONTH_KEYS.forEach(m => { monthlyPlanned[m] = 0; monthlyActual[m] = 0; });
 
     capexItems.forEach(item => {
+      const req = Number(item.requested_amount) || 0;
       totalQty += Number(item.qty) || 0;
-      totalPlanned += Number(item.requested_amount) || 0;
-      statusCounts[item.status] = (statusCounts[item.status] || 0) + 1;
+      totalEstCost += req;
+
+      const st = normalizeCapexStatus(item.status);
+      const tg = normalizeCapexStage(item.stage_tag, item.status);
+      statusTotals[st].count += 1;
+      statusTotals[st].amount += req;
+      stageTotals[tg].count += 1;
+      stageTotals[tg].amount += req;
 
       MONTH_KEYS.forEach(m => {
         const p = Number(item.monthly_spending?.[m]?.planned) || 0;
         const a = Number(item.monthly_spending?.[m]?.actual) || 0;
         monthlyPlanned[m] += p;
         monthlyActual[m] += a;
+        totalMonthlyPlanned += p;
         totalActual += a;
       });
     });
-
-    const totalVariance = totalPlanned - totalActual;
-    const burnPercent = totalPlanned > 0 ? (totalActual / totalPlanned) * 100 : 0;
-    const avgUnitPrice = totalQty > 0 ? totalPlanned / totalQty : 0;
 
     const q1Planned = monthlyPlanned.jan + monthlyPlanned.feb + monthlyPlanned.mar;
     const q2Planned = monthlyPlanned.apr + monthlyPlanned.may + monthlyPlanned.jun;
@@ -534,12 +597,13 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
 
     return {
       totalQty,
-      totalPlanned,
+      totalPlanned: totalEstCost,
+      totalMonthlyPlanned,
       totalActual,
-      totalVariance,
-      burnPercent,
-      avgUnitPrice,
-      statusCounts,
+      totalVariance: totalEstCost - totalActual,
+      burnPercent: totalEstCost > 0 ? (totalActual / totalEstCost) * 100 : 0,
+      statusTotals,
+      stageTotals,
       monthlyPlanned,
       monthlyActual,
       quarterly: {
@@ -549,450 +613,7 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     };
   }, [capexItems]);
 
-  // Preview calculation for Fiscal Year Rollover card
-  const rolloverPreview = useMemo(() => {
-    let sourceCapexCount = capexItems.length;
-    let sourceOpexCount = opexItems.length;
-    let sourceCapexAmount = capexItems.reduce((sum, item) => sum + (Number(item.requested_amount) || 0), 0);
-    let sourceOpexAmount = opexItems.reduce((sum, item) => sum + (Number(item.annual_cost) || 0), 0);
-
-    if (rolloverCampus !== 'All Sites') {
-      const filteredCapex = capexItems.filter(c => c.site === rolloverCampus);
-      const filteredOpex = opexItems.filter(o => o.site === rolloverCampus);
-      sourceCapexCount = filteredCapex.length;
-      sourceOpexCount = filteredOpex.length;
-      sourceCapexAmount = filteredCapex.reduce((sum, item) => sum + (Number(item.requested_amount) || 0), 0);
-      sourceOpexAmount = filteredOpex.reduce((sum, item) => sum + (Number(item.annual_cost) || 0), 0);
-    }
-
-    const multiplier = 1 + (rolloverAdjustmentPercent / 100);
-    const targetCapexAmount = sourceCapexAmount * multiplier;
-    const targetOpexAmount = sourceOpexAmount * multiplier;
-
-    const totalItems = (rolloverCopyCapex ? sourceCapexCount : 0) + (rolloverCopyOpex ? sourceOpexCount : 0);
-    const totalTargetBudget = (rolloverCopyCapex ? targetCapexAmount : 0) + (rolloverCopyOpex ? targetOpexAmount : 0);
-
-    return {
-      sourceCapexCount,
-      sourceOpexCount,
-      sourceCapexAmount,
-      sourceOpexAmount,
-      targetCapexAmount,
-      targetOpexAmount,
-      totalItems,
-      totalTargetBudget
-    };
-  }, [capexItems, opexItems, rolloverCampus, rolloverAdjustmentPercent, rolloverCopyCapex, rolloverCopyOpex]);
-
-  // Execute Fiscal Year Planning Rollover & Copy from Sync & Template tab
-  const handleExecuteRollover = async () => {
-    if (!rolloverCopyCapex && !rolloverCopyOpex) {
-      showToast('Please select at least CapEx or OpEx/S-Operation to copy', 'error');
-      return;
-    }
-    if (rolloverSourceYear === rolloverTargetYear) {
-      showToast('Source and Target Fiscal Year cannot be the same', 'error');
-      return;
-    }
-
-    setIsRollingOver(true);
-    try {
-      const res = await fetch('/api/it-budget/clone-year', {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          from_year: rolloverSourceYear,
-          to_year: rolloverTargetYear,
-          copy_capex: rolloverCopyCapex,
-          copy_opex: rolloverCopyOpex,
-          campus_filter: rolloverCampus,
-          adjustment_percent: rolloverAdjustmentPercent,
-          overwrite: rolloverOverwrite
-        })
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        showToast(
-          data.message || `Successfully rolled over FY ${rolloverSourceYear} plan into FY ${rolloverTargetYear}!`,
-          'success'
-        );
-        // Ensure new target year is in availableYears list
-        setAvailableYears(prev => Array.from(new Set([...prev, rolloverTargetYear])).sort((a, b) => a - b));
-        
-        // Auto-switch to target year as requested
-        setSelectedFiscalYear(rolloverTargetYear);
-      } else {
-        showToast(data.error || 'Failed to roll over fiscal year', 'error');
-      }
-    } catch (e: any) {
-      showToast('Error rolling over fiscal year: ' + e.message, 'error');
-    } finally {
-      setIsRollingOver(false);
-    }
-  };
-
-  // Restore Template Defaults with in-app confirmation modal
-  const handleRestoreDefaults = () => {
-    setDeleteConfirmItem({
-      id: 'restore-all',
-      name: `All CapEx and S-Operation items for FY ${selectedFiscalYear}`,
-      type: 'restore-defaults'
-    });
-  };
-
-  // CapEx Inline Status Update
-  const handleUpdateCapexStatus = async (item: CapExItem, newStatus: string) => {
-    try {
-      const res = await fetch(`/api/it-budget/capex/${item.id}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ ...item, status: newStatus })
-      });
-      if (res.ok) {
-        setCapexItems(prev => prev.map(c => c.id === item.id ? { ...c, status: newStatus as any } : c));
-        fetchSummary();
-        showToast(`Updated "${item.description}" status to ${newStatus}`);
-      }
-    } catch (e) {
-      showToast('Failed to update status', 'error');
-    }
-  };
-
-  // CapEx Monthly Cell Update (Planned or Actual)
-  const handleCapexMonthChange = async (itemId: string, monthKey: string, type: 'planned' | 'actual', value: number) => {
-    const item = capexItems.find(c => c.id === itemId);
-    if (!item) return;
-
-    const updatedSpending = {
-      ...item.monthly_spending,
-      [monthKey]: {
-        ...(item.monthly_spending?.[monthKey] || { planned: 0, actual: 0 }),
-        [type]: Math.max(0, value)
-      }
-    };
-
-    // Optimistic update
-    setCapexItems(prev => prev.map(c => {
-      if (c.id === itemId) {
-        return { ...c, monthly_spending: updatedSpending };
-      }
-      return c;
-    }));
-
-    try {
-      await fetch(`/api/it-budget/capex/${itemId}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          ...item,
-          monthly_spending: updatedSpending
-        })
-      });
-      fetchSummary();
-    } catch (e) {
-      console.error('Failed to save monthly capex cell', e);
-    }
-  };
-
-  // OpEx Monthly Cell Update (Planned or Actual)
-  const handleOpexMonthChange = async (itemId: string, monthKey: string, type: 'planned' | 'actual', value: number) => {
-    const item = opexItems.find(o => o.id === itemId);
-    if (!item) return;
-
-    const updatedSpending = {
-      ...item.monthly_spending,
-      [monthKey]: {
-        ...(item.monthly_spending?.[monthKey] || { planned: 0, actual: 0 }),
-        [type]: Math.max(0, value)
-      }
-    };
-
-    const newAnnualPlanned = MONTH_KEYS.reduce((acc, m) => acc + (updatedSpending[m]?.planned || 0), 0);
-
-    // Optimistic update
-    setOpexItems(prev => prev.map(o => {
-      if (o.id === itemId) {
-        return { 
-          ...o, 
-          annual_cost: newAnnualPlanned,
-          monthly_spending: updatedSpending 
-        };
-      }
-      return o;
-    }));
-
-    try {
-      await fetch(`/api/it-budget/opex/${itemId}`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          ...item,
-          annual_cost: newAnnualPlanned,
-          monthly_spending: updatedSpending
-        })
-      });
-      fetchSummary();
-    } catch (e) {
-      console.error('Failed to save monthly opex cell', e);
-    }
-  };
-
-  // Delete Handlers with safe in-app confirmation modal (eliminates blocked window.confirm in iframes)
-  const handleDeleteCapex = (id: string, name: string) => {
-    setDeleteConfirmItem({ id, name, type: 'capex' });
-  };
-
-  const handleDeleteOpex = (id: string, name: string) => {
-    setDeleteConfirmItem({ id, name, type: 'opex' });
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!deleteConfirmItem) return;
-    setIsDeleting(true);
-    try {
-      if (deleteConfirmItem.type === 'restore-defaults') {
-        const res = await fetch('/api/it-budget/restore-defaults', {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ fiscal_year: selectedFiscalYear })
-        });
-        const data = await res.json();
-        if (res.ok) {
-          showToast(data.message || 'Template restored successfully', 'success');
-          await loadAll();
-          setDeleteConfirmItem(null);
-        } else {
-          showToast(data.error || 'Failed to restore template defaults', 'error');
-        }
-        return;
-      }
-
-      const endpoint = deleteConfirmItem.type === 'capex'
-        ? `/api/it-budget/capex/${deleteConfirmItem.id}`
-        : `/api/it-budget/opex/${deleteConfirmItem.id}`;
-
-      const res = await fetch(endpoint, {
-        method: 'DELETE',
-        headers: getAuthHeaders()
-      });
-
-      if (res.ok) {
-        if (deleteConfirmItem.type === 'capex') {
-          setCapexItems(prev => prev.filter(c => c.id !== deleteConfirmItem.id));
-          showToast(`CapEx item "${deleteConfirmItem.name}" deleted successfully`);
-        } else {
-          setOpexItems(prev => prev.filter(o => o.id !== deleteConfirmItem.id));
-          showToast(`OpEx item "${deleteConfirmItem.name}" deleted successfully`);
-        }
-        await loadAll();
-        setDeleteConfirmItem(null);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        showToast(err.error || `Failed to delete ${deleteConfirmItem.type.toUpperCase()} item`, 'error');
-      }
-    } catch (e: any) {
-      showToast('Error deleting item: ' + e.message, 'error');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
-  // Excel Export: Multi-Sheet Workbook with Planned vs Actual & Variance
-  const handleExportExcel = () => {
-    try {
-      const wb = XLSX.utils.book_new();
-
-      // --- Sheet 1: CapEx Plan ---
-      const capexSheetData = capexItems.map((c, idx) => {
-        const row: any = {
-          'No': idx + 1,
-          'Fiscal Year': c.fiscal_year || selectedFiscalYear,
-          'Description': c.description,
-          'Asset Type': c.asset_type,
-          'Site': c.site,
-          'PIC': c.pic,
-          'Capex Code': c.capex_code,
-          'Qty': c.qty,
-          'Unit Price ($)': c.unit_price,
-          'Requested Amount ($)': c.requested_amount,
-          'Status': c.status,
-          'Start Date': c.start_date || '',
-          'Complete Date': c.complete_date || '',
-          'Justification': c.justification || ''
-        };
-
-        // Monthly Planned
-        MONTH_KEYS.forEach(m => {
-          row[`${m.toUpperCase()} (Planned)`] = c.monthly_spending?.[m]?.planned || 0;
-          row[`${m.toUpperCase()} (Actual)`] = c.monthly_spending?.[m]?.actual || 0;
-        });
-
-        const totalPlanned = MONTH_KEYS.reduce((acc, m) => acc + (c.monthly_spending?.[m]?.planned || 0), 0);
-        const totalActual = MONTH_KEYS.reduce((acc, m) => acc + (c.monthly_spending?.[m]?.actual || 0), 0);
-        row['Annual Planned ($)'] = totalPlanned;
-        row['Annual Actual ($)'] = totalActual;
-        row['Annual Variance ($)'] = totalPlanned - totalActual;
-
-        return row;
-      });
-
-      const wsCapex = XLSX.utils.json_to_sheet(capexSheetData);
-      XLSX.utils.book_append_sheet(wb, wsCapex, `CapEx Plan FY${selectedFiscalYear}`);
-
-      // --- Sheet 2: OpEx & S-Operation Plan ---
-      const opexSheetData = opexItems.map((o, idx) => {
-        const row: any = {
-          'No': idx + 1,
-          'Fiscal Year': o.fiscal_year || selectedFiscalYear,
-          'Account Code': o.account_code,
-          'Account Name': o.account_name,
-          'Description': o.description,
-          'Site': o.site,
-          'Billing Cycle': o.billing_cycle,
-          'Renewal Date': o.renewal_date || '',
-          'Qty': o.qty,
-          'Unit Price ($)': o.unit_price,
-          'Justification': o.justification || ''
-        };
-
-        let rowPlanned = 0;
-        let rowActual = 0;
-        MONTH_KEYS.forEach(m => {
-          const p = o.monthly_spending?.[m]?.planned || 0;
-          const a = o.monthly_spending?.[m]?.actual || 0;
-          row[`${m.toUpperCase()} (Planned)`] = p;
-          row[`${m.toUpperCase()} (Actual)`] = a;
-          row[`${m.toUpperCase()} (Variance)`] = p - a;
-          rowPlanned += p;
-          rowActual += a;
-        });
-
-        row['Annual Planned ($)'] = rowPlanned;
-        row['Annual Actual ($)'] = rowActual;
-        row['Annual Variance ($)'] = rowPlanned - rowActual;
-
-        return row;
-      });
-
-      const wsOpex = XLSX.utils.json_to_sheet(opexSheetData);
-      XLSX.utils.book_append_sheet(wb, wsOpex, `OpEx & S-Operation FY${selectedFiscalYear}`);
-
-      // Write File
-      XLSX.writeFile(wb, `Khema_Global_IT_CapEx_and_S-Operation_FY${selectedFiscalYear}.xlsx`);
-      showToast(`Exported IT CapEx & S-Operation FY${selectedFiscalYear} Excel workbook!`, 'success');
-    } catch (e: any) {
-      showToast('Failed to export Excel file: ' + e.message, 'error');
-    }
-  };
-
-  // Excel Import Handler
-  const handleImportExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (evt) => {
-      try {
-        const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
-
-        const importedCapex: any[] = [];
-        const importedOpex: any[] = [];
-
-        // Parse sheets
-        wb.SheetNames.forEach(sheetName => {
-          const lower = sheetName.toLowerCase();
-          const rows: any[] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName]);
-
-          if (lower.includes('capex')) {
-            rows.forEach((r, idx) => {
-              if (!r.Description) return;
-              const spending: any = {};
-              MONTH_KEYS.forEach(m => {
-                spending[m] = {
-                  planned: parseFloat(r[`${m.toUpperCase()} (Planned)`] || r[m.toUpperCase()] || 0) || 0,
-                  actual: parseFloat(r[`${m.toUpperCase()} (Actual)`] || 0) || 0
-                };
-              });
-
-              importedCapex.push({
-                fiscal_year: selectedFiscalYear,
-                item_no: r.No || idx + 1,
-                description: String(r.Description),
-                asset_type: r['Asset Type'] || 'Hardware',
-                site: r.Site || 'K1',
-                pic: r.PIC || 'Braseth',
-                capex_code: r['Capex Code'] || `Capex#${selectedFiscalYear}-${idx + 1}`,
-                qty: parseInt(r.Qty, 10) || 1,
-                unit_price: parseFloat(r['Unit Price ($)'] || r.UnitPrice || 0) || 0,
-                requested_amount: parseFloat(r['Requested Amount ($)'] || 0) || 0,
-                status: r.Status || 'Planned',
-                justification: r.Justification || '',
-                monthly_spending: spending
-              });
-            });
-          } else if (lower.includes('opex') || lower.includes('operation')) {
-            rows.forEach((r, idx) => {
-              if (!r.Description) return;
-              const spending: any = {};
-              MONTH_KEYS.forEach(m => {
-                spending[m] = {
-                  planned: parseFloat(r[`${m.toUpperCase()} (Planned)`] || r[m.toUpperCase()] || 0) || 0,
-                  actual: parseFloat(r[`${m.toUpperCase()} (Actual)`] || 0) || 0
-                };
-              });
-
-              importedOpex.push({
-                fiscal_year: selectedFiscalYear,
-                item_no: r.No || idx + 1,
-                account_code: r['Account Code'] || '630104 - Other Outside Services',
-                account_name: r['Account Name'] || 'Other Outside Services',
-                description: String(r.Description),
-                site: r.Site || 'K1',
-                billing_cycle: r['Billing Cycle'] || 'Annual',
-                renewal_date: r['Renewal Date'] || null,
-                qty: parseInt(r.Qty, 10) || 1,
-                unit_price: parseFloat(r['Unit Price ($)'] || 0) || 0,
-                justification: r.Justification || '',
-                monthly_spending: spending
-              });
-            });
-          }
-        });
-
-        if (importedCapex.length === 0 && importedOpex.length === 0) {
-          showToast('No recognizable CapEx or OpEx sheets found in file.', 'error');
-          return;
-        }
-
-        const res = await fetch('/api/it-budget/bulk-sync', {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            fiscal_year: selectedFiscalYear,
-            capexItems: importedCapex,
-            opexItems: importedOpex,
-            replaceExisting: false
-          })
-        });
-
-        const resData = await res.json();
-        if (res.ok) {
-          showToast(resData.message, 'success');
-          await loadAll();
-        } else {
-          showToast(resData.error || 'Failed to import Excel data', 'error');
-        }
-      } catch (err: any) {
-        showToast('Error reading Excel file: ' + err.message, 'error');
-      }
-    };
-    reader.readAsBinaryString(file);
-    e.target.value = '';
-  };
-
-  // Rollups & Burn-rates calculation for OpEx Grid
+  // OpEx Dynamic Filtered Subtotals (matching Excel SUBTOTAL(9, ...))
   const opexGridRollups = useMemo(() => {
     const monthlyPlannedTotals: Record<string, number> = {};
     const monthlyActualTotals: Record<string, number> = {};
@@ -1009,8 +630,8 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
 
     opexItems.forEach(item => {
       MONTH_KEYS.forEach(m => {
-        const p = item.monthly_spending?.[m]?.planned || 0;
-        const a = item.monthly_spending?.[m]?.actual || 0;
+        const p = Number(item.monthly_spending?.[m]?.planned) || 0;
+        const a = Number(item.monthly_spending?.[m]?.actual) || 0;
         monthlyPlannedTotals[m] += p;
         monthlyActualTotals[m] += a;
         grandPlanned += p;
@@ -1032,215 +653,495 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
     };
   }, [opexItems]);
 
+  // Rollover preview calculation
+  const rolloverPreview = useMemo(() => {
+    const matchesCampus = (s: string) =>
+      rolloverCampus === 'All Sites' || normalizeBuCanonical(s) === normalizeBuCanonical(rolloverCampus);
+
+    const filteredCapex = capexItems.filter(c => matchesCampus(c.site));
+    const filteredOpex = opexItems.filter(o => matchesCampus(o.site));
+    const multiplier = 1 + (rolloverAdjustmentPercent / 100);
+    const targetCapexAmount = filteredCapex.reduce((sum, item) => sum + (Number(item.requested_amount) || 0), 0) * multiplier;
+    const targetOpexAmount = filteredOpex.reduce((sum, item) => sum + (Number(item.annual_cost) || 0), 0) * multiplier;
+
+    return {
+      sourceCapexCount: filteredCapex.length,
+      sourceOpexCount: filteredOpex.length,
+      totalItems: (rolloverCopyCapex ? filteredCapex.length : 0) + (rolloverCopyOpex ? filteredOpex.length : 0),
+      totalTargetBudget: (rolloverCopyCapex ? targetCapexAmount : 0) + (rolloverCopyOpex ? targetOpexAmount : 0)
+    };
+  }, [capexItems, opexItems, rolloverCampus, rolloverAdjustmentPercent, rolloverCopyCapex, rolloverCopyOpex]);
+
+  const handleExecuteRollover = async () => {
+    if (!rolloverCopyCapex && !rolloverCopyOpex) {
+      showToast('Select at least CapEx or OpEx to roll over', 'error');
+      return;
+    }
+    if (rolloverSourceYear === rolloverTargetYear) {
+      showToast('Source and Target Fiscal Year cannot be the same', 'error');
+      return;
+    }
+    setIsRollingOver(true);
+    try {
+      const res = await fetch('/api/it-budget/clone-year', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          from_year: rolloverSourceYear,
+          to_year: rolloverTargetYear,
+          copy_capex: rolloverCopyCapex,
+          copy_opex: rolloverCopyOpex,
+          campus_filter: rolloverCampus,
+          adjustment_percent: rolloverAdjustmentPercent,
+          overwrite: rolloverOverwrite
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || `Rolled over to FY ${rolloverTargetYear}`, 'success');
+        setAvailableYears(prev => Array.from(new Set([...prev, rolloverTargetYear])).sort((a, b) => a - b));
+        setSelectedFiscalYear(rolloverTargetYear);
+      } else {
+        showToast(data.error || 'Failed to roll over fiscal year', 'error');
+      }
+    } catch (e: any) {
+      showToast('Error rolling over: ' + e.message, 'error');
+    } finally {
+      setIsRollingOver(false);
+    }
+  };
+
+  const handleRestoreDefaults = () => {
+    setDeleteConfirmItem({
+      id: 'restore-all',
+      name: `All CapEx and OPEX items for FY ${selectedFiscalYear}`,
+      type: 'restore-defaults'
+    });
+  };
+
+  // CapEx Inline Updates
+  const handleUpdateCapexField = async (item: CapExItem, patch: Partial<CapExItem>) => {
+    const updated = { ...item, ...patch };
+    setCapexItems(prev => prev.map(c => c.id === item.id ? updated : c));
+    try {
+      const res = await fetch(`/api/it-budget/capex/${item.id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(updated)
+      });
+      if (res.ok) {
+        fetchSummary();
+        showToast(`Updated "${item.description}"`);
+      }
+    } catch {
+      showToast('Failed to update CapEx item', 'error');
+    }
+  };
+
+  const handleCapexDistributeEvenlyInline = async (item: CapExItem) => {
+    const total = Math.round((Number(item.qty) || 1) * (Number(item.unit_price) || 0) * 100) / 100;
+    const distributed = distributeAmountAcrossMonths(
+      total,
+      item.expected_start_month || 'Jan',
+      item.expected_complete_month || 'Dec'
+    );
+    const updatedSpending: Record<string, { planned: number; actual: number }> = {};
+    MONTH_KEYS.forEach(m => {
+      updatedSpending[m] = {
+        planned: distributed[m].planned,
+        actual: Number(item.monthly_spending?.[m]?.actual) || 0
+      };
+    });
+    await handleUpdateCapexField(item, { monthly_spending: updatedSpending });
+    await fetchCapex();
+  };
+
+  const handleCapexMonthChange = async (itemId: string, monthKey: string, type: 'planned' | 'actual', value: number) => {
+    const item = capexItems.find(c => c.id === itemId);
+    if (!item) return;
+
+    const updatedSpending = {
+      ...item.monthly_spending,
+      [monthKey]: {
+        ...(item.monthly_spending?.[monthKey] || { planned: 0, actual: 0 }),
+        [type]: Math.max(0, value)
+      }
+    };
+
+    setCapexItems(prev => prev.map(c => c.id === itemId ? { ...c, monthly_spending: updatedSpending } : c));
+    try {
+      await fetch(`/api/it-budget/capex/${itemId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ ...item, monthly_spending: updatedSpending })
+      });
+      fetchSummary();
+    } catch (e) {
+      console.error('Failed to save CapEx monthly cell', e);
+    }
+  };
+
+  const handleOpexMonthChange = async (itemId: string, monthKey: string, type: 'planned' | 'actual', value: number) => {
+    const item = opexItems.find(o => o.id === itemId);
+    if (!item) return;
+
+    const updatedSpending = {
+      ...item.monthly_spending,
+      [monthKey]: {
+        ...(item.monthly_spending?.[monthKey] || { planned: 0, actual: 0 }),
+        [type]: Math.max(0, value)
+      }
+    };
+    const newAnnualPlanned = MONTH_KEYS.reduce((acc, m) => acc + (updatedSpending[m]?.planned || 0), 0);
+
+    setOpexItems(prev => prev.map(o => o.id === itemId ? { ...o, annual_cost: newAnnualPlanned, monthly_spending: updatedSpending } : o));
+    try {
+      await fetch(`/api/it-budget/opex/${itemId}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ ...item, annual_cost: newAnnualPlanned, monthly_spending: updatedSpending })
+      });
+      fetchSummary();
+    } catch (e) {
+      console.error('Failed to save OpEx monthly cell', e);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmItem) return;
+    setIsDeleting(true);
+    try {
+      if (deleteConfirmItem.type === 'restore-defaults') {
+        const res = await fetch('/api/it-budget/restore-defaults', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ fiscal_year: selectedFiscalYear })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(data.message || 'Template restored', 'success');
+          await loadAll();
+          setDeleteConfirmItem(null);
+        } else {
+          showToast(data.error || 'Failed to restore template defaults', 'error');
+        }
+        return;
+      }
+
+      const endpoint = deleteConfirmItem.type === 'capex'
+        ? `/api/it-budget/capex/${deleteConfirmItem.id}`
+        : `/api/it-budget/opex/${deleteConfirmItem.id}`;
+
+      const res = await fetch(endpoint, { method: 'DELETE', headers: getAuthHeaders() });
+      if (res.ok) {
+        showToast(`${deleteConfirmItem.type.toUpperCase()} item "${deleteConfirmItem.name}" deleted`);
+        await loadAll();
+        setDeleteConfirmItem(null);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(err.error || 'Failed to delete item', 'error');
+      }
+    } catch (e: any) {
+      showToast('Error deleting item: ' + e.message, 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Separate 2027 Excel Template Exports (Plan, Actual, or Both)
+  const handleExportCapexExcel = async (modeOverride?: BudgetExportMode) => {
+    const mode = modeOverride || exportMode;
+    try {
+      const file = await exportCapexTemplateWorkbook(capexItems, selectedFiscalYear, { unitPriceCatalog, mode });
+      const label = mode === 'both' ? 'Plan & Actual' : mode === 'actual' ? 'Actual' : 'Planning';
+      showToast(`Exported FY ${selectedFiscalYear} CapEx (${label}) template (${file})`, 'success');
+    } catch (e: any) {
+      showToast('Failed to export CapEx Excel: ' + e.message, 'error');
+    }
+  };
+
+  const handleExportOpexExcel = async (modeOverride?: BudgetExportMode) => {
+    const mode = modeOverride || exportMode;
+    try {
+      const file = await exportOpexTemplateWorkbook(opexItems, glActuals, selectedFiscalYear, { mode });
+      const label = mode === 'both' ? 'Plan & Actual' : mode === 'actual' ? 'Actual' : 'Planning';
+      showToast(`Exported FY ${selectedFiscalYear} OPEX (${label}) template (${file})`, 'success');
+    } catch (e: any) {
+      showToast('Failed to export OpEx Excel: ' + e.message, 'error');
+    }
+  };
+
+  // Multi-Sheet 2027 Excel Import
+  const handleImportExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = parseBudgetWorkbook(buf, selectedFiscalYear);
+      setImportWarnings(parsed.warnings);
+
+      if (parsed.capexItems.length === 0 && parsed.opexItems.length === 0 && parsed.glActuals.length === 0) {
+        showToast('No recognizable CAPEX, OPEX, or COA Details sheets found.', 'error');
+        return;
+      }
+
+      const res = await fetch('/api/it-budget/bulk-sync', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          fiscal_year: selectedFiscalYear,
+          capexItems: parsed.capexItems,
+          opexItems: parsed.opexItems,
+          glActuals: parsed.glActuals,
+          replaceExisting: false
+        })
+      });
+      const resData = await res.json();
+      if (res.ok) {
+        const warnNote = parsed.warnings.length > 0 ? ` (${parsed.warnings.length} validation notices shown)` : '';
+        showToast(`${resData.message}${warnNote}`, 'success');
+        await loadAll();
+      } else {
+        showToast(resData.error || 'Failed to import Excel data', 'error');
+      }
+    } catch (err: any) {
+      showToast('Error reading Excel file: ' + err.message, 'error');
+    } finally {
+      e.target.value = '';
+    }
+  };
+
   return (
-    <div className="w-full space-y-6 pb-12 animate-in fade-in duration-300">
+    <div className="w-full space-y-5 pb-12">
       {/* Toast Notification */}
       {toastMessage && (
-        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 text-sm font-medium border transition-all ${
-          toastMessage.type === 'error' 
-            ? 'bg-rose-50 text-rose-800 border-rose-200' 
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-xl flex items-center gap-3 text-xs font-medium border ${
+          toastMessage.type === 'error'
+            ? 'bg-rose-50 text-rose-800 border-rose-200'
             : toastMessage.type === 'info'
             ? 'bg-sky-50 text-sky-800 border-sky-200'
             : 'bg-emerald-50 text-emerald-800 border-emerald-200'
         }`}>
-          {toastMessage.type === 'error' ? <AlertCircle size={18} className="text-rose-600" /> : <CheckCircle2 size={18} className="text-emerald-600" />}
+          {toastMessage.type === 'error' ? <AlertCircle size={16} className="text-rose-600" /> : <CheckCircle2 size={16} className="text-emerald-600" />}
           <span>{toastMessage.text}</span>
-          <button onClick={() => setToastMessage(null)} className="ml-2 hover:opacity-70"><X size={14} /></button>
+          <button type="button" onClick={() => setToastMessage(null)} className="ml-2 hover:opacity-70 cursor-pointer"><X size={14} /></button>
         </div>
       )}
 
-      {/* Main Module Header & Sticky Filter Toolbar */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm space-y-4">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-700 flex items-center justify-center text-white shadow-md shadow-indigo-500/20">
-                <DollarSign size={22} strokeWidth={2.5} />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                  IT CapEx & S-Operation Tracking & Planning
-                  <span className="text-xs font-semibold px-2.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/60">
-                    FY {selectedFiscalYear}
-                  </span>
-                </h1>
-                <p className="text-xs text-slate-500 mt-0.5 font-medium">
-                  Annual Capital & S-Operational Financial Planning, Budget Phasing & Realized Expense Tracking
-                </p>
-              </div>
+      {/* Import Validation Notices Banner */}
+      {importWarnings.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 space-y-1.5">
+          <div className="flex items-center justify-between font-bold">
+            <span className="flex items-center gap-1.5">
+              <AlertTriangle size={15} className="text-amber-600" />
+              Excel Import Validation Notices ({importWarnings.length})
+            </span>
+            <button type="button" onClick={() => setImportWarnings([])} className="text-amber-700 hover:underline cursor-pointer">
+              Dismiss
+            </button>
+          </div>
+          <ul className="list-disc pl-5 space-y-0.5 text-[11px] max-h-28 overflow-y-auto">
+            {importWarnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {/* Main Header & Filter Bar */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-4">
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white shrink-0">
+              <DollarSign size={20} />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2 flex-wrap">
+                <span>IT CapEx &amp; Operation Tracking &amp; Planning</span>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 font-mono">
+                  FY {selectedFiscalYear}
+                </span>
+              </h1>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Aligned with 2027 IT CapEx &amp; Operational (OPEX / COA Details) Master Templates
+              </p>
             </div>
           </div>
 
-          {/* Quick Action Utilities */}
+          {/* Quick Actions */}
           <div className="flex flex-wrap items-center gap-2">
             <button
+              type="button"
               onClick={handleSyncExpenses}
               disabled={isSyncingExpenses}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 transition-colors shadow-sm disabled:opacity-50"
-              title="Pull and map real actual expenses from it_expenses table"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50"
             >
               <RefreshCw size={13} className={isSyncingExpenses ? 'animate-spin' : ''} />
-              <span>{isSyncingExpenses ? 'Syncing...' : 'Sync IT Expenses Actuals'}</span>
+              <span>{isSyncingExpenses ? 'Syncing...' : 'Sync Expenses'}</span>
+            </button>
+
+            <select
+              value={exportMode}
+              onChange={(e) => setExportMode(e.target.value as BudgetExportMode)}
+              title="Choose whether Excel exports contain Plan & Actual, Planning only, or Actual only"
+              className="px-2.5 py-2 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 cursor-pointer"
+            >
+              <option value="both">Export: Plan &amp; Actual</option>
+              <option value="planned">Export: Planning Only</option>
+              <option value="actual">Export: Actual Only</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => handleExportCapexExcel()}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+              title="Export CapEx template workbook (Planning, Actual, or Both)"
+            >
+              <Download size={13} className="text-indigo-600" />
+              <span>Export CapEx .xlsx</span>
             </button>
 
             <button
-              onClick={handleExportExcel}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-sm"
-              title="Download formatted multi-sheet Excel workbook"
+              type="button"
+              onClick={() => handleExportOpexExcel()}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 whitespace-nowrap shrink-0 cursor-pointer"
+              title="Export OPEX template workbook (Planning, Actual, or Both)"
             >
-              <Download size={13} className="text-slate-500" />
-              <span>Export .xlsx</span>
+              <Download size={13} className="text-emerald-600" />
+              <span>Export OpEx .xlsx</span>
             </button>
 
-            <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-sm cursor-pointer">
-              <Upload size={13} className="text-slate-500" />
-              <span>Import .xlsx</span>
+            <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 whitespace-nowrap shrink-0 cursor-pointer">
+              <Upload size={13} className="text-slate-600" />
+              <span>Import Template .xlsx</span>
               <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
             </label>
-
-            <button
-              onClick={() => setActiveSubTab('sync')}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border border-slate-200 hover:border-indigo-300 transition-all shadow-2xs group"
-              title="Configure Account Codes & Reset Template in Sync & Template"
-            >
-              <SlidersHorizontal size={13} className="text-slate-500 group-hover:text-indigo-600 transition-colors" />
-              <span>Sync & Template Settings</span>
-            </button>
           </div>
         </div>
 
-        {/* Annual Fiscal Year Filter & Campus Filter Bar */}
-        <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-4">
+        {/* Fiscal Year, BU Filter & Sub-Tabs */}
+        <div className="pt-3 border-t border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
             {/* Fiscal Year Selector */}
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                <Calendar size={13} /> Fiscal Year:
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                <Calendar size={12} /> FY:
               </span>
-              <div className="inline-flex items-center bg-slate-100/80 p-0.5 rounded-xl border border-slate-200/60">
+              <div className="inline-flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
                 {availableYears.map(year => (
                   <button
                     key={year}
                     type="button"
                     onClick={() => setSelectedFiscalYear(year)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                      selectedFiscalYear === year
-                        ? 'bg-white text-indigo-700 shadow-sm font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                      selectedFiscalYear === year ? 'bg-white text-indigo-700 shadow-xs font-bold' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    FY {year}
+                    {year}
                   </button>
                 ))}
                 <button
                   type="button"
                   onClick={() => setShowCloneYearModal(true)}
-                  className="px-2 py-1.5 rounded-lg text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50/50 flex items-center gap-1"
-                  title="Plan or clone budget into a new fiscal year"
+                  className="px-2 py-1 rounded-lg text-xs font-medium text-indigo-600 hover:bg-indigo-50 flex items-center gap-0.5 cursor-pointer"
+                  title="Clone or plan a new fiscal year"
                 >
                   <Plus size={12} />
-                  <span>New Year</span>
                 </button>
               </div>
             </div>
 
-            {/* Site / Campus Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                <Building2 size={13} /> Campus:
-              </span>
+            {/* BU / Site Filter */}
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+              <Building2 size={13} className="text-slate-400 shrink-0" />
               <select
                 value={selectedSite}
                 onChange={(e) => setSelectedSite(e.target.value)}
-                className="bg-slate-50 border border-slate-200 text-slate-700 text-xs font-semibold rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                className="text-xs bg-transparent font-semibold text-slate-700 focus:outline-none cursor-pointer"
               >
-                {SITES.map(s => (
-                  <option key={s} value={s}>{s}</option>
+                {ALL_BU_FILTER_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Sub-tab Switcher */}
-          <div className="inline-flex items-center bg-slate-100/90 p-1 rounded-xl border border-slate-200/60">
+          {/* Sub-Tab Switcher */}
+          <div className="flex flex-wrap items-center bg-slate-100 p-1 rounded-xl border border-slate-200 gap-0.5">
             <button
+              type="button"
               onClick={() => setActiveSubTab('overview')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeSubTab === 'overview'
-                  ? 'bg-white text-slate-900 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'overview' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <BarChart3 size={13} />
-              <span>Executive Overview</span>
+              <span>Overview</span>
             </button>
             <button
+              type="button"
               onClick={() => setActiveSubTab('capex')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeSubTab === 'capex'
-                  ? 'bg-white text-indigo-700 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'capex' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Layers size={13} />
-              <span>CapEx Planner ({capexItems.length})</span>
+              <span>CapEx ({capexItems.length})</span>
             </button>
             <button
+              type="button"
               onClick={() => setActiveSubTab('opex')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeSubTab === 'opex'
-                  ? 'bg-white text-emerald-700 shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'opex' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <TrendingUp size={13} />
-              <span>OpEx & S-Operation ({opexItems.length})</span>
+              <span>OpEx ({opexItems.length})</span>
             </button>
             <button
-              onClick={() => setActiveSubTab('sync')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeSubTab === 'sync'
-                  ? 'bg-white text-indigo-900 shadow-sm font-bold border-b-2 border-indigo-600 ring-1 ring-slate-200/60'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+              type="button"
+              onClick={() => setActiveSubTab('gl-actuals')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'gl-actuals' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <FileSpreadsheet size={13} className={activeSubTab === 'sync' ? 'text-indigo-600' : 'text-slate-500'} />
-              <span>Sync & Template</span>
-              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold border transition-colors ${
-                activeSubTab === 'sync'
-                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                  : 'bg-slate-100 text-slate-500 border-slate-200'
-              }`}>
-                Config
-              </span>
+              <Receipt size={13} />
+              <span>GL Actuals ({glActuals.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('master-data')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'master-data' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Database size={13} />
+              <span>Master Data</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('sync')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap cursor-pointer ${
+                activeSubTab === 'sync' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileSpreadsheet size={13} />
+              <span>Sync &amp; Template</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* --- SUB-TAB 1: EXECUTIVE OVERVIEW (SMART DASHBOARD FOR HEAD OF IT) --- */}
+      {/* --- SUB-TAB 1: EXECUTIVE OVERVIEW --- */}
       {activeSubTab === 'overview' && (
-        <div className="space-y-6">
-          {/* Out-of-Budget Expense Warning Alert Banner if any unplanned items exist */}
+        <div className="space-y-5">
           {Number(summaryData?.unplannedOpexCount || 0) > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-rose-500/10 border border-amber-300 rounded-2xl shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs">
               <div className="flex items-start sm:items-center gap-3">
-                <div className="p-2.5 bg-amber-500 text-white rounded-xl shadow-xs shrink-0 mt-0.5 sm:mt-0">
-                  <AlertTriangle size={18} />
-                </div>
+                <AlertTriangle size={18} className="text-amber-600 shrink-0" />
                 <div>
-                  <div className="text-xs font-bold text-amber-950 flex flex-wrap items-center gap-2">
-                    <span>Out-of-Budget Expense Alert:</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200/90 text-amber-900 border border-amber-300">
-                      {summaryData?.unplannedOpexCount} Unbudgeted Service{(summaryData?.unplannedOpexCount || 0) > 1 ? 's' : ''}
-                    </span>
-                    <span className="font-mono text-amber-900 font-bold">
-                      (${Number(summaryData?.totalUnplannedOpexPlanned || 0).toLocaleString()} allocated)
-                    </span>
+                  <div className="font-bold text-amber-950">
+                    Out-of-Budget Alert: {summaryData?.unplannedOpexCount} Unbudgeted OPEX Item{(summaryData?.unplannedOpexCount || 0) > 1 ? 's' : ''} (${Number(summaryData?.totalUnplannedOpexPlanned || 0).toLocaleString()} allocated)
                   </div>
-                  <p className="text-[11px] text-amber-800 mt-0.5">
-                    Unplanned operational expenditures registered for FY {selectedFiscalYear}. Monitored for justification approval and budget audit control.
-                  </p>
+                  <p className="text-amber-800 text-[11px]">Registered outside baseline plan for FY {selectedFiscalYear}.</p>
                 </div>
               </div>
               <button
@@ -1249,364 +1150,291 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
                   setOpexClassificationFilter('Unplanned');
                   setActiveSubTab('opex');
                 }}
-                className="px-3.5 py-1.5 text-xs font-bold text-amber-950 bg-white hover:bg-amber-50 border border-amber-300 rounded-xl shadow-xs transition-colors shrink-0 self-start sm:self-auto cursor-pointer"
+                className="px-3 py-1.5 font-semibold text-amber-950 bg-white hover:bg-amber-100 border border-amber-300 rounded-xl shrink-0 cursor-pointer"
               >
                 Review Unplanned &rarr;
               </button>
             </div>
           )}
 
-          {/* Head of IT Command Ribbon: 4 Smart Metric Cards */}
+          {/* 4 KPI Ribbon Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Card 1: Total IT Envelope & Allocation */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-indigo-300 transition-all flex flex-col justify-between">
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total IT Portfolio Envelope</span>
-                  <span className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
-                    <DollarSign size={16} />
-                  </span>
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">FY {selectedFiscalYear} IT Portfolio</span>
+                  <DollarSign size={16} className="text-indigo-600" />
                 </div>
-                <div className="mt-3">
-                  <div className="text-2xl font-bold text-slate-900 tracking-tight font-mono">
-                    ${(summaryData?.totalFiscalBudget || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 font-medium">
-                    <span>Execution:</span>
-                    <span className="font-bold text-indigo-700 font-mono">
-                      ${(summaryData?.totalFiscalActual || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
-                    </span>
-                    <span className="text-[11px] text-slate-400">
-                      ({Math.round(((summaryData?.totalFiscalActual || 0) / (summaryData?.totalFiscalBudget || 1)) * 100)}% Realized)
-                    </span>
-                  </div>
+                <div className="mt-2.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
+                  ${(summaryData?.totalFiscalBudget || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </div>
+                <div className="text-xs text-slate-500 mt-1 font-mono tabular-nums">
+                  Realized: <strong className="text-indigo-700">${fmtUsd(summaryData?.totalFiscalActual)}</strong> ({Math.round(((summaryData?.totalFiscalActual || 0) / (summaryData?.totalFiscalBudget || 1)) * 100)}%)
                 </div>
               </div>
-              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                  CapEx: ${(summaryData?.totalCapexRequested || 0).toLocaleString()}
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-sky-500"></span>
-                  S-OpEx: ${(summaryData?.totalAnnualOpex || 0).toLocaleString()}
-                </span>
+              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500 font-mono">
+                <span>CapEx: ${fmtUsd(summaryData?.totalCapexRequested)}</span>
+                <span>OPEX: ${fmtUsd(summaryData?.totalAnnualOpex)}</span>
               </div>
             </div>
 
-            {/* Card 2: CapEx Strategic Projects & Execution */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-emerald-300 transition-all flex flex-col justify-between">
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">CapEx Delivery Pipeline</span>
-                  <span className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
-                    <Layers size={16} />
-                  </span>
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">CapEx Plan {selectedFiscalYear}</span>
+                  <Layers size={16} className="text-emerald-600" />
                 </div>
-                <div className="mt-3">
-                  <div className="text-2xl font-bold text-emerald-950 tracking-tight font-mono">
-                    {capexItems.length} <span className="text-sm font-semibold text-slate-500">Projects</span>
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 font-medium">
-                    <span>Approved Allocation:</span>
-                    <span className="font-bold text-emerald-700 font-mono">
-                      ${(summaryData?.totalCapexRequested || 0).toLocaleString()}
-                    </span>
-                  </div>
+                <div className="mt-2.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
+                  ${fmtUsd(summaryData?.totalCapexRequested)}
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  {capexItems.length} Projects · {capexStatusCounts.inProgress} In Progress · {capexStatusCounts.complete} Complete
                 </div>
               </div>
-              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                  <CheckCircle2 size={12} className="text-emerald-500" />
-                  {capexStatusCounts.approved} Approved · {capexStatusCounts.inProgress} In-Flight
+              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                <span className="text-slate-500 font-mono">
+                  Q1–Q4: ${fmtUsd(summaryData?.capexQuarterly?.total)}
                 </span>
-                <button 
-                  onClick={() => setActiveSubTab('capex')}
-                  className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
-                >
-                  Planner &rarr;
+                <button type="button" onClick={() => setActiveSubTab('capex')} className="font-semibold text-indigo-600 hover:underline cursor-pointer">
+                  CapEx Plan &rarr;
                 </button>
               </div>
             </div>
 
-            {/* Card 3: S-Operation Run-Rate & Monthly Burn */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-sky-300 transition-all flex flex-col justify-between">
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">S-OpEx Run-Rate / Burn</span>
-                  <span className="p-2 rounded-xl bg-sky-50 text-sky-600">
-                    <TrendingUp size={16} />
-                  </span>
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">OPEX Plan &amp; GL Actual</span>
+                  <TrendingUp size={16} className="text-sky-600" />
                 </div>
-                <div className="mt-3">
-                  <div className="text-2xl font-bold text-sky-950 tracking-tight font-mono">
-                    ${Math.round((summaryData?.totalAnnualOpex || 0) / 12).toLocaleString()} <span className="text-sm font-semibold text-slate-500">/ mo</span>
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 font-medium">
-                    <span>Active Contracts:</span>
-                    <span className="font-bold text-slate-800">{opexItems.length} Service SLAs</span>
-                  </div>
+                <div className="mt-2.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
+                  ${fmtUsd(summaryData?.totalAnnualOpex)}
+                </div>
+                <div className="text-xs text-slate-500 mt-1 font-mono tabular-nums">
+                  COA Details GL: <strong className="text-emerald-700">${fmtUsd(summaryData?.totalGlActual)}</strong> ({summaryData?.glEntryCount || 0} entries)
                 </div>
               </div>
-              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                <span className={`font-semibold ${
-                  (summaryData?.totalAnnualOpexVariance || 0) >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                }`}>
-                  {(summaryData?.totalAnnualOpexVariance || 0) >= 0 ? '+' : ''}${(summaryData?.totalAnnualOpexVariance || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} Variance
+              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                <span className={`font-semibold font-mono ${(summaryData?.totalAnnualOpexVariance || 0) >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                  {(summaryData?.totalAnnualOpexVariance || 0) >= 0 ? '+' : ''}${fmtUsd(summaryData?.totalAnnualOpexVariance)} Var
                 </span>
-                <button 
-                  onClick={() => setActiveSubTab('opex')}
-                  className="text-xs font-semibold text-sky-600 hover:text-sky-800"
-                >
-                  Contracts &rarr;
+                <button type="button" onClick={() => setActiveSubTab('gl-actuals')} className="font-semibold text-sky-600 hover:underline cursor-pointer">
+                  GL Variance &rarr;
                 </button>
               </div>
             </div>
 
-            {/* Card 4: IT Governance & Financial Guardrails */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-amber-300 transition-all flex flex-col justify-between">
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Governance & Guardrails</span>
-                  <span className="p-2 rounded-xl bg-amber-50 text-amber-600">
-                    <ShieldCheck size={16} />
-                  </span>
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Controls &amp; Guardrails</span>
+                  <ShieldCheck size={16} className="text-amber-600" />
                 </div>
-                <div className="mt-3">
-                  <div className="text-2xl font-bold text-amber-950 tracking-tight font-mono">
-                    {summaryData?.upcomingRenewals?.length || 0} <span className="text-sm font-semibold text-slate-500">Renewals Due</span>
-                  </div>
-                  <div className="text-xs text-slate-500 mt-1 flex items-center gap-1 font-medium">
-                    <span>Critical (&lt;30d):</span>
-                    <span className="font-bold text-rose-600">
-                      {summaryData?.upcomingRenewals?.filter(r => r.isCritical).length || 0} Urgent
-                    </span>
-                    <span className="text-slate-300">|</span>
-                    <span>Unbudgeted:</span>
-                    <span className="font-bold text-amber-700">
-                      {summaryData?.unplannedOpexCount || 0}
-                    </span>
-                  </div>
+                <div className="mt-2.5 text-2xl font-bold text-slate-900 font-mono tabular-nums">
+                  {capexStatusCounts.mismatchCount} <span className="text-sm font-semibold text-slate-500">Phasing Alerts</span>
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  {summaryData?.upcomingRenewals?.length || 0} Renewals Due (&lt;60d) · {summaryData?.unplannedOpexCount || 0} Unplanned
                 </div>
               </div>
-              <div className="mt-4 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-emerald-700 font-semibold">
-                <span className="flex items-center gap-1">
-                  <CheckCircle2 size={12} className="text-emerald-500" />
-                  Audit Ready Policy
+              <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                <span className={capexStatusCounts.mismatchCount > 0 ? 'text-amber-700 font-semibold' : 'text-emerald-700 font-semibold'}>
+                  {capexStatusCounts.mismatchCount > 0 ? 'Review CapEx Monthly Split' : '100% CapEx Phased'}
                 </span>
-                <span className="text-slate-400 font-normal">Next 60 Days</span>
+                <button type="button" onClick={() => setActiveSubTab('master-data')} className="font-semibold text-slate-600 hover:underline cursor-pointer">
+                  Master Data &rarr;
+                </button>
               </div>
             </div>
           </div>
 
-          {/* Smart Visual Analytics: Monthly Velocity & Strategic Domain Allocation */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            {/* Left Column (7 Cols): Cash Flow Velocity & Monthly Runway */}
-            <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between">
+          {/* CapEx Quarterly Cash Flow Strip (Q1 - Q4) */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">2027 CapEx Schedule</div>
+              <div className="text-sm font-bold text-slate-900 mt-0.5">Quarterly Cash Flow</div>
+            </div>
+            {(['q1', 'q2', 'q3', 'q4'] as const).map((q, idx) => (
+              <div key={q} className="border-l border-slate-100 pl-3">
+                <div className="text-[11px] font-semibold text-slate-500 uppercase">
+                  {q.toUpperCase()} ({idx === 0 ? 'Jan–Mar' : idx === 1 ? 'Apr–Jun' : idx === 2 ? 'Jul–Sep' : 'Oct–Dec'})
+                </div>
+                <div className="text-base font-bold text-indigo-700 font-mono tabular-nums mt-0.5">
+                  ${fmtUsd(summaryData?.capexQuarterly?.[q])}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Charts Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
               <div>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 mb-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 mb-4">
                   <div>
-                    <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                      <BarChart3 size={16} className="text-indigo-600" />
-                      <span>Monthly Cash Flow Velocity: CapEx vs S-OpEx vs Actuals</span>
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      <BarChart3 size={15} className="text-indigo-600" />
+                      <span>Monthly Cash Flow: Planned CapEx vs OPEX vs GL Actual</span>
                     </h3>
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Planned capital disbursements and recurring monthly operational burn across FY {selectedFiscalYear}
-                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">FY {selectedFiscalYear} monthly plan curve against COA Details postings</p>
                   </div>
-                  <div className="flex items-center gap-3 text-[11px] font-medium text-slate-600 shrink-0">
-                    <div className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-indigo-600"></span>
-                      <span>CapEx</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-sky-400"></span>
-                      <span>S-OpEx</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500"></span>
-                      <span>Actual Spend</span>
-                    </div>
+                  <div className="flex items-center gap-3 text-[11px] font-medium text-slate-600">
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-xs bg-indigo-600" /> CapEx Plan</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-xs bg-sky-400" /> OPEX Plan</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-xs bg-emerald-500" /> GL / Actual</span>
                   </div>
                 </div>
-
                 <div className="h-72 w-full">
                   {summaryData?.cashFlowChartData && summaryData.cashFlowChartData.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={summaryData.cashFlowChartData} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                      <BarChart data={summaryData.cashFlowChartData} margin={{ top: 10, right: 10, left: 5, bottom: 0 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                         <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} />
-                        <YAxis 
-                          tick={{ fontSize: 11, fill: '#64748b' }} 
-                          axisLine={{ stroke: '#e2e8f0' }}
-                          tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} 
-                        />
-                        <RechartsTooltip 
+                        <YAxis tick={{ fontSize: 11, fill: '#64748b' }} axisLine={{ stroke: '#e2e8f0' }} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} />
+                        <RechartsTooltip
                           formatter={(value: any, name: any) => [
-                            `$${Number(value).toLocaleString()}`, 
-                            name === 'planned_capex' ? 'Planned CapEx' : name === 'planned_opex' ? 'Planned S-OpEx' : name === 'actual_total' ? 'Actual Disbursed' : name
+                            `$${Number(value).toLocaleString()}`,
+                            name === 'planned_capex' ? 'CapEx Plan' : name === 'planned_opex' ? 'OPEX Plan' : name === 'gl_actual_opex' ? 'COA GL Actual' : 'Actual Spend'
                           ]}
-                          contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.05)', fontSize: '12px' }}
+                          contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px' }}
                         />
-                        <Bar dataKey="planned_capex" name="planned_capex" fill="#6366f1" radius={[3, 3, 0, 0]} />
-                        <Bar dataKey="planned_opex" name="planned_opex" fill="#38bdf8" radius={[3, 3, 0, 0]} />
-                        <Bar dataKey="actual_total" name="actual_total" fill="#10b981" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="planned_capex" fill="#6366f1" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey="planned_opex" fill="#38bdf8" radius={[3, 3, 0, 0]} />
+                        <Bar dataKey={(summaryData.totalGlActual || 0) > 0 ? 'gl_actual_opex' : 'actual_total'} fill="#10b981" radius={[3, 3, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
-                    <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-                      No monthly cash flow data available
-                    </div>
+                    <div className="h-full flex items-center justify-center text-slate-400 text-xs">No chart data available</div>
                   )}
                 </div>
               </div>
-
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 mt-2">
-                <span>Average Monthly Burn: <strong className="text-slate-800 font-mono">${Math.round((summaryData?.totalFiscalBudget || 0) / 12).toLocaleString()}</strong></span>
-                <span className="text-emerald-700 font-medium">Predictable Cash Outflow Guaranteed</span>
-              </div>
             </div>
 
-            {/* Right Column (5 Cols): Strategic Spend Allocation Donut */}
-            <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs flex flex-col justify-between">
+            {/* Right Column: Switchable Breakdown (Asset Type / Status / COA Account) */}
+            <div className="lg:col-span-5 bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
               <div>
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
-                  <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                    <PieChartIcon size={16} className="text-indigo-600" />
-                    <span>Strategic IT Spend Allocation</span>
+                <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-100 mb-3">
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                    <PieChartIcon size={15} className="text-indigo-600" />
+                    <span>Portfolio Breakdown</span>
                   </h3>
-                  <span className="text-[11px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full font-mono">
-                    FY {selectedFiscalYear}
-                  </span>
+                  <div className="inline-flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => setOverviewBreakdownMode('capex_asset')}
+                      className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${overviewBreakdownMode === 'capex_asset' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}
+                    >
+                      Asset Type
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOverviewBreakdownMode('capex_status')}
+                      className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${overviewBreakdownMode === 'capex_status' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}
+                    >
+                      Status
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOverviewBreakdownMode('opex_coa')}
+                      className={`px-2 py-0.5 rounded font-semibold cursor-pointer ${overviewBreakdownMode === 'opex_coa' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}
+                    >
+                      OPEX COA
+                    </button>
+                  </div>
                 </div>
 
-                <div className="relative h-56 w-full flex items-center justify-center">
+                <div className="h-48 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
-                        data={strategicDomainData.length > 0 ? strategicDomainData : [{ name: 'IT Portfolio', value: 100, color: '#6366f1' }]}
+                        data={overviewBreakdownData.length > 0 ? overviewBreakdownData : [{ name: 'No Data', value: 1, color: '#e2e8f0' }]}
                         cx="50%"
                         cy="50%"
-                        innerRadius={62}
-                        outerRadius={88}
-                        paddingAngle={3}
+                        innerRadius={52}
+                        outerRadius={78}
+                        paddingAngle={2}
                         dataKey="value"
                       >
-                        {strategicDomainData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} stroke="#ffffff" strokeWidth={2} />
+                        {overviewBreakdownData.map((entry, idx) => (
+                          <Cell key={idx} fill={entry.color} stroke="#fff" strokeWidth={2} />
                         ))}
                       </Pie>
-                      <RechartsTooltip 
-                        contentStyle={{ backgroundColor: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '12px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.05)' }} 
-                        formatter={(val: any, name: any) => [`$${Number(val).toLocaleString()}`, name]}
-                      />
+                      <RechartsTooltip formatter={(v: any, n: any) => [`$${Number(v).toLocaleString()}`, n]} />
                     </PieChart>
                   </ResponsiveContainer>
-                  {/* Donut Center Display */}
-                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                    <span className="text-2xl font-bold text-slate-900 font-mono">
-                      ${Math.round((summaryData?.totalFiscalBudget || 0) / 1000)}k
-                    </span>
-                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                      IT Envelope
-                    </span>
-                  </div>
                 </div>
               </div>
 
-              {/* Strategic Breakdown List */}
-              <div className="space-y-1.5 pt-3 border-t border-slate-100 max-h-36 overflow-y-auto pr-1">
-                {strategicDomainData.slice(0, 5).map(domain => {
-                  const pct = Math.round((domain.value / ((summaryData?.totalFiscalBudget || 1))) * 100);
-                  return (
-                    <div key={domain.name} className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-1.5 truncate">
-                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: domain.color }}></span>
-                        <span className="text-slate-700 truncate">{domain.name}</span>
-                      </div>
-                      <div className="flex items-center gap-2 font-mono shrink-0">
-                        <span className="font-bold text-slate-900">${domain.value.toLocaleString()}</span>
-                        <span className="text-[10px] text-slate-400 w-7 text-right">{pct}%</span>
-                      </div>
+              <div className="space-y-1.5 pt-2 border-t border-slate-100 max-h-36 overflow-y-auto pr-1">
+                {overviewBreakdownData.slice(0, 6).map(d => (
+                  <div key={d.name} className="flex items-center justify-between text-xs gap-2">
+                    <div className="flex items-center gap-1.5 truncate">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: d.color }} />
+                      <span className="text-slate-700 truncate">{d.name}</span>
                     </div>
-                  );
-                })}
+                    <span className="font-mono font-bold text-slate-900 shrink-0 tabular-nums">${d.value.toLocaleString()}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
 
-          {/* Campus Budget & Operational Health Matrix */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100 mb-4">
+          {/* Multi-Site Matrix (Normalized K3 / Sakal + Sakal Lab) */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100 mb-3">
               <div>
-                <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                  <Building2 size={16} className="text-indigo-600" />
-                  <span>Campus IT Investment & Performance Matrix (Multi-Site Command)</span>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Building2 size={15} className="text-indigo-600" />
+                  <span>Business Unit Investment Matrix (K3 &amp; Sakal Normalized)</span>
                 </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  CapEx and S-Operation allocation, realized actuals, and variance performance across Khema campuses
-                </p>
+                <p className="text-xs text-slate-500">CapEx, OPEX Plan, GL/Actual Spend, and Variance across Khema campuses</p>
               </div>
-              <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200/60">
-                4 Active Hospital Sites
-              </span>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50/70 text-slate-600 font-semibold border-b border-slate-200/70">
+                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
                   <tr>
-                    <th className="py-2.5 px-3">Campus / Site</th>
-                    <th className="py-2.5 px-3 text-right">CapEx Budget ($)</th>
-                    <th className="py-2.5 px-3 text-right">S-OpEx Budget ($)</th>
+                    <th className="py-2.5 px-3">Business Unit</th>
+                    <th className="py-2.5 px-3 text-right">CapEx Plan ($)</th>
+                    <th className="py-2.5 px-3 text-right">OPEX Plan ($)</th>
                     <th className="py-2.5 px-3 text-right">Total Planned ($)</th>
-                    <th className="py-2.5 px-3 text-right">Realized Actual ($)</th>
-                    <th className="py-2.5 px-3 text-right">Net Variance ($)</th>
-                    <th className="py-2.5 px-3 text-right">Health Status</th>
+                    <th className="py-2.5 px-3 text-right">Realized / GL Actual ($)</th>
+                    <th className="py-2.5 px-3 text-right">Variance ($)</th>
+                    <th className="py-2.5 px-3 text-right">Status</th>
                     <th className="py-2.5 px-3 text-center">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-medium">
-                  {summaryData?.totalBySite && Object.entries(summaryData.totalBySite).map(([siteKey, vals]) => {
+                <tbody className="divide-y divide-slate-100">
+                  {summaryData?.totalBySite && (Object.entries(summaryData.totalBySite) as Array<[string, ExecutiveSummaryData['totalBySite'][string]]>).map(([siteKey, vals]) => {
                     const isUnder = vals.variance >= 0;
-                    const executionPct = vals.planned > 0 ? Math.round((vals.actual / vals.planned) * 100) : 0;
+                    const pct = vals.planned > 0 ? Math.round((vals.actual / vals.planned) * 100) : 0;
                     return (
-                      <tr key={siteKey} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3 px-3 font-semibold text-slate-900 flex items-center gap-2">
-                          <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
-                          <span>{siteKey}</span>
+                      <tr key={siteKey} className="hover:bg-slate-50/60">
+                        <td className="py-2.5 px-3 font-semibold text-slate-900">{siteKey}</td>
+                        <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-700">${(vals.capex_planned || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td className="py-2.5 px-3 text-right font-mono tabular-nums text-slate-700">${(vals.opex_planned || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold tabular-nums text-slate-900">${vals.planned.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-semibold tabular-nums text-indigo-700">${vals.actual.toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+                        <td className={`py-2.5 px-3 text-right font-mono font-bold tabular-nums ${isUnder ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {isUnder ? '+' : ''}${vals.variance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                         </td>
-                        <td className="py-3 px-3 text-right font-mono text-slate-700">
-                          ${(vals.capex_planned || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono text-slate-700">
-                          ${(vals.opex_planned || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">
-                          ${vals.planned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono font-semibold text-indigo-900">
-                          ${vals.actual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td className={`py-3 px-3 text-right font-mono font-bold ${isUnder ? 'text-emerald-700' : 'text-rose-600'}`}>
-                          {isUnder ? '+' : ''}${vals.variance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                        <td className="py-3 px-3 text-right">
-                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            isUnder ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+                        <td className="py-2.5 px-3 text-right">
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold border ${
+                            isUnder ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
                           }`}>
-                            {isUnder ? <CheckCircle2 size={10} className="text-emerald-600" /> : <AlertTriangle size={10} className="text-rose-600" />}
-                            {isUnder ? 'Under Budget' : 'Over Budget'} ({executionPct}%)
+                            {isUnder ? <CheckCircle2 size={10} /> : <AlertTriangle size={10} />}
+                            {isUnder ? 'Under' : 'Over'} ({pct}%)
                           </span>
                         </td>
-                        <td className="py-3 px-3 text-center">
+                        <td className="py-2.5 px-3 text-center">
                           <button
                             type="button"
                             onClick={() => {
-                              setSelectedSite(siteKey);
+                              setSelectedSite(vals.bu_code || siteKey);
                               setActiveSubTab('opex');
                             }}
-                            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
+                            className="font-semibold text-indigo-600 hover:underline cursor-pointer"
                           >
                             Inspect &rarr;
                           </button>
@@ -1619,645 +1447,484 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
             </div>
           </div>
 
-          {/* Action & Priority Decision Radar (2-Column Grid) */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Left: Strategic CapEx Project Pipeline in Flight */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
-                  <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                    <Layers size={16} className="text-emerald-600" />
-                    <span>CapEx Strategic Projects in Flight</span>
-                  </h3>
-                  <button 
-                    onClick={() => setActiveSubTab('capex')}
-                    className="text-xs font-semibold text-indigo-600 hover:text-indigo-800"
-                  >
-                    View All {capexItems.length} &rarr;
-                  </button>
-                </div>
-
-                <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
-                  {capexItems.length > 0 ? (
-                    capexItems.slice(0, 5).map((project) => (
-                      <div 
-                        key={project.id}
-                        className="p-3 rounded-xl border border-slate-200/80 bg-slate-50/50 hover:bg-white hover:border-slate-300 transition-all flex items-center justify-between gap-3 text-xs"
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 font-bold text-slate-900 truncate">
-                            <span className="font-mono text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded text-[10px] border border-indigo-200/70">
-                              {project.capex_code || `CPX-${project.item_no}`}
-                            </span>
-                            <span className="truncate">{project.description}</span>
-                          </div>
-                          <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-2">
-                            <span>{project.site}</span>
-                            <span>·</span>
-                            <span className="text-slate-600 font-medium">{project.asset_type}</span>
-                            <span>·</span>
-                            <span>Qty: {project.qty}</span>
-                          </div>
+          {/* CapEx Pipeline & Renewal Decision Radar */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Layers size={15} className="text-emerald-600" />
+                  <span>2027 CapEx Pipeline</span>
+                </h3>
+                <button type="button" onClick={() => setActiveSubTab('capex')} className="text-xs font-semibold text-indigo-600 hover:underline cursor-pointer">
+                  View All {capexItems.length} &rarr;
+                </button>
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {capexItems.length === 0 ? (
+                  <div className="py-8 text-center text-slate-400 text-xs">No CapEx items for FY {selectedFiscalYear}</div>
+                ) : (
+                  capexItems.slice(0, 5).map(p => (
+                    <div key={p.id} className="p-3 rounded-xl border border-slate-200/80 bg-slate-50/50 flex items-center justify-between gap-3 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-900 truncate">
+                          <span className="font-mono text-indigo-700 mr-1.5">{p.capex_code}</span>
+                          {p.description}
                         </div>
-                        <div className="text-right shrink-0">
-                          <div className="font-bold text-slate-900 font-mono">
-                            ${Number(project.requested_amount).toLocaleString()}
-                          </div>
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold mt-1 ${
-                            project.status === 'Completed' ? 'bg-emerald-100 text-emerald-800' :
-                            project.status === 'In Progress' ? 'bg-sky-100 text-sky-800' :
-                            project.status === 'Approved' ? 'bg-indigo-100 text-indigo-800' :
-                            'bg-slate-200 text-slate-700'
-                          }`}>
-                            {project.status}
-                          </span>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          {formatBuDisplayLabel(p.site)} · {p.asset_type} · {p.department || 'IT'} · {p.expected_start_month || 'Jan'}–{p.expected_complete_month || 'Dec'}
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="py-8 text-center text-slate-400 text-xs">No CapEx projects registered for FY {selectedFiscalYear}</div>
-                  )}
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 mt-2">
-                <span>Infrastructure & Hardware Investments</span>
-                <span className="text-indigo-600 font-semibold cursor-pointer" onClick={() => setActiveSubTab('capex')}>
-                  Open CapEx Planner &rarr;
-                </span>
+                      <div className="text-right shrink-0">
+                        <div className="font-mono font-bold text-slate-900">${Number(p.requested_amount || 0).toLocaleString()}</div>
+                        <span className="text-[10px] font-semibold text-slate-600">{normalizeCapexStatus(p.status)}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
 
-            {/* Right: 60-Day Contract & License Renewal Decision Radar */}
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
-                  <h3 className="text-sm font-bold text-slate-900 tracking-tight flex items-center gap-2">
-                    <Clock size={16} className="text-amber-600" />
-                    <span>Contract & License Renewal Decision Radar</span>
-                  </h3>
-                  <span className="text-xs text-slate-400 font-normal">Next 60 Days</span>
-                </div>
-
-                <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
-                  {summaryData?.upcomingRenewals && summaryData.upcomingRenewals.length > 0 ? (
-                    summaryData.upcomingRenewals.map((r) => (
-                      <div 
-                        key={r.id} 
-                        className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs transition-colors ${
-                          r.isCritical 
-                            ? 'bg-rose-50/60 border-rose-200/80 text-rose-900' 
-                            : 'bg-amber-50/40 border-amber-200/60 text-slate-800'
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <div className="font-bold truncate text-slate-900">{r.description}</div>
-                          <div className="text-[11px] text-slate-500 mt-0.5">
-                            {r.site} · {r.account_code} · Due {r.renewal_date ? new Date(r.renewal_date).toLocaleDateString() : 'N/A'}
-                          </div>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <div className="font-bold text-slate-900 font-mono">${Number(r.annual_cost).toLocaleString()}</div>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold mt-1 inline-block ${
-                            r.isCritical ? 'bg-rose-100 text-rose-800' : 'bg-amber-100 text-amber-800'
-                          }`}>
-                            {r.daysRemaining} days left
-                          </span>
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  <Clock size={15} className="text-amber-600" />
+                  <span>60-Day Renewal Decision Radar</span>
+                </h3>
+                <span className="text-xs text-slate-400">Next 60 Days</span>
+              </div>
+              <div className="space-y-2 max-h-72 overflow-y-auto">
+                {summaryData?.upcomingRenewals && summaryData.upcomingRenewals.length > 0 ? (
+                  summaryData.upcomingRenewals.map(r => (
+                    <div key={r.id} className={`p-3 rounded-xl border flex items-center justify-between gap-3 text-xs ${
+                      r.isCritical ? 'bg-rose-50/60 border-rose-200' : 'bg-amber-50/40 border-amber-200'
+                    }`}>
+                      <div className="min-w-0">
+                        <div className="font-bold text-slate-900 truncate">{r.description}</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          {r.site} · {r.account_code} · Due {r.renewal_date ? new Date(r.renewal_date).toLocaleDateString() : 'N/A'}
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="text-center py-8 text-slate-400 text-xs">
-                      No critical contract renewals in the next 60 days
+                      <div className="text-right shrink-0">
+                        <div className="font-mono font-bold text-slate-900">${Number(r.annual_cost).toLocaleString()}</div>
+                        <span className={`text-[10px] font-bold ${r.isCritical ? 'text-rose-700' : 'text-amber-800'}`}>
+                          {r.daysRemaining}d left
+                        </span>
+                      </div>
                     </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 mt-2">
-                <span>Vendor SLA & Licensing Guardrails</span>
-                <button
-                  type="button"
-                  onClick={() => setActiveSubTab('opex')}
-                  className="text-indigo-600 font-semibold hover:underline"
-                >
-                  Manage S-Operation &rarr;
-                </button>
+                  ))
+                ) : (
+                  <div className="py-8 text-center text-slate-400 text-xs">No upcoming renewals within 60 days</div>
+                )}
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* --- SUB-TAB 2: CAPEX PLANNER & PROJECT TRACKER --- */}
+      {/* --- SUB-TAB 2: CAPEX PLANNER (CAPEX PLAN 2027) --- */}
       {activeSubTab === 'capex' && (
         <div className="space-y-4">
-          {/* CapEx Filter Toolbar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative min-w-[200px]">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search CapEx items..."
+                  placeholder="Search Capex#, description, specs..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none"
                 />
               </div>
 
-              {/* Campus / Site Filter */}
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
-                <Building2 size={13} className="text-slate-400 shrink-0" />
-                <select
-                  value={selectedSite}
-                  onChange={(e) => setSelectedSite(e.target.value)}
-                  className="text-xs bg-transparent font-semibold text-slate-700 focus:outline-none cursor-pointer"
-                  title="Filter CapEx items by Campus (K1, K2, Sakal, KG)"
-                >
-                  <option value="All Sites">All Campuses</option>
-                  <option value="K1">K1</option>
-                  <option value="K2">K2</option>
-                  <option value="Sakal">Sakal</option>
-                  <option value="KG">KG</option>
-                </select>
-              </div>
+              <select
+                value={selectedSite}
+                onChange={(e) => setSelectedSite(e.target.value)}
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-semibold text-slate-700"
+              >
+                {ALL_BU_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
 
               <select
                 value={capexAssetFilter}
                 onChange={(e) => setCapexAssetFilter(e.target.value)}
-                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none"
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700"
               >
                 <option value="All Types">All Asset Types</option>
-                {(assetCategories.length > 0 ? assetCategories : DEFAULT_ASSET_TYPES).map(t => (
-                  <option key={t} value={t}>{t}</option>
+                {ASSET_TYPES_MASTER.map(a => (
+                  <option key={`${a.code}-${a.asset_type}`} value={a.asset_type}>{a.asset_type} ({a.code})</option>
+                ))}
+              </select>
+
+              <select
+                value={capexDeptFilter}
+                onChange={(e) => setCapexDeptFilter(e.target.value)}
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700"
+              >
+                <option value="All Departments">All Depts</option>
+                {DEPT_DEFINITIONS.map(d => (
+                  <option key={d.code} value={d.code}>{d.code} — {d.name}</option>
                 ))}
               </select>
 
               <select
                 value={capexStatusFilter}
                 onChange={(e) => setCapexStatusFilter(e.target.value)}
-                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none"
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700"
               >
                 <option value="All Statuses">All Statuses</option>
-                {CAPEX_STATUSES.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
+                {CAPEX_STATUSES_2027.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+
+              <select
+                value={capexStageFilter}
+                onChange={(e) => setCapexStageFilter(e.target.value)}
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700"
+              >
+                <option value="All Stages">All Stages</option>
+                {CAPEX_STAGE_TAGS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
 
             <Button
               onClick={() => {
                 setEditingCapexItem(null);
+                setPreselectedBenchmark(null);
                 setShowCapexModal(true);
               }}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shadow-sm"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold py-2 px-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl shrink-0 whitespace-nowrap"
             >
               <Plus size={14} />
-              <span>Add CapEx Item</span>
+              <span>Add CapEx Line</span>
             </Button>
           </div>
 
-          {/* CapEx Interactive Data Grid */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
                   <tr>
-                    <th className="py-3 px-3 w-8">#</th>
-                    <th className="py-3 px-3">Description & Code</th>
-                    <th className="py-3 px-3">Asset Type</th>
-                    <th className="py-3 px-3">Campus</th>
-                    <th className="py-3 px-3 text-center">Qty</th>
-                    <th className="py-3 px-3 text-right">Unit Price</th>
-                    <th className="py-3 px-3 text-right">Planned Total</th>
-                    <th className="py-3 px-3 text-right">Actual Spent</th>
-                    <th className="py-3 px-3 text-right">Variance</th>
-                    <th className="py-3 px-3">Status</th>
-                    <th className="py-3 px-3 text-center">Phasing</th>
-                    <th className="py-3 px-3 text-right">Actions</th>
+                    <th className="py-3 px-2.5 w-8">No.</th>
+                    <th className="py-3 px-2.5">BU</th>
+                    <th className="py-3 px-2.5">Capex# &amp; Description</th>
+                    <th className="py-3 px-2.5">Asset Type (Owner / Supv)</th>
+                    <th className="py-3 px-2.5">Dept / CC / PIC</th>
+                    <th className="py-3 px-2.5 text-center">Qty</th>
+                    <th className="py-3 px-2.5 text-right">Est. Unit Cost</th>
+                    <th className="py-3 px-2.5 text-right">Total Est. Cost</th>
+                    <th className="py-3 px-2.5">Timeline</th>
+                    <th className="py-3 px-2.5">Status &amp; Stage</th>
+                    <th className="py-3 px-2.5 text-center">Schedule</th>
+                    <th className="py-3 px-2.5 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {capexItems.length === 0 ? (
                     <tr>
                       <td colSpan={12} className="py-12 text-center text-slate-400">
-                        <Layers size={28} className="mx-auto mb-2 text-slate-300" />
-                        <p className="font-medium text-slate-600 text-xs">No CapEx items found for the selected criteria</p>
-                        <p className="text-[11px] text-slate-400 mt-0.5">Try adjusting your filters, searching another keyword, or click "+ Add CapEx Item".</p>
+                        No CapEx items match the active filters for FY {selectedFiscalYear}.
                       </td>
                     </tr>
                   ) : (
                     capexItems.map((item, idx) => {
-                    const isExpanded = expandedCapexId === item.id;
-                    const totalActual = MONTH_KEYS.reduce((acc, m) => acc + (item.monthly_spending?.[m]?.actual || 0), 0);
-                    const totalPlanned = Number(item.requested_amount) || 0;
-                    const variance = totalPlanned - totalActual;
-                    const isUnder = variance >= 0;
+                      const isExpanded = expandedCapexId === item.id;
+                      const totalEst = Math.round((Number(item.qty) || 1) * (Number(item.unit_price) || 0) * 100) / 100;
+                      const monthlyPlanned = MONTH_KEYS.reduce((acc, m) => acc + (Number(item.monthly_spending?.[m]?.planned) || 0), 0);
+                      const totalActual = MONTH_KEYS.reduce((acc, m) => acc + (Number(item.monthly_spending?.[m]?.actual) || 0), 0);
+                      const diffAlloc = Math.round((totalEst - monthlyPlanned) * 100) / 100;
+                      const hasMismatch = Math.abs(diffAlloc) > 0.01;
+                      const normStatus = normalizeCapexStatus(item.status);
+                      const normStage = normalizeCapexStage(item.stage_tag, item.status);
 
-                    return (
-                      <React.Fragment key={item.id}>
-                        <tr className="hover:bg-slate-50/70 transition-colors">
-                          <td className="py-3 px-3 text-slate-400 font-medium">{idx + 1}</td>
-                          <td className="py-3 px-3">
-                            <div className="font-bold text-slate-900">{item.description}</div>
-                            <div className="text-[11px] text-slate-400 font-mono mt-0.5">{item.capex_code} · {item.pic}</div>
-                          </td>
-                          <td className="py-3 px-3 font-medium text-slate-700">{item.asset_type}</td>
-                          <td className="py-3 px-3 font-semibold text-slate-800">{item.site}</td>
-                          <td className="py-3 px-3 text-center text-slate-700 font-medium">{item.qty}</td>
-                          <td className="py-3 px-3 text-right text-slate-600 font-mono">
-                            ${Number(item.unit_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-3 px-3 text-right text-indigo-700 font-bold font-mono">
-                            ${totalPlanned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-3 px-3 text-right text-slate-900 font-semibold font-mono">
-                            ${totalActual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className={`py-3 px-3 text-right font-bold font-mono ${isUnder ? 'text-emerald-700' : 'text-rose-600'}`}>
-                            {isUnder ? '+' : ''}${variance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-3 px-3">
-                            <select
-                              value={item.status}
-                              onChange={(e) => handleUpdateCapexStatus(item, e.target.value)}
-                              className={`text-[11px] font-semibold rounded-lg px-2 py-1 border transition-colors ${
-                                item.status === 'Approved' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                item.status === 'In Progress' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                item.status === 'Completed' ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                                item.status === 'Pending Approval' ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                                item.status === 'Cancelled' ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                                'bg-slate-100 text-slate-700 border-slate-200'
-                              }`}
-                            >
-                              {CAPEX_STATUSES.map(st => (
-                                <option key={st} value={st}>{st}</option>
-                              ))}
-                            </select>
-                          </td>
-                          <td className="py-3 px-3 text-center">
-                            <button
-                              onClick={() => setExpandedCapexId(isExpanded ? null : item.id)}
-                              className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center justify-center gap-1 mx-auto"
-                            >
-                              <span>{isExpanded ? 'Hide' : '12-Mo'}</span>
-                              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                            </button>
-                          </td>
-                          <td className="py-3 px-3 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <button
-                                onClick={() => {
-                                  setEditingCapexItem(item);
-                                  setShowCapexModal(true);
-                                }}
-                                className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50"
-                                title="Edit Item"
-                              >
-                                <Edit2 size={13} />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteCapex(item.id, item.description)}
-                                className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50"
-                                title="Delete Item"
-                              >
-                                <Trash2 size={13} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-
-                        {/* Expandable 12-Month Phasing Matrix for this CapEx Item */}
-                        {isExpanded && (
-                          <tr className="bg-slate-50/90 border-y border-indigo-100">
-                            <td colSpan={12} className="p-4">
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <div className="text-xs font-bold text-slate-800 flex items-center gap-2">
-                                    <Layers size={14} className="text-indigo-600" />
-                                    <span>Monthly Phasing & Quarterly Rollups for "{item.description}"</span>
-                                    <span className="text-[11px] text-slate-400 font-normal">Edit cells directly to adjust budget or log actuals</span>
-                                  </div>
-                                  <div className="text-xs text-slate-500 font-medium">
-                                    Justification: <span className="text-slate-700 italic">{item.justification || 'No justification provided'}</span>
-                                  </div>
+                      return (
+                        <React.Fragment key={item.id}>
+                          <tr className="hover:bg-slate-50/70">
+                            <td className="py-3 px-2.5 text-slate-400 font-mono">{idx + 1}</td>
+                            <td className="py-3 px-2.5 font-mono font-bold text-slate-800 whitespace-nowrap">
+                              {normalizeBuCanonical(item.site) || item.site}
+                            </td>
+                            <td className="py-3 px-2.5 max-w-[260px]">
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-[11px] font-bold text-indigo-700">{item.capex_code}</span>
+                              </div>
+                              <div className="font-bold text-slate-900">{item.description}</div>
+                              {item.specifications && (
+                                <div className="text-[11px] text-slate-500 truncate" title={item.specifications}>
+                                  {item.specifications}
                                 </div>
-
-                                <div className="overflow-x-auto bg-white rounded-xl border border-slate-200/80 p-3 shadow-inner">
-                                  <table className="w-full text-center text-xs">
-                                    <thead>
-                                      <tr className="text-slate-400 font-semibold border-b border-slate-100">
-                                        <th className="py-1 px-2 text-left w-20">Row</th>
-                                        {MONTH_LABELS.map(m => (
-                                          <th key={m} className="py-1 px-1.5 font-bold text-slate-700">{m}</th>
-                                        ))}
-                                        <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q1</th>
-                                        <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q2</th>
-                                        <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q3</th>
-                                        <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q4</th>
-                                        <th className="py-1 px-2 bg-indigo-50 font-bold text-indigo-900">Annual Total</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                      {/* Planned Row */}
-                                      <tr>
-                                        <td className="py-1.5 px-2 text-left font-bold text-indigo-600">Planned ($)</td>
-                                        {MONTH_KEYS.map(m => (
-                                          <td key={m} className="py-1 px-1">
-                                            <input
-                                              type="number"
-                                              value={item.monthly_spending?.[m]?.planned ?? 0}
-                                              onChange={(e) => handleCapexMonthChange(item.id, m, 'planned', parseFloat(e.target.value) || 0)}
-                                              className="w-16 px-1.5 py-1 text-right text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
-                                            />
-                                          </td>
-                                        ))}
-                                        <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
-                                          ${(item.quarterly_spending?.planned?.q1 ?? item.quarterly_spending?.q1 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
-                                          ${(item.quarterly_spending?.planned?.q2 ?? item.quarterly_spending?.q2 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
-                                          ${(item.quarterly_spending?.planned?.q3 ?? item.quarterly_spending?.q3 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
-                                          ${(item.quarterly_spending?.planned?.q4 ?? item.quarterly_spending?.q4 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 bg-indigo-50 font-mono font-bold text-indigo-900">
-                                          ${totalPlanned.toLocaleString()}
-                                        </td>
-                                      </tr>
-
-                                      {/* Actual Row */}
-                                      <tr>
-                                        <td className="py-1.5 px-2 text-left font-bold text-emerald-600">Actual ($)</td>
-                                        {MONTH_KEYS.map(m => (
-                                          <td key={m} className="py-1 px-1">
-                                            <input
-                                              type="number"
-                                              value={item.monthly_spending?.[m]?.actual ?? 0}
-                                              onChange={(e) => handleCapexMonthChange(item.id, m, 'actual', parseFloat(e.target.value) || 0)}
-                                              className="w-16 px-1.5 py-1 text-right text-xs bg-emerald-50/50 border border-emerald-200/70 rounded-md focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono text-slate-900"
-                                            />
-                                          </td>
-                                        ))}
-                                        <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
-                                          ${(item.quarterly_spending?.actual?.q1 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
-                                          ${(item.quarterly_spending?.actual?.q2 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
-                                          ${(item.quarterly_spending?.actual?.q3 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
-                                          ${(item.quarterly_spending?.actual?.q4 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 bg-indigo-50 font-mono font-bold text-slate-900">
-                                          ${totalActual.toLocaleString()}
-                                        </td>
-                                      </tr>
-
-                                      {/* Variance Row */}
-                                      <tr className="bg-slate-50/50">
-                                        <td className="py-1.5 px-2 text-left font-bold text-slate-700">Variance ($)</td>
-                                        {MONTH_KEYS.map(m => {
-                                          const p = item.monthly_spending?.[m]?.planned || 0;
-                                          const a = item.monthly_spending?.[m]?.actual || 0;
-                                          const diff = p - a;
-                                          return (
-                                            <td key={m} className={`py-1 px-1 font-mono text-xs font-semibold ${
-                                              diff >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                                            }`}>
-                                              {diff !== 0 ? (diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()) : '—'}
-                                            </td>
-                                          );
-                                        })}
-                                        <td className="py-1.5 px-2 font-mono font-bold text-slate-700">
-                                          ${(item.quarterly_spending?.variance?.q1 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 font-mono font-bold text-slate-700">
-                                          ${(item.quarterly_spending?.variance?.q2 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 font-mono font-bold text-slate-700">
-                                          ${(item.quarterly_spending?.variance?.q3 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className="py-1.5 px-2 font-mono font-bold text-slate-700">
-                                          ${(item.quarterly_spending?.variance?.q4 ?? 0).toLocaleString()}
-                                        </td>
-                                        <td className={`py-1.5 px-2 font-mono font-bold ${isUnder ? 'text-emerald-700' : 'text-rose-600'}`}>
-                                          {isUnder ? '+' : ''}${variance.toLocaleString()}
-                                        </td>
-                                      </tr>
-                                    </tbody>
-                                  </table>
-                                </div>
+                              )}
+                            </td>
+                            <td className="py-3 px-2.5">
+                              <div className="font-semibold text-slate-800">{item.asset_type}</div>
+                              <div className="text-[11px] text-slate-500 font-mono">
+                                {item.asset_owner || 'IT'} · Supv: {item.asset_supervisor || 'ITO'}
+                              </div>
+                            </td>
+                            <td className="py-3 px-2.5 text-slate-700 whitespace-nowrap">
+                              <div className="font-mono font-semibold">{normalizeDepartmentCode(item.department)} · {item.cost_center || 'IT'}</div>
+                              <div className="text-[11px] text-slate-500">{item.pic}</div>
+                            </td>
+                            <td className="py-3 px-2.5 text-center font-mono font-semibold">{item.qty}</td>
+                            <td className="py-3 px-2.5 text-right font-mono tabular-nums text-slate-600">
+                              ${Number(item.unit_price || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className="py-3 px-2.5 text-right">
+                              <div className="font-mono font-bold text-indigo-700 tabular-nums">
+                                ${totalEst.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                              </div>
+                              {hasMismatch ? (
+                                <span
+                                  className="inline-flex items-center gap-1 mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300"
+                                  title="Monthly cash flow schedule does not equal Total Est. Cost"
+                                >
+                                  <AlertTriangle size={10} />
+                                  {diffAlloc > 0 ? `Unalloc $${diffAlloc.toLocaleString()}` : `Over $${Math.abs(diffAlloc).toLocaleString()}`}
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-emerald-700 font-mono">
+                                  Act: ${totalActual.toLocaleString()}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-2.5 font-mono text-slate-700 whitespace-nowrap">
+                              {item.expected_start_month || 'Jan'} &ndash; {item.expected_complete_month || 'Dec'}
+                            </td>
+                            <td className="py-3 px-2.5 space-y-1">
+                              <select
+                                value={normStatus}
+                                onChange={(e) => handleUpdateCapexField(item, { status: e.target.value })}
+                                className={`block w-full text-[11px] font-semibold rounded-lg px-2 py-1 border ${
+                                  normStatus === 'Complete'
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                    : normStatus === 'Cancelled'
+                                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                                    : 'bg-sky-50 text-sky-700 border-sky-200'
+                                }`}
+                              >
+                                {CAPEX_STATUSES_2027.map(st => <option key={st} value={st}>{st}</option>)}
+                              </select>
+                              <select
+                                value={normStage}
+                                onChange={(e) => handleUpdateCapexField(item, { stage_tag: e.target.value })}
+                                className="block w-full text-[10px] font-medium rounded-md px-1.5 py-0.5 bg-slate-50 border border-slate-200 text-slate-700"
+                              >
+                                {CAPEX_STAGE_TAGS.map(tg => <option key={tg} value={tg}>Stage: {tg}</option>)}
+                              </select>
+                            </td>
+                            <td className="py-3 px-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedCapexId(isExpanded ? null : item.id)}
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                              >
+                                <span>{isExpanded ? 'Hide' : '12-Mo'}</span>
+                                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                              </button>
+                            </td>
+                            <td className="py-3 px-2.5 text-right whitespace-nowrap">
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingCapexItem(item);
+                                    setPreselectedBenchmark(null);
+                                    setShowCapexModal(true);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 cursor-pointer"
+                                  title="Edit CapEx Line"
+                                >
+                                  <Edit2 size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteConfirmItem({ id: item.id, name: item.description, type: 'capex' })}
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 cursor-pointer"
+                                  title="Delete CapEx Line"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
                               </div>
                             </td>
                           </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })
-                )}
-                </tbody>
-                {capexItems.length > 0 && (
-                  <tfoot className="border-t-2 border-indigo-200 bg-slate-50/95 sticky bottom-0 z-10 shadow-xs backdrop-blur-xs">
-                    {/* Primary Total Row */}
-                    <tr className="border-b border-indigo-100 text-slate-900 font-bold">
-                      <td className="py-3.5 px-3 text-center text-indigo-700 bg-indigo-50/50">
-                        <Calculator size={14} className="mx-auto text-indigo-600" />
-                      </td>
-                      <td className="py-3.5 px-3">
-                        <div className="font-extrabold text-slate-900 text-xs tracking-tight flex items-center gap-1.5">
-                          <span>Total CapEx Portfolio</span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-800 font-mono">
-                            {capexItems.length} {capexItems.length === 1 ? 'item' : 'items'}
-                          </span>
-                        </div>
-                        <div className="text-[10px] text-slate-500 font-normal mt-0.5">
-                          Fiscal Year {selectedFiscalYear} · {selectedSite === 'All Sites' ? 'All Campuses' : selectedSite}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-3 text-slate-500 font-medium text-[11px]">
-                        {new Set(capexItems.map(c => c.asset_type)).size} types
-                      </td>
-                      <td className="py-3.5 px-3 font-semibold text-slate-700 text-[11px]">
-                        {selectedSite === 'All Sites' ? 'All Campuses' : selectedSite}
-                      </td>
-                      <td className="py-3.5 px-3 text-center font-extrabold text-slate-900 font-mono text-xs">
-                        {capexTotals.totalQty}
-                      </td>
-                      <td className="py-3.5 px-3 text-right font-medium text-slate-500 font-mono text-[11px]" title="Weighted average unit price">
-                        {capexTotals.avgUnitPrice > 0 ? `~$${capexTotals.avgUnitPrice.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}/ea` : '—'}
-                      </td>
-                      <td className="py-3.5 px-3 text-right text-indigo-700 font-extrabold font-mono text-xs">
-                        ${capexTotals.totalPlanned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                      <td className="py-3.5 px-3 text-right text-slate-900 font-extrabold font-mono text-xs">
-                        <div>${capexTotals.totalActual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                        <div className="text-[9px] font-semibold text-slate-500 font-mono">
-                          {capexTotals.burnPercent.toFixed(1)}% spent
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-3 text-right font-extrabold font-mono text-xs">
-                        <div className={capexTotals.totalVariance >= 0 ? 'text-emerald-700' : 'text-rose-600'}>
-                          {capexTotals.totalVariance >= 0 ? '+' : ''}${capexTotals.totalVariance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </div>
-                        <div className={`text-[9px] font-semibold ${capexTotals.totalVariance >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-                          {capexTotals.totalVariance >= 0 ? 'Under Budget' : 'Over Budget'}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-3">
-                        <div className="flex flex-wrap items-center gap-1">
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                            {capexTotals.statusCounts['Approved'] || 0} Appr
-                          </span>
-                          {(capexTotals.statusCounts['In Progress'] || 0) > 0 && (
-                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
-                              {capexTotals.statusCounts['In Progress']} In Prog
-                            </span>
+
+                          {/* Expandable 12-Month & Quarterly Spending Schedule */}
+                          {isExpanded && (
+                            <tr className="bg-slate-50/90 border-y border-indigo-100">
+                              <td colSpan={12} className="p-4">
+                                <div className="space-y-3">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                    <div className="text-xs font-bold text-slate-800 flex items-center gap-2 flex-wrap">
+                                      <Layers size={14} className="text-indigo-600" />
+                                      <span>Monthly &amp; Quarterly Cash Flow Schedule — {item.capex_code}</span>
+                                      {hasMismatch && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-amber-100 text-amber-900 border border-amber-300">
+                                          <AlertTriangle size={11} />
+                                          Monthly Planned (${monthlyPlanned.toLocaleString()}) &ne; Total Est. Cost (${totalEst.toLocaleString()})
+                                        </span>
+                                      )}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCapexDistributeEvenlyInline(item)}
+                                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer shrink-0"
+                                    >
+                                      <Sparkles size={12} />
+                                      <span>Distribute Evenly ({item.expected_start_month || 'Jan'}–{item.expected_complete_month || 'Dec'})</span>
+                                    </button>
+                                  </div>
+
+                                  <div className="overflow-x-auto bg-white rounded-xl border border-slate-200 p-3">
+                                    <table className="w-full text-center text-xs">
+                                      <thead>
+                                        <tr className="text-slate-500 font-semibold border-b border-slate-100">
+                                          <th className="py-1 px-2 text-left w-24">Row</th>
+                                          {MONTH_LABELS.map(m => <th key={m} className="py-1 px-1">{m}</th>)}
+                                          <th className="py-1 px-2 bg-slate-50 text-indigo-700">Q1</th>
+                                          <th className="py-1 px-2 bg-slate-50 text-indigo-700">Q2</th>
+                                          <th className="py-1 px-2 bg-slate-50 text-indigo-700">Q3</th>
+                                          <th className="py-1 px-2 bg-slate-50 text-indigo-700">Q4</th>
+                                          <th className="py-1 px-2 bg-indigo-50 text-indigo-900">Annual Total</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        <tr>
+                                          <td className="py-1.5 px-2 text-left font-bold text-indigo-600">Planned ($)</td>
+                                          {MONTH_KEYS.map(m => (
+                                            <td key={m} className="py-1 px-0.5">
+                                              <input
+                                                type="number"
+                                                value={item.monthly_spending?.[m]?.planned ?? 0}
+                                                onChange={(e) => handleCapexMonthChange(item.id, m, 'planned', parseFloat(e.target.value) || 0)}
+                                                className="w-16 px-1 py-1 text-right text-xs bg-slate-50 border border-slate-200 rounded font-mono"
+                                              />
+                                            </td>
+                                          ))}
+                                          <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">${(item.quarterly_spending?.planned?.q1 ?? 0).toLocaleString()}</td>
+                                          <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">${(item.quarterly_spending?.planned?.q2 ?? 0).toLocaleString()}</td>
+                                          <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">${(item.quarterly_spending?.planned?.q3 ?? 0).toLocaleString()}</td>
+                                          <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">${(item.quarterly_spending?.planned?.q4 ?? 0).toLocaleString()}</td>
+                                          <td className="py-1.5 px-2 bg-indigo-50 font-mono font-bold text-indigo-900">${monthlyPlanned.toLocaleString()}</td>
+                                        </tr>
+                                        <tr>
+                                          <td className="py-1.5 px-2 text-left font-bold text-emerald-600">Actual ($)</td>
+                                          {MONTH_KEYS.map(m => (
+                                            <td key={m} className="py-1 px-0.5">
+                                              <input
+                                                type="number"
+                                                value={item.monthly_spending?.[m]?.actual ?? 0}
+                                                onChange={(e) => handleCapexMonthChange(item.id, m, 'actual', parseFloat(e.target.value) || 0)}
+                                                className="w-16 px-1 py-1 text-right text-xs bg-emerald-50/60 border border-emerald-200 rounded font-mono"
+                                              />
+                                            </td>
+                                          ))}
+                                          <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold">${(item.quarterly_spending?.actual?.q1 ?? 0).toLocaleString()}</td>
+                                          <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold">${(item.quarterly_spending?.actual?.q2 ?? 0).toLocaleString()}</td>
+                                          <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold">${(item.quarterly_spending?.actual?.q3 ?? 0).toLocaleString()}</td>
+                                          <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold">${(item.quarterly_spending?.actual?.q4 ?? 0).toLocaleString()}</td>
+                                          <td className="py-1.5 px-2 bg-indigo-50 font-mono font-bold">${totalActual.toLocaleString()}</td>
+                                        </tr>
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                  {item.justification && (
+                                    <div className="text-[11px] text-slate-600">
+                                      <strong>Justification:</strong> {item.justification}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
                           )}
+                        </React.Fragment>
+                      );
+                    })
+                  )}
+                </tbody>
+
+                {/* Dynamic Summary Footer with Monthly, Quarterly, Stage & Status Rollups */}
+                {capexItems.length > 0 && (
+                  <tfoot className="border-t-2 border-indigo-200 bg-slate-50">
+                    <tr className="font-bold text-slate-900">
+                      <td className="py-3 px-2.5 text-center"><Calculator size={14} className="mx-auto text-indigo-600" /></td>
+                      <td colSpan={4} className="py-3 px-2.5">
+                        <div className="text-xs font-extrabold">
+                          SUBTOTAL — {capexItems.length} CapEx Line{capexItems.length === 1 ? '' : 's'}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 mt-1 text-[10px] font-medium text-slate-600">
+                          {CAPEX_STAGE_TAGS.map(st => (
+                            <span key={st} className="px-1.5 py-0.5 bg-white border border-slate-200 rounded font-mono">
+                              {st}: ${fmtUsd(capexTotals.stageTotals[st]?.amount)} ({capexTotals.stageTotals[st]?.count || 0})
+                            </span>
+                          ))}
+                          <span className="text-slate-300">|</span>
+                          {CAPEX_STATUSES_2027.map(st => (
+                            <span key={st} className="px-1.5 py-0.5 bg-white border border-slate-200 rounded font-mono">
+                              {st}: ${fmtUsd(capexTotals.statusTotals[st]?.amount)} ({capexTotals.statusTotals[st]?.count || 0})
+                            </span>
+                          ))}
                         </div>
                       </td>
-                      <td className="py-3.5 px-3 text-center">
+                      <td className="py-3 px-2.5 text-center font-mono">{capexTotals.totalQty}</td>
+                      <td className="py-3 px-2.5 text-right text-slate-400 font-mono">—</td>
+                      <td className="py-3 px-2.5 text-right font-mono font-extrabold text-indigo-700 tabular-nums">
+                        ${fmtUsd(capexTotals.totalPlanned)}
+                        <div className="text-[10px] font-normal text-slate-500">
+                          Phased: ${fmtUsd(capexTotals.totalMonthlyPlanned)}
+                        </div>
+                      </td>
+                      <td colSpan={2} className="py-3 px-2.5 text-xs font-mono text-slate-700">
+                        <div>Q1: ${fmtUsd(capexTotals.quarterly.planned.q1)} · Q2: ${fmtUsd(capexTotals.quarterly.planned.q2)}</div>
+                        <div>Q3: ${fmtUsd(capexTotals.quarterly.planned.q3)} · Q4: ${fmtUsd(capexTotals.quarterly.planned.q4)}</div>
+                      </td>
+                      <td className="py-3 px-2.5 text-center">
                         <button
                           type="button"
                           onClick={() => setShowPortfolioPhasingTotal(!showPortfolioPhasingTotal)}
-                          className="text-xs font-bold text-indigo-700 hover:text-indigo-900 flex items-center justify-center gap-1 mx-auto bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 transition-colors shadow-2xs cursor-pointer"
-                          title="Toggle 12-Month Portfolio Phasing Totals"
+                          className="text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg border border-indigo-200 cursor-pointer"
                         >
-                          <span>{showPortfolioPhasingTotal ? 'Hide 12-Mo' : '12-Mo Total'}</span>
-                          {showPortfolioPhasingTotal ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                          {showPortfolioPhasingTotal ? 'Hide 12-Mo' : '12-Mo Total'}
                         </button>
                       </td>
-                      <td className="py-3.5 px-3 text-right">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total</span>
-                      </td>
+                      <td></td>
                     </tr>
 
-                    {/* Expandable 12-Month & Quarterly Rollup for Total Portfolio */}
                     {showPortfolioPhasingTotal && (
-                      <tr className="bg-indigo-50/70 border-t border-indigo-200">
+                      <tr className="bg-indigo-50/60 border-t border-indigo-200">
                         <td colSpan={12} className="p-4">
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between">
-                              <div className="text-xs font-bold text-slate-900 flex items-center gap-2">
-                                <Layers size={14} className="text-indigo-600" />
-                                <span>Full CapEx Portfolio 12-Month & Quarterly Financial Rollup</span>
-                                <span className="text-[11px] text-indigo-700 font-semibold bg-indigo-100/80 px-2 py-0.5 rounded-full">
-                                  FY {selectedFiscalYear} ({capexItems.length} Items Aggregated)
-                                </span>
-                              </div>
-                              <div className="text-xs text-slate-600 font-medium">
-                                Overall Execution Rate: <span className="font-bold font-mono text-indigo-800">{capexTotals.burnPercent.toFixed(1)}%</span>
-                              </div>
-                            </div>
-
-                            <div className="overflow-x-auto bg-white rounded-xl border border-indigo-100 p-3 shadow-xs">
-                              <table className="w-full text-center text-xs">
-                                <thead>
-                                  <tr className="text-slate-500 font-semibold border-b border-slate-100">
-                                    <th className="py-1 px-2 text-left w-24">Row</th>
-                                    {MONTH_LABELS.map(m => (
-                                      <th key={m} className="py-1 px-1.5 font-bold text-slate-700">{m}</th>
-                                    ))}
-                                    <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q1</th>
-                                    <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q2</th>
-                                    <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q3</th>
-                                    <th className="py-1 px-2 bg-slate-50 font-bold text-indigo-700">Q4</th>
-                                    <th className="py-1 px-2 bg-indigo-50 font-bold text-indigo-900">Annual Total</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                  {/* Total Planned Row */}
-                                  <tr>
-                                    <td className="py-1.5 px-2 text-left font-bold text-indigo-700">Total Planned ($)</td>
-                                    {MONTH_KEYS.map(m => (
-                                      <td key={m} className="py-1 px-1 font-mono font-semibold text-indigo-900 text-[11px]">
-                                        ${capexTotals.monthlyPlanned[m].toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                      </td>
-                                    ))}
-                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
-                                      ${capexTotals.quarterly.planned.q1.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
-                                      ${capexTotals.quarterly.planned.q2.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
-                                      ${capexTotals.quarterly.planned.q3.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-indigo-700">
-                                      ${capexTotals.quarterly.planned.q4.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                    <td className="py-1.5 px-2 bg-indigo-50 font-mono font-extrabold text-indigo-900">
-                                      ${capexTotals.totalPlanned.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                  </tr>
-
-                                  {/* Total Actual Row */}
-                                  <tr>
-                                    <td className="py-1.5 px-2 text-left font-bold text-emerald-700">Total Actual ($)</td>
-                                    {MONTH_KEYS.map(m => (
-                                      <td key={m} className="py-1 px-1 font-mono font-semibold text-slate-800 text-[11px]">
-                                        ${capexTotals.monthlyActual[m].toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                      </td>
-                                    ))}
-                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
-                                      ${capexTotals.quarterly.actual.q1.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
-                                      ${capexTotals.quarterly.actual.q2.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
-                                      ${capexTotals.quarterly.actual.q3.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                    <td className="py-1.5 px-2 bg-slate-50 font-mono font-bold text-slate-800">
-                                      ${capexTotals.quarterly.actual.q4.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                    <td className="py-1.5 px-2 bg-indigo-50 font-mono font-extrabold text-slate-900">
-                                      ${capexTotals.totalActual.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                  </tr>
-
-                                  {/* Total Variance Row */}
-                                  <tr className="bg-slate-50/50">
-                                    <td className="py-1.5 px-2 text-left font-bold text-slate-800">Net Variance ($)</td>
-                                    {MONTH_KEYS.map(m => {
-                                      const p = capexTotals.monthlyPlanned[m];
-                                      const a = capexTotals.monthlyActual[m];
-                                      const diff = p - a;
-                                      return (
-                                        <td key={m} className={`py-1 px-1 font-mono text-[11px] font-bold ${
-                                          diff >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                                        }`}>
-                                          {diff !== 0 ? (diff > 0 ? `+${diff.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : diff.toLocaleString(undefined, { maximumFractionDigits: 0 })) : '—'}
-                                        </td>
-                                      );
-                                    })}
-                                    {(['q1', 'q2', 'q3', 'q4'] as const).map((qKey) => {
-                                      const p = capexTotals.quarterly.planned[qKey];
-                                      const a = capexTotals.quarterly.actual[qKey];
-                                      const diff = p - a;
-                                      return (
-                                        <td key={qKey} className={`py-1.5 px-2 font-mono font-bold ${
-                                          diff >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                                        }`}>
-                                          {diff >= 0 ? '+' : ''}${diff.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                        </td>
-                                      );
-                                    })}
-                                    <td className={`py-1.5 px-2 font-mono font-extrabold ${
-                                      capexTotals.totalVariance >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                                    }`}>
-                                      {capexTotals.totalVariance >= 0 ? '+' : ''}${capexTotals.totalVariance.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                    </td>
-                                  </tr>
-                                </tbody>
-                              </table>
-                            </div>
+                          <div className="overflow-x-auto bg-white rounded-xl border border-indigo-100 p-3">
+                            <table className="w-full text-center text-xs">
+                              <thead>
+                                <tr className="text-slate-500 font-semibold border-b border-slate-100">
+                                  <th className="py-1 px-2 text-left">Aggregated Portfolio</th>
+                                  {MONTH_LABELS.map(m => <th key={m} className="py-1 px-1">{m}</th>)}
+                                  <th className="py-1 px-2 bg-slate-50 text-indigo-700">Q1</th>
+                                  <th className="py-1 px-2 bg-slate-50 text-indigo-700">Q2</th>
+                                  <th className="py-1 px-2 bg-slate-50 text-indigo-700">Q3</th>
+                                  <th className="py-1 px-2 bg-slate-50 text-indigo-700">Q4</th>
+                                  <th className="py-1 px-2 bg-indigo-50 text-indigo-900">Annual Total</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 font-mono">
+                                <tr>
+                                  <td className="py-1.5 px-2 text-left font-sans font-bold text-indigo-700">Total Est. Spending ($)</td>
+                                  {MONTH_KEYS.map(m => <td key={m} className="py-1 px-1">${fmtUsd(capexTotals.monthlyPlanned[m])}</td>)}
+                                  <td className="py-1.5 px-2 bg-slate-50 font-bold text-indigo-700">${fmtUsd(capexTotals.quarterly.planned.q1)}</td>
+                                  <td className="py-1.5 px-2 bg-slate-50 font-bold text-indigo-700">${fmtUsd(capexTotals.quarterly.planned.q2)}</td>
+                                  <td className="py-1.5 px-2 bg-slate-50 font-bold text-indigo-700">${fmtUsd(capexTotals.quarterly.planned.q3)}</td>
+                                  <td className="py-1.5 px-2 bg-slate-50 font-bold text-indigo-700">${fmtUsd(capexTotals.quarterly.planned.q4)}</td>
+                                  <td className="py-1.5 px-2 bg-indigo-50 font-extrabold text-indigo-900">${fmtUsd(capexTotals.totalMonthlyPlanned)}</td>
+                                </tr>
+                                <tr>
+                                  <td className="py-1.5 px-2 text-left font-sans font-bold text-emerald-700">Total Actual ($)</td>
+                                  {MONTH_KEYS.map(m => <td key={m} className="py-1 px-1">${fmtUsd(capexTotals.monthlyActual[m])}</td>)}
+                                  <td className="py-1.5 px-2 bg-slate-50 font-bold">${fmtUsd(capexTotals.quarterly.actual.q1)}</td>
+                                  <td className="py-1.5 px-2 bg-slate-50 font-bold">${fmtUsd(capexTotals.quarterly.actual.q2)}</td>
+                                  <td className="py-1.5 px-2 bg-slate-50 font-bold">${fmtUsd(capexTotals.quarterly.actual.q3)}</td>
+                                  <td className="py-1.5 px-2 bg-slate-50 font-bold">${fmtUsd(capexTotals.quarterly.actual.q4)}</td>
+                                  <td className="py-1.5 px-2 bg-indigo-50 font-extrabold">${fmtUsd(capexTotals.totalActual)}</td>
+                                </tr>
+                              </tbody>
+                            </table>
                           </div>
                         </td>
                       </tr>
@@ -2270,94 +1937,88 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
         </div>
       )}
 
-      {/* --- SUB-TAB 3: OPEX & S-OPERATION MATRIX (SIDE-BY-SIDE 12-MONTH FINANCIAL GRID) --- */}
+      {/* --- SUB-TAB 3: OPEX PLAN (OPEX PLAN 2027) --- */}
       {activeSubTab === 'opex' && (
         <div className="space-y-4">
-          {/* OpEx Controls & Filter Toolbar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs">
             <div className="flex flex-wrap items-center gap-2">
-              <div className="relative min-w-[200px]">
+              <div className="relative min-w-[190px]">
                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder="Search OpEx & services..."
+                  placeholder="Search description, remark, G/L..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none"
                 />
               </div>
 
-              {/* Campus / Site Filter */}
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
-                <Building2 size={13} className="text-slate-400 shrink-0" />
-                <select
-                  value={selectedSite}
-                  onChange={(e) => setSelectedSite(e.target.value)}
-                  className="text-xs bg-transparent font-semibold text-slate-700 focus:outline-none cursor-pointer"
-                  title="Filter OpEx & S-Operation by Campus (K1, K2, Sakal, KG)"
-                >
-                  <option value="All Sites">All Campuses</option>
-                  <option value="K1">K1</option>
-                  <option value="K2">K2</option>
-                  <option value="Sakal">Sakal</option>
-                  <option value="KG">KG</option>
-                </select>
-              </div>
+              <select
+                value={selectedSite}
+                onChange={(e) => setSelectedSite(e.target.value)}
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-semibold text-slate-700"
+              >
+                {ALL_BU_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
 
               <select
                 value={opexAccountFilter}
                 onChange={(e) => setOpexAccountFilter(e.target.value)}
-                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none"
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700 max-w-[220px]"
               >
-                <option value="All Accounts">All Accounts</option>
-                {effectiveAccountCodes.map(a => (
-                  <option key={a.id || a.code} value={a.code}>{a.code}</option>
+                <option value="All Accounts">All 17 COA Accounts</option>
+                {COA_SUMMARY_2027.map(c => (
+                  <option key={c.account_code} value={c.account_code}>{c.account_code} — {c.account_name}</option>
                 ))}
               </select>
 
-              {/* Budget Classification Filter */}
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
-                <Tag size={13} className="text-slate-400 shrink-0" />
-                <select
-                  value={opexClassificationFilter}
-                  onChange={(e) => setOpexClassificationFilter(e.target.value as any)}
-                  className="text-xs bg-transparent font-semibold text-slate-700 focus:outline-none cursor-pointer"
-                  title="Filter by Budget Classification"
-                >
-                  <option value="All">All Classifications</option>
-                  <option value="Planned">Planned Baseline Only</option>
-                  <option value="Unplanned">Out-of-Budget (Unplanned)</option>
-                </select>
-              </div>
+              <select
+                value={opexCostCenterFilter}
+                onChange={(e) => setOpexCostCenterFilter(e.target.value)}
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700"
+              >
+                {opexCostCenterOptions.map(cc => <option key={cc} value={cc}>{cc}</option>)}
+              </select>
 
-              {/* View Mode Toggle */}
+              <select
+                value={opexPicFilter}
+                onChange={(e) => setOpexPicFilter(e.target.value)}
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700"
+              >
+                {opexPicOptions.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+
+              <select
+                value={opexClassificationFilter}
+                onChange={(e) => setOpexClassificationFilter(e.target.value as any)}
+                className="text-xs bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-medium text-slate-700"
+              >
+                <option value="All">All Classifications</option>
+                <option value="Planned">Planned Only</option>
+                <option value="Unplanned">Out-of-Budget Only</option>
+              </select>
+
               <div className="inline-flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
                 <button
                   type="button"
                   onClick={() => setViewMode('side-by-side')}
-                  className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
-                    viewMode === 'side-by-side' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500'
-                  }`}
+                  className={`px-2 py-1 rounded font-semibold cursor-pointer ${viewMode === 'side-by-side' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'}`}
                 >
-                  Side-by-Side (Planned & Actual)
+                  Plan &amp; Act
                 </button>
                 <button
                   type="button"
                   onClick={() => setViewMode('planned-only')}
-                  className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
-                    viewMode === 'planned-only' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500'
-                  }`}
+                  className={`px-2 py-1 rounded font-semibold cursor-pointer ${viewMode === 'planned-only' ? 'bg-white text-indigo-700 shadow-xs' : 'text-slate-500'}`}
                 >
-                  Planned Only
+                  Plan Only
                 </button>
                 <button
                   type="button"
                   onClick={() => setViewMode('actual-only')}
-                  className={`px-2.5 py-1 rounded-md font-semibold transition-all ${
-                    viewMode === 'actual-only' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'
-                  }`}
+                  className={`px-2 py-1 rounded font-semibold cursor-pointer ${viewMode === 'actual-only' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-500'}`}
                 >
-                  Actuals Only
+                  Act Only
                 </button>
               </div>
             </div>
@@ -2367,1942 +2028,579 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => 
                 setEditingOpexItem(null);
                 setShowOpexModal(true);
               }}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold py-2 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm hover:shadow transition-all"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold py-2 px-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shrink-0 whitespace-nowrap"
             >
-              <Plus size={14} className="stroke-[2.5]" />
-              <span>Add OpEx Service</span>
+              <Plus size={14} />
+              <span>Add OPEX Line</span>
             </Button>
           </div>
 
-          {/* Interactive 12-Month OpEx Financial Matrix */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50/90 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
                   <tr>
-                    <th className="py-3 px-3 w-8">#</th>
-                    <th className="py-3 px-3 min-w-[200px]">Service & Account</th>
-                    <th className="py-3 px-2">Site</th>
-                    <th className="py-3 px-2">Cycle</th>
-                    <th className="py-3 px-2 w-14 text-center">Row</th>
-                    {MONTH_LABELS.map(m => (
-                      <th key={m} className="py-3 px-1.5 text-center min-w-[70px]">{m}</th>
-                    ))}
-                    <th className="py-3 px-3 text-right bg-slate-100/70 min-w-[100px]">Annual Total</th>
-                    <th className="py-3 px-2 text-center w-16">Actions</th>
+                    <th className="py-3 px-2.5 w-8">No</th>
+                    <th className="py-3 px-2.5">BU</th>
+                    <th className="py-3 px-2.5 min-w-[210px]">Description &amp; Remark</th>
+                    <th className="py-3 px-2.5">Account Code &amp; Name</th>
+                    <th className="py-3 px-2.5">Qty &times; Price</th>
+                    <th className="py-3 px-2.5">CC / PIC</th>
+                    <th className="py-3 px-2 w-12 text-center">Row</th>
+                    {MONTH_LABELS.map(m => <th key={m} className="py-3 px-1 text-center min-w-[66px]">{m}</th>)}
+                    <th className="py-3 px-3 text-right bg-slate-100/70 min-w-[96px]">Total</th>
+                    <th className="py-3 px-2 text-center w-16">Act</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {opexItems.map((item, idx) => {
-                    const annualPlanned = MONTH_KEYS.reduce((acc, m) => acc + (item.monthly_spending?.[m]?.planned || 0), 0);
-                    const annualActual = MONTH_KEYS.reduce((acc, m) => acc + (item.monthly_spending?.[m]?.actual || 0), 0);
-                    const annualVariance = annualPlanned - annualActual;
-                    const isUnder = annualVariance >= 0;
-
-                    return (
-                      <React.Fragment key={item.id}>
-                        {/* Sub-Row 1: Planned ($) */}
-                        {(viewMode === 'side-by-side' || viewMode === 'planned-only') && (
-                          <tr className="hover:bg-slate-50/50 transition-colors">
-                            <td className="py-2 px-3 text-slate-400 font-medium" rowSpan={viewMode === 'side-by-side' ? 3 : 1}>
-                              {idx + 1}
-                            </td>
-                            <td className="py-2 px-3" rowSpan={viewMode === 'side-by-side' ? 3 : 1}>
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="font-bold text-slate-900">{item.description}</span>
-                                {item.budget_classification === 'Unplanned' && (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 shrink-0 shadow-2xs" title={`Unplanned root cause: ${item.unplanned_reason || 'Out-of-Budget'}`}>
-                                    <AlertTriangle size={10} className="text-amber-600" />
-                                    Out-of-Budget
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[11px] text-slate-400 truncate max-w-xs">{item.account_code}</div>
-                              {item.budget_classification === 'Unplanned' && item.unplanned_reason && (
-                                <div className="text-[10px] text-amber-800 font-medium truncate max-w-xs mt-0.5 flex items-center gap-1">
-                                  <span className="font-semibold text-amber-900">Reason:</span> {item.unplanned_reason}
-                                  {item.approval_ref && <span className="text-slate-500 font-mono text-[9px] bg-slate-100 px-1 py-0.2 rounded border border-slate-200">[{item.approval_ref}]</span>}
-                                </div>
-                              )}
-                              {item.renewal_date && (
-                                <div className="text-[10px] text-amber-600 font-medium mt-0.5">
-                                  Renews: {new Date(item.renewal_date).toLocaleDateString()}
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-2 px-2 font-semibold text-slate-700" rowSpan={viewMode === 'side-by-side' ? 3 : 1}>
-                              {item.site}
-                            </td>
-                            <td className="py-2 px-2 text-slate-600 font-medium" rowSpan={viewMode === 'side-by-side' ? 3 : 1}>
-                              {item.billing_cycle}
-                            </td>
-
-                            {/* Row label */}
-                            <td className="py-2 px-2 text-center font-bold text-indigo-600 text-[11px] bg-indigo-50/40">
-                              Plan
-                            </td>
-
-                            {/* Monthly planned inputs */}
-                            {MONTH_KEYS.map(m => (
-                              <td key={m} className="py-1 px-1 text-center">
-                                <input
-                                  type="number"
-                                  value={item.monthly_spending?.[m]?.planned ?? 0}
-                                  onChange={(e) => handleOpexMonthChange(item.id, m, 'planned', parseFloat(e.target.value) || 0)}
-                                  className="w-16 px-1.5 py-1 text-right text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono font-medium text-slate-800"
-                                />
-                              </td>
-                            ))}
-
-                            <td className="py-2 px-3 text-right font-mono font-bold text-indigo-700 bg-slate-50/70">
-                              ${annualPlanned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-
-                            <td className="py-2 px-2 text-center" rowSpan={viewMode === 'side-by-side' ? 3 : 1}>
-                              <div className="flex items-center justify-center gap-1">
-                                <button
-                                  onClick={() => {
-                                    setEditingOpexItem(item);
-                                    setShowOpexModal(true);
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-indigo-600 rounded-md hover:bg-indigo-50"
-                                  title="Edit Item"
-                                >
-                                  <Edit2 size={13} />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteOpex(item.id, item.description)}
-                                  className="p-1 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50"
-                                  title="Delete Item"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-
-                        {/* Sub-Row 2: Actual ($) */}
-                        {(viewMode === 'side-by-side' || viewMode === 'actual-only') && (
-                          <tr className="hover:bg-slate-50/50 transition-colors bg-emerald-50/20">
-                            {viewMode === 'actual-only' && (
-                              <>
-                                <td className="py-2 px-3 text-slate-400 font-medium">{idx + 1}</td>
-                                <td className="py-2 px-3">
-                                  <div className="font-bold text-slate-900">{item.description}</div>
-                                  <div className="text-[11px] text-slate-400 truncate max-w-xs">{item.account_code}</div>
-                                </td>
-                                <td className="py-2 px-2 font-semibold text-slate-700">{item.site}</td>
-                                <td className="py-2 px-2 text-slate-600 font-medium">{item.billing_cycle}</td>
-                              </>
-                            )}
-
-                            {/* Row label */}
-                            <td className="py-2 px-2 text-center font-bold text-emerald-700 text-[11px] bg-emerald-50/50">
-                              Act
-                            </td>
-
-                            {/* Monthly actual inputs */}
-                            {MONTH_KEYS.map(m => (
-                              <td key={m} className="py-1 px-1 text-center">
-                                <input
-                                  type="number"
-                                  value={item.monthly_spending?.[m]?.actual ?? 0}
-                                  onChange={(e) => handleOpexMonthChange(item.id, m, 'actual', parseFloat(e.target.value) || 0)}
-                                  className="w-16 px-1.5 py-1 text-right text-xs bg-emerald-50/50 border border-emerald-200/80 rounded-md focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 font-mono font-medium text-slate-900"
-                                />
-                              </td>
-                            ))}
-
-                            <td className="py-2 px-3 text-right font-mono font-bold text-emerald-800 bg-slate-50/70">
-                              ${annualActual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-
-                            {viewMode === 'actual-only' && (
-                              <td className="py-2 px-2 text-center">
-                                <button
-                                  onClick={() => {
-                                    setEditingOpexItem(item);
-                                    setShowOpexModal(true);
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-indigo-600"
-                                >
-                                  <Edit2 size={13} />
-                                </button>
-                              </td>
-                            )}
-                          </tr>
-                        )}
-
-                        {/* Sub-Row 3: Variance ($) */}
-                        {viewMode === 'side-by-side' && (
-                          <tr className="border-b-2 border-slate-200/80 bg-slate-50/60">
-                            <td className="py-1.5 px-2 text-center font-bold text-slate-600 text-[11px]">
-                              Var
-                            </td>
-
-                            {MONTH_KEYS.map(m => {
-                              const p = item.monthly_spending?.[m]?.planned || 0;
-                              const a = item.monthly_spending?.[m]?.actual || 0;
-                              const diff = p - a;
-                              return (
-                                <td key={m} className={`py-1 px-1 text-right font-mono font-semibold text-xs ${
-                                  diff >= 0 ? 'text-emerald-700' : 'text-rose-600'
-                                }`}>
-                                  {diff !== 0 ? (diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()) : '—'}
-                                </td>
-                              );
-                            })}
-
-                            <td className={`py-1.5 px-3 text-right font-mono font-bold ${isUnder ? 'text-emerald-700' : 'text-rose-600'} bg-slate-100/70`}>
-                              {isUnder ? '+' : ''}${annualVariance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    );
-                  })}
-
-                  {/* Summary / Burn-rate Totals Footer */}
-                  <tr className="bg-indigo-50/40 border-t-2 border-indigo-200 font-bold">
-                    <td colSpan={4} className="py-3 px-3 text-indigo-900 text-xs uppercase tracking-wider">
-                      Monthly Planned IT OpEx Burn Rate
-                    </td>
-                    <td className="py-3 px-2 text-center text-indigo-700">Plan</td>
-                    {MONTH_KEYS.map(m => (
-                      <td key={m} className="py-3 px-1 text-right font-mono text-indigo-900 text-xs">
-                        ${(opexGridRollups.monthlyPlannedTotals[m] || 0).toLocaleString()}
+                  {opexItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={21} className="py-12 text-center text-slate-400">
+                        No OPEX lines match the active filters for FY {selectedFiscalYear}.
                       </td>
-                    ))}
-                    <td className="py-3 px-3 text-right font-mono text-indigo-900 text-sm bg-indigo-100/50">
-                      ${opexGridRollups.grandPlanned.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td></td>
-                  </tr>
+                    </tr>
+                  ) : (
+                    opexItems.map((item, idx) => {
+                      const annualPlanned = MONTH_KEYS.reduce((acc, m) => acc + (Number(item.monthly_spending?.[m]?.planned) || 0), 0);
+                      const annualActual = MONTH_KEYS.reduce((acc, m) => acc + (Number(item.monthly_spending?.[m]?.actual) || 0), 0);
+                      const annualVariance = annualPlanned - annualActual;
+                      const isUnder = annualVariance >= 0;
+                      const spanRows = viewMode === 'side-by-side' ? 3 : 1;
+                      const coaCode = extractGlCodeNumber(item.account_code);
+                      const coaName = findCoaByCode(coaCode)?.account_name || item.account_name;
 
-                  <tr className="bg-emerald-50/40 font-bold">
-                    <td colSpan={4} className="py-3 px-3 text-emerald-900 text-xs uppercase tracking-wider">
-                      Monthly Actual IT Realized Burn Rate
-                    </td>
-                    <td className="py-3 px-2 text-center text-emerald-700">Act</td>
-                    {MONTH_KEYS.map(m => (
-                      <td key={m} className="py-3 px-1 text-right font-mono text-emerald-900 text-xs">
-                        ${(opexGridRollups.monthlyActualTotals[m] || 0).toLocaleString()}
-                      </td>
-                    ))}
-                    <td className="py-3 px-3 text-right font-mono text-emerald-900 text-sm bg-emerald-100/50">
-                      ${opexGridRollups.grandActual.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td></td>
-                  </tr>
-
-                  <tr className="bg-slate-100/90 font-bold border-t border-slate-300">
-                    <td colSpan={4} className="py-3 px-3 text-slate-800 text-xs uppercase tracking-wider">
-                      Net Monthly OpEx Variance
-                    </td>
-                    <td className="py-3 px-2 text-center text-slate-700">Var</td>
-                    {MONTH_KEYS.map(m => {
-                      const v = opexGridRollups.monthlyVarianceTotals[m] || 0;
                       return (
-                        <td key={m} className={`py-3 px-1 text-right font-mono text-xs ${v >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                          {v >= 0 ? '+' : ''}${v.toLocaleString()}
-                        </td>
+                        <React.Fragment key={item.id}>
+                          {(viewMode === 'side-by-side' || viewMode === 'planned-only') && (
+                            <tr className="hover:bg-slate-50/50">
+                              <td className="py-2 px-2.5 text-slate-400 font-mono" rowSpan={spanRows}>{idx + 1}</td>
+                              <td className="py-2 px-2.5 font-mono font-bold text-slate-800 whitespace-nowrap" rowSpan={spanRows}>
+                                {item.site}
+                              </td>
+                              <td className="py-2 px-2.5" rowSpan={spanRows}>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="font-bold text-slate-900">{item.description}</span>
+                                  {item.budget_classification === 'Unplanned' && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                                      <AlertTriangle size={10} /> Out-of-Budget
+                                    </span>
+                                  )}
+                                </div>
+                                {(item.remark || item.justification) && (
+                                  <div className="text-[11px] text-slate-500 mt-0.5 max-w-xs truncate" title={item.remark || item.justification}>
+                                    {item.remark || item.justification}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-2 px-2.5" rowSpan={spanRows}>
+                                <div className="font-mono font-bold text-indigo-700">{coaCode}</div>
+                                <div className="text-[11px] text-slate-600">{coaName}</div>
+                              </td>
+                              <td className="py-2 px-2.5 font-mono text-slate-700 whitespace-nowrap" rowSpan={spanRows}>
+                                {item.qty} &times; ${Number(item.unit_price || 0).toLocaleString()}
+                              </td>
+                              <td className="py-2 px-2.5 text-slate-600 whitespace-nowrap" rowSpan={spanRows}>
+                                <div className="font-mono font-semibold">{item.cost_center || 'IT'}</div>
+                                <div className="text-[11px] text-slate-400">{item.pic}</div>
+                              </td>
+                              <td className="py-2 px-2 text-center font-bold text-indigo-600 text-[11px] bg-indigo-50/40">Plan</td>
+                              {MONTH_KEYS.map(m => (
+                                <td key={m} className="py-1 px-0.5 text-center">
+                                  <input
+                                    type="number"
+                                    value={item.monthly_spending?.[m]?.planned ?? 0}
+                                    onChange={(e) => handleOpexMonthChange(item.id, m, 'planned', parseFloat(e.target.value) || 0)}
+                                    className="w-16 px-1 py-1 text-right text-xs bg-slate-50 border border-slate-200 rounded font-mono"
+                                  />
+                                </td>
+                              ))}
+                              <td className="py-2 px-3 text-right font-mono font-bold text-indigo-700 bg-slate-50/70 tabular-nums">
+                                ${annualPlanned.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="py-2 px-2 text-center" rowSpan={spanRows}>
+                                <div className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => { setEditingOpexItem(item); setShowOpexModal(true); }}
+                                    className="p-1 text-slate-400 hover:text-indigo-600 rounded hover:bg-indigo-50 cursor-pointer"
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteConfirmItem({ id: item.id, name: item.description, type: 'opex' })}
+                                    className="p-1 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50 cursor-pointer"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+
+                          {(viewMode === 'side-by-side' || viewMode === 'actual-only') && (
+                            <tr className="bg-emerald-50/20">
+                              {viewMode === 'actual-only' && (
+                                <>
+                                  <td className="py-2 px-2.5 text-slate-400 font-mono">{idx + 1}</td>
+                                  <td className="py-2 px-2.5 font-mono font-bold">{item.site}</td>
+                                  <td className="py-2 px-2.5 font-bold">{item.description}</td>
+                                  <td className="py-2 px-2.5"><span className="font-mono font-bold text-indigo-700">{coaCode}</span> · {coaName}</td>
+                                  <td className="py-2 px-2.5 font-mono">{item.qty} &times; ${Number(item.unit_price || 0).toLocaleString()}</td>
+                                  <td className="py-2 px-2.5">{item.cost_center} / {item.pic}</td>
+                                </>
+                              )}
+                              <td className="py-2 px-2 text-center font-bold text-emerald-700 text-[11px] bg-emerald-50/50">Act</td>
+                              {MONTH_KEYS.map(m => (
+                                <td key={m} className="py-1 px-0.5 text-center">
+                                  <input
+                                    type="number"
+                                    value={item.monthly_spending?.[m]?.actual ?? 0}
+                                    onChange={(e) => handleOpexMonthChange(item.id, m, 'actual', parseFloat(e.target.value) || 0)}
+                                    className="w-16 px-1 py-1 text-right text-xs bg-emerald-50/50 border border-emerald-200 rounded font-mono"
+                                  />
+                                </td>
+                              ))}
+                              <td className="py-2 px-3 text-right font-mono font-bold text-emerald-800 bg-slate-50/70 tabular-nums">
+                                ${annualActual.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                              </td>
+                              {viewMode === 'actual-only' && (
+                                <td className="py-2 px-2 text-center">
+                                  <button type="button" onClick={() => { setEditingOpexItem(item); setShowOpexModal(true); }} className="p-1 text-slate-400 hover:text-indigo-600 cursor-pointer">
+                                    <Edit2 size={13} />
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          )}
+
+                          {viewMode === 'side-by-side' && (
+                            <tr className="border-b-2 border-slate-200 bg-slate-50/60">
+                              <td className="py-1 px-2 text-center font-bold text-slate-600 text-[11px]">Var</td>
+                              {MONTH_KEYS.map(m => {
+                                const diff = (item.monthly_spending?.[m]?.planned || 0) - (item.monthly_spending?.[m]?.actual || 0);
+                                return (
+                                  <td key={m} className={`py-1 px-1 text-right font-mono font-semibold text-xs ${diff >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                                    {diff !== 0 ? (diff > 0 ? `+${diff.toLocaleString()}` : diff.toLocaleString()) : '—'}
+                                  </td>
+                                );
+                              })}
+                              <td className={`py-1 px-3 text-right font-mono font-bold tabular-nums bg-slate-100/70 ${isUnder ? 'text-emerald-700' : 'text-rose-600'}`}>
+                                {isUnder ? '+' : ''}${annualVariance.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
                       );
-                    })}
-                    <td className={`py-3 px-3 text-right font-mono text-sm ${opexGridRollups.grandVariance >= 0 ? 'text-emerald-700' : 'text-rose-600'} bg-slate-200/70`}>
-                      {opexGridRollups.grandVariance >= 0 ? '+' : ''}${opexGridRollups.grandVariance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td></td>
-                  </tr>
+                    })
+                  )}
                 </tbody>
+
+                {/* Dynamic Filtered SUBTOTAL(9, ...) Summary Footer */}
+                {opexItems.length > 0 && (
+                  <tfoot className="border-t-2 border-indigo-200 font-bold">
+                    <tr className="bg-indigo-50/50 text-indigo-950">
+                      <td colSpan={6} className="py-3 px-3 text-xs uppercase tracking-wider">
+                        SUBTOTAL (Filtered {opexItems.length} OPEX Line{opexItems.length === 1 ? '' : 's'}) — Planned
+                      </td>
+                      <td className="py-3 px-2 text-center text-indigo-700">Plan</td>
+                      {MONTH_KEYS.map(m => (
+                        <td key={m} className="py-3 px-1 text-right font-mono text-xs tabular-nums">
+                          ${fmtUsd(opexGridRollups.monthlyPlannedTotals[m])}
+                        </td>
+                      ))}
+                      <td className="py-3 px-3 text-right font-mono text-sm bg-indigo-100/60 tabular-nums">
+                        ${fmtUsd(opexGridRollups.grandPlanned)}
+                      </td>
+                      <td></td>
+                    </tr>
+                    <tr className="bg-emerald-50/50 text-emerald-950">
+                      <td colSpan={6} className="py-2.5 px-3 text-xs uppercase tracking-wider">
+                        SUBTOTAL — Actual Burn
+                      </td>
+                      <td className="py-2.5 px-2 text-center text-emerald-700">Act</td>
+                      {MONTH_KEYS.map(m => (
+                        <td key={m} className="py-2.5 px-1 text-right font-mono text-xs tabular-nums">
+                          ${fmtUsd(opexGridRollups.monthlyActualTotals[m])}
+                        </td>
+                      ))}
+                      <td className="py-2.5 px-3 text-right font-mono text-sm bg-emerald-100/60 tabular-nums">
+                        ${fmtUsd(opexGridRollups.grandActual)}
+                      </td>
+                      <td></td>
+                    </tr>
+                    <tr className="bg-slate-100 text-slate-900">
+                      <td colSpan={6} className="py-2.5 px-3 text-xs uppercase tracking-wider">
+                        SUBTOTAL — Net Variance
+                      </td>
+                      <td className="py-2.5 px-2 text-center text-slate-700">Var</td>
+                      {MONTH_KEYS.map(m => {
+                        const v = opexGridRollups.monthlyVarianceTotals[m] || 0;
+                        return (
+                          <td key={m} className={`py-2.5 px-1 text-right font-mono text-xs tabular-nums ${v >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                            {v >= 0 ? '+' : ''}${fmtUsd(v)}
+                          </td>
+                        );
+                      })}
+                      <td className={`py-2.5 px-3 text-right font-mono text-sm bg-slate-200/70 tabular-nums ${opexGridRollups.grandVariance >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                        {opexGridRollups.grandVariance >= 0 ? '+' : ''}${fmtUsd(opexGridRollups.grandVariance)}
+                      </td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
           </div>
         </div>
       )}
 
-      {/* --- SUB-TAB 4: SYNC & TEMPLATE TOOLS (RESET TEMPLATE & MASTER ACCOUNT CODES CONFIGURATION) --- */}
+      {/* --- SUB-TAB 4: GL ACTUALS (COA DETAILS) & PLAN VS ACTUAL VARIANCE --- */}
+      {activeSubTab === 'gl-actuals' && (
+        <GlActualsTab
+          fiscalYear={selectedFiscalYear}
+          selectedSite={selectedSite}
+          onSiteChange={setSelectedSite}
+          glActuals={glActuals}
+          opexItems={opexItems}
+          onRefresh={loadAll}
+          showToast={showToast}
+        />
+      )}
+
+      {/* --- SUB-TAB 5: MASTER DATA & REFERENCE TABLES --- */}
+      {activeSubTab === 'master-data' && (
+        <MasterDataTab
+          unitPriceCatalog={unitPriceCatalog}
+          onRefreshMasterData={fetchMasterData}
+          onUseUnitPriceInCapex={(benchmark) => {
+            setEditingCapexItem(null);
+            setPreselectedBenchmark(benchmark);
+            setShowCapexModal(true);
+          }}
+          onOpenAccountCodesModal={() => setShowAccountCodesModal(true)}
+          showToast={showToast}
+        />
+      )}
+
+      {/* --- SUB-TAB 6: SYNC & TEMPLATE --- */}
       {activeSubTab === 'sync' && (
         <div className="space-y-6">
-          {/* SECTION 1: DEDICATED FISCAL YEAR PLANNING ROLLOVER & COPY SETTING CARD */}
-          <div className="bg-white rounded-2xl border-2 border-indigo-200/90 p-6 shadow-sm space-y-6 relative overflow-hidden">
+          {/* Annual Rollover Card */}
+          <div className="bg-white rounded-2xl border border-indigo-200 p-6 shadow-xs space-y-5">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-              <div className="flex items-start gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center shrink-0 border border-indigo-100 shadow-2xs">
-                  <Copy size={22} className="text-indigo-600" />
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-700 flex items-center justify-center border border-indigo-100 shrink-0">
+                  <Copy size={20} />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">
-                      Copy & Roll Over IT CapEx & S-Operation Planning
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                      Annual Budget Rollover
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">
-                    Instantly copy your planned CapEx investments and OpEx/S-Operation recurring contracts into future fiscal years. Planned monthly numbers are retained with optional inflation scaling, and all actual spending is reset to <strong>$0.00</strong> so you start next year with a clean execution slate.
+                  <h3 className="text-base font-bold text-slate-900">Copy &amp; Roll Over IT CapEx &amp; OPEX Planning</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Copy planned 2027 CapEx &amp; OPEX schedules into future fiscal years with optional CPI escalation while resetting actuals to $0.00.
                   </p>
                 </div>
               </div>
-
-              <div className="flex items-center gap-2 shrink-0 self-start lg:self-auto">
-                <span className="text-xs text-slate-500">Current Active View:</span>
-                <span className="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-800 font-mono font-bold text-xs border border-slate-200">
-                  FY {selectedFiscalYear}
-                </span>
-              </div>
+              <span className="px-2.5 py-1 rounded-xl bg-slate-100 text-slate-800 font-mono font-bold text-xs border border-slate-200 self-start">
+                Active: FY {selectedFiscalYear}
+              </span>
             </div>
 
-            {/* Source & Destination Selectors */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-50/80 border border-slate-200/80 rounded-2xl">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-slate-50 border border-slate-200/80 rounded-2xl">
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Source Fiscal Year (Copy Plan From)
-                </label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Source Fiscal Year</label>
                 <select
                   value={rolloverSourceYear}
                   onChange={(e) => setRolloverSourceYear(parseInt(e.target.value, 10))}
-                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-2xs"
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold"
                 >
-                  {availableYears.map(yr => (
-                    <option key={yr} value={yr}>
-                      FY {yr} {yr === selectedFiscalYear ? '(Currently Selected)' : ''}
-                    </option>
-                  ))}
+                  {availableYears.map(yr => <option key={yr} value={yr}>FY {yr}</option>)}
                 </select>
-                <div className="flex items-center gap-2 mt-1.5 text-[11px] text-slate-500">
-                  <span>Available lines in FY {rolloverSourceYear}: <strong>{rolloverPreview.sourceCapexCount}</strong> CapEx · <strong>{rolloverPreview.sourceOpexCount}</strong> OpEx</span>
-                </div>
               </div>
-
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-slate-700">
-                    Target Fiscal Year (Roll Plan Into)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setRolloverTargetYear(rolloverSourceYear + 1)}
-                    className="text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline"
-                  >
-                    Quick Next FY (+1 Year)
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="2020"
-                    max="2040"
-                    value={rolloverTargetYear}
-                    onChange={(e) => setRolloverTargetYear(parseInt(e.target.value, 10) || (rolloverSourceYear + 1))}
-                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-2xs"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setRolloverTargetYear(prev => prev + 1)}
-                    className="px-3 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold shrink-0 transition-colors shadow-2xs"
-                    title="Increment 1 Year"
-                  >
-                    +1 Y
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-400 mt-1.5">
-                  Destination fiscal year where the cloned budget ledger will be prepared.
-                </p>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Target Fiscal Year</label>
+                <input
+                  type="number"
+                  min="2020"
+                  max="2040"
+                  value={rolloverTargetYear}
+                  onChange={(e) => setRolloverTargetYear(parseInt(e.target.value, 10) || (rolloverSourceYear + 1))}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-indigo-700"
+                />
               </div>
             </div>
 
-            {/* Scope & Adjustment Controls */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-              {/* Checkboxes */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-2">
-                <label className="text-xs font-bold text-slate-700 block">
-                  Components to Roll Over
+                <label className="text-xs font-bold text-slate-700 block">Components</label>
+                <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={rolloverCopyCapex} onChange={(e) => setRolloverCopyCapex(e.target.checked)} className="rounded text-indigo-600" />
+                  <span>CapEx ({rolloverPreview.sourceCapexCount} items)</span>
                 </label>
-                <label className="flex items-center gap-2.5 text-xs font-medium text-slate-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={rolloverCopyCapex}
-                    onChange={(e) => setRolloverCopyCapex(e.target.checked)}
-                    className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
-                  />
-                  <span>CapEx Projects ({rolloverPreview.sourceCapexCount} items)</span>
-                </label>
-                <label className="flex items-center gap-2.5 text-xs font-medium text-slate-700 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={rolloverCopyOpex}
-                    onChange={(e) => setRolloverCopyOpex(e.target.checked)}
-                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
-                  />
-                  <span>OpEx & S-Operation ({rolloverPreview.sourceOpexCount} items)</span>
+                <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={rolloverCopyOpex} onChange={(e) => setRolloverCopyOpex(e.target.checked)} className="rounded text-emerald-600" />
+                  <span>OPEX ({rolloverPreview.sourceOpexCount} items)</span>
                 </label>
               </div>
-
-              {/* Campus Scope */}
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Campus Scope
-                </label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Campus / BU Scope</label>
                 <select
                   value={rolloverCampus}
                   onChange={(e) => setRolloverCampus(e.target.value)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
                 >
-                  <option value="All Sites">All Campuses (K1, K2, KG, Sakal)</option>
-                  {SITES.filter(s => s !== 'All Sites').map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
+                  {ALL_BU_FILTER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
-                <p className="text-[11px] text-slate-400 mt-1">Copy lines for all branches or isolate one campus.</p>
               </div>
-
-              {/* Budget Scaling / Inflation */}
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Budget Scaling / Inflation Factor
-                </label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Escalation Factor</label>
                 <select
                   value={rolloverAdjustmentPercent}
                   onChange={(e) => setRolloverAdjustmentPercent(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold"
                 >
-                  <option value="0">+0% (Exact Identical Planned Budget)</option>
+                  <option value="0">+0% Identical Baseline</option>
                   <option value="3">+3% Annual Escalation</option>
-                  <option value="5">+5% General Inflation / CPI Index</option>
-                  <option value="8">+8% Vendor SLA Rate Increase</option>
-                  <option value="10">+10% Growth & Capacity Buffer</option>
+                  <option value="5">+5% CPI / Inflation</option>
+                  <option value="10">+10% Growth Buffer</option>
                 </select>
-                <p className="text-[11px] text-slate-400 mt-1">Multiplies planned monthly figures and unit prices.</p>
               </div>
             </div>
 
-            {/* Clean Slate & Overwrite Guard */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-emerald-50/70 border border-emerald-200/80 rounded-xl text-xs">
-              <div className="flex items-center gap-2 text-emerald-900">
-                <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
-                <span>
-                  <strong>Clean Execution Slate:</strong> Historical actual disbursements will not carry over; all months in FY {rolloverTargetYear} will start cleanly at <strong>$0.00</strong>.
-                </span>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer text-slate-700 font-semibold shrink-0">
-                <input
-                  type="checkbox"
-                  checked={rolloverOverwrite}
-                  onChange={(e) => setRolloverOverwrite(e.target.checked)}
-                  className="w-4 h-4 text-rose-600 rounded border-slate-300 focus:ring-rose-500"
-                />
-                <span className="text-rose-700 text-[11px]">Overwrite if FY {rolloverTargetYear} already exists</span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-slate-100">
+              <label className="flex items-center gap-2 text-xs font-semibold text-rose-700 cursor-pointer">
+                <input type="checkbox" checked={rolloverOverwrite} onChange={(e) => setRolloverOverwrite(e.target.checked)} className="rounded text-rose-600" />
+                <span>Overwrite if FY {rolloverTargetYear} already has lines</span>
               </label>
-            </div>
-
-            {/* Live Preview & Action Button */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-slate-100">
-              <div className="flex flex-wrap items-center gap-3 sm:gap-5 text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400">Lines to Clone:</span>
-                  <span className="font-bold text-slate-900 font-mono text-sm">{rolloverPreview.totalItems} items</span>
-                </div>
-                <span className="text-slate-200 hidden sm:inline">|</span>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-400">Target Budget:</span>
-                  <span className="font-bold text-indigo-700 font-mono text-sm">
-                    ${rolloverPreview.totalTargetBudget.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <span className="text-slate-200 hidden sm:inline">|</span>
-                <div className="flex items-center gap-1.5 text-slate-500 text-[11px]">
-                  <span>Destination: <strong>FY {rolloverTargetYear}</strong></span>
-                </div>
-              </div>
-
               <Button
                 onClick={handleExecuteRollover}
                 disabled={isRollingOver || rolloverPreview.totalItems === 0 || rolloverSourceYear === rolloverTargetYear}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold py-2.5 px-5 shadow-sm inline-flex items-center gap-2 shrink-0 transition-all hover:shadow disabled:opacity-50"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold py-2.5 px-5"
               >
-                {isRollingOver ? (
-                  <>
-                    <RefreshCw size={14} className="animate-spin" />
-                    <span>Copying Plan into FY {rolloverTargetYear}...</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy size={14} />
-                    <span>Clone & Roll Over to FY {rolloverTargetYear}</span>
-                  </>
-                )}
+                {isRollingOver ? 'Rolling Over...' : `Clone & Roll Over to FY ${rolloverTargetYear}`}
               </Button>
             </div>
           </div>
 
-          {/* Top 2 Cards: Excel Spreadsheet Export & Sync */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                <Download size={20} />
-              </div>
+          {/* Separate 2027 Template Export & Smart Import Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Export Multi-Sheet Financial Workbook</h3>
+                <h3 className="text-sm font-bold text-slate-900">2027 CapEx Template Workbook</h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Download the complete FY {selectedFiscalYear} IT CapEx & S-Operation dataset formatted identically to our Finance template with side-by-side Planned, Actual, and Variance columns.
+                  Exports styled CAPEX sheets (Planning, Actual, or both tabs in the exact template layout) plus Dept. Definition, Asset Types, Business Line &amp; Est. Unit Price.
                 </p>
               </div>
-              <Button
-                onClick={handleExportExcel}
-                className="w-full inline-flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold py-2.5"
-              >
-                <Download size={14} />
-                <span>Download Khema_IT_CapEx_and_S-Operation_FY{selectedFiscalYear}.xlsx</span>
-              </Button>
+              <div className="space-y-2">
+                <Button onClick={() => handleExportCapexExcel('both')} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2.5 rounded-xl">
+                  <Download size={14} className="mr-1.5 inline" /> Export CapEx (Plan &amp; Actual)
+                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleExportCapexExcel('planned')}
+                    className="px-2.5 py-1.5 rounded-xl text-[11px] font-semibold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 cursor-pointer"
+                  >
+                    Planning Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportCapexExcel('actual')}
+                    className="px-2.5 py-1.5 rounded-xl text-[11px] font-semibold bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 cursor-pointer"
+                  >
+                    Actual Only
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                <Upload size={20} />
-              </div>
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-3 flex flex-col justify-between">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Import & Sync External Spreadsheet</h3>
+                <h3 className="text-sm font-bold text-slate-900">2027 OPEX Template Workbook</h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  Upload updated `.xlsx` files with CapEx and OpEx worksheets to synchronize budget and actuals into MySQL.
+                  Exports styled OPEX sheets (Planning, Actual, or both tabs in the exact template layout) plus 17-account COA Summary and COA Details GL Actuals.
                 </p>
               </div>
-              <label className="w-full inline-flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold py-2.5 cursor-pointer">
+              <div className="space-y-2">
+                <Button onClick={() => handleExportOpexExcel('both')} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold py-2.5 rounded-xl">
+                  <Download size={14} className="mr-1.5 inline" /> Export OpEx (Plan &amp; Actual)
+                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleExportOpexExcel('planned')}
+                    className="px-2.5 py-1.5 rounded-xl text-[11px] font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 cursor-pointer"
+                  >
+                    Planning Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportOpexExcel('actual')}
+                    className="px-2.5 py-1.5 rounded-xl text-[11px] font-semibold bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 cursor-pointer"
+                  >
+                    Actual Only
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-3 flex flex-col justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Smart Multi-Sheet Import</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Upload 2027 CapEx, OPEX, or COA Details `.xlsx` files. Automatically skips title headers and normalizes K3/Sakal BUs &amp; COA codes.
+                </p>
+              </div>
+              <label className="w-full inline-flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold py-2.5 cursor-pointer">
                 <Upload size={14} />
-                <span>Choose .xlsx File to Synchronize</span>
+                <span>Choose .xlsx Workbook</span>
                 <input type="file" accept=".xlsx,.xls" onChange={handleImportExcel} className="hidden" />
               </label>
             </div>
           </div>
 
-          {/* Section 2: Master Account Code Configuration (OpEx Chart of Accounts) */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center border border-teal-200/80">
-                  <SlidersHorizontal size={20} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">Master Account Codes Configuration</h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-100 text-teal-800 border border-teal-300">
-                      {effectiveAccountCodes.length} Codes Active
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Standardized chart of accounts for OpEx recurring services, maintenance SLAs, software licenses, and IT leases.
-                  </p>
-                </div>
+          {/* Account Codes Preview & Reset */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <BookOpen size={20} className="text-emerald-600 shrink-0" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Chart of Accounts ({effectiveAccountCodes.length} Active Codes)</h3>
+                <p className="text-xs text-slate-500">All 17 official 2027 OPEX G/L accounts pre-seeded and ready for custom extensions.</p>
               </div>
-              <Button
-                onClick={() => setShowAccountCodesModal(true)}
-                className="bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-semibold py-2 px-4 shadow-sm inline-flex items-center gap-1.5 shrink-0"
-              >
-                <Plus size={14} />
-                <span>Manage / Add Account Codes</span>
-              </Button>
             </div>
-
-            {/* Quick Preview Table of Configured Master Account Codes */}
-            <div className="border border-slate-200/80 rounded-xl overflow-hidden shadow-2xs">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
-                  <tr>
-                    <th className="py-2.5 px-3">Account Code</th>
-                    <th className="py-2.5 px-3">Account Name</th>
-                    <th className="py-2.5 px-3">Category</th>
-                    <th className="py-2.5 px-3">Scope / Description</th>
-                    <th className="py-2.5 px-3 text-center">Status</th>
-                    <th className="py-2.5 px-3 text-center w-20">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {effectiveAccountCodes.map((ac) => (
-                    <tr key={ac.id || ac.code} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="py-2 px-3 font-mono font-bold text-slate-900">
-                        {ac.code}
-                      </td>
-                      <td className="py-2 px-3 font-semibold text-slate-800">
-                        {ac.name}
-                      </td>
-                      <td className="py-2 px-3">
-                        <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
-                          {ac.category || 'OpEx'}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 text-slate-500 text-[11px] max-w-xs truncate">
-                        {ac.description || 'Standard outside services and IT maintenance SLA'}
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        {ac.is_active === 0 || ac.is_active === false ? (
-                          <span className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">Inactive</span>
-                        ) : (
-                          <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">Active</span>
-                        )}
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <button
-                          onClick={() => setShowAccountCodesModal(true)}
-                          className="p-1 text-slate-400 hover:text-teal-700 hover:bg-teal-50 rounded-md transition-colors"
-                          title="Edit in Master CRUD Modal"
-                        >
-                          <Edit2 size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Button onClick={() => setShowAccountCodesModal(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shrink-0">
+              Manage Account Codes
+            </Button>
           </div>
 
-          {/* Section 3: Reset & Restore Standard Baseline Template */}
-          <div className="bg-gradient-to-r from-rose-50/50 via-white to-amber-50/30 rounded-2xl border-2 border-rose-200/80 p-6 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center shrink-0 border border-rose-200">
-                  <RotateCcw size={20} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900">Reset & Restore Standard Template</h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
-                      FY {selectedFiscalYear} Baseline
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
-                    Reset all CapEx and OpEx/S-Operation line items for <strong>FY {selectedFiscalYear}</strong> back to the official Khema Global baseline template. This will restore default core contracts (eHospital, Anzer, Vcloudia, Cyfuture, D365, RadiAnt View, Bluehost/GoDaddy, iDrive, printer rentals) and standard planned hardware acquisitions.
-                  </p>
-                </div>
+          <div className="bg-rose-50/40 rounded-2xl border border-rose-200 p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <RotateCcw size={20} className="text-rose-600 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Reset FY {selectedFiscalYear} Baseline Template</h3>
+                <p className="text-xs text-slate-600">Restore default CapEx &amp; OPEX baseline contracts for FY {selectedFiscalYear}.</p>
               </div>
-              <Button
-                onClick={handleRestoreDefaults}
-                className="bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold py-2.5 px-4 shadow-sm inline-flex items-center gap-2 shrink-0 transition-all hover:shadow"
-              >
-                <RotateCcw size={14} />
-                <span>Reset FY {selectedFiscalYear} Template</span>
-              </Button>
             </div>
+            <Button onClick={handleRestoreDefaults} className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shrink-0">
+              Reset FY {selectedFiscalYear} Template
+            </Button>
           </div>
         </div>
       )}
 
-      {/* --- MODAL: CLONE / PLAN NEW FISCAL YEAR --- */}
+      {/* --- MODALS --- */}
       {showCloneYearModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xl max-w-md w-full space-y-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xl max-w-md w-full space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Calendar size={18} className="text-indigo-600" />
-                Plan / Roll Over Fiscal Year
-              </h3>
-              <button onClick={() => setShowCloneYearModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={16} />
-              </button>
+              <h3 className="text-base font-bold text-slate-900">Plan / Roll Over Fiscal Year</h3>
+              <button type="button" onClick={() => setShowCloneYearModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer"><X size={16} /></button>
             </div>
-
-            <p className="text-xs text-slate-500">
-              Clone your planned budget items from <strong>FY {selectedFiscalYear}</strong> into a new fiscal year. Actual expenses will be reset to 0 so you start with a clean execution slate.
-            </p>
-
-            <div className="space-y-3">
+            <div className="space-y-3 text-xs">
               <div>
-                <label className="text-xs font-semibold text-slate-700">Source Fiscal Year</label>
-                <input
-                  type="text"
-                  disabled
-                  value={`FY ${selectedFiscalYear}`}
-                  className="w-full mt-1 px-3 py-2 text-xs bg-slate-100 border border-slate-200 rounded-xl text-slate-500 font-semibold"
-                />
+                <label className="font-semibold text-slate-700">Source Year</label>
+                <input type="text" disabled value={`FY ${selectedFiscalYear}`} className="w-full mt-1 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl font-semibold" />
               </div>
-
               <div>
-                <label className="text-xs font-semibold text-slate-700">New Target Fiscal Year</label>
+                <label className="font-semibold text-slate-700">Target Fiscal Year</label>
                 <input
                   type="number"
                   min="2020"
                   max="2040"
                   value={cloneTargetYear}
                   onChange={(e) => setCloneTargetYear(parseInt(e.target.value, 10) || 2028)}
-                  className="w-full mt-1 px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
                 />
               </div>
-
-              <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer pt-1">
-                <input
-                  type="checkbox"
-                  checked={cloneOverwrite}
-                  onChange={(e) => setCloneOverwrite(e.target.checked)}
-                  className="rounded border-slate-300 text-indigo-600"
-                />
-                <span>Overwrite records if FY {cloneTargetYear} already exists</span>
+              <label className="flex items-center gap-2 text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={cloneOverwrite} onChange={(e) => setCloneOverwrite(e.target.checked)} className="rounded text-indigo-600" />
+                <span>Overwrite if FY {cloneTargetYear} already exists</span>
               </label>
             </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-              <Button variant="outline" onClick={() => setShowCloneYearModal(false)} className="text-xs">
-                Cancel
-              </Button>
-              <Button onClick={handleCloneYear} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold">
-                Clone into FY {cloneTargetYear}
-              </Button>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button variant="outline" onClick={() => setShowCloneYearModal(false)}>Cancel</Button>
+              <Button onClick={handleCloneYear} className="bg-indigo-600 hover:bg-indigo-700 text-white">Clone to FY {cloneTargetYear}</Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* --- MODAL: CAPEX ITEM ADD / EDIT --- */}
       {showCapexModal && (
         <CapexEditModal
           fiscalYear={selectedFiscalYear}
           item={editingCapexItem}
-          sites={SITES.filter(s => s !== 'All Sites')}
-          assetCategories={assetCategories}
-          onClose={() => setShowCapexModal(false)}
+          unitPriceCatalog={unitPriceCatalog}
+          preselectedBenchmark={preselectedBenchmark}
+          onClose={() => {
+            setShowCapexModal(false);
+            setPreselectedBenchmark(null);
+          }}
           onSaved={() => {
             setShowCapexModal(false);
+            setPreselectedBenchmark(null);
             loadAll();
-            showToast('CapEx item saved successfully');
+            showToast('CapEx line saved successfully');
           }}
         />
       )}
 
-      {/* --- MODAL: OPEX ITEM ADD / EDIT --- */}
       {showOpexModal && (
         <OpexEditModal
           fiscalYear={selectedFiscalYear}
           item={editingOpexItem}
-          sites={SITES.filter(s => s !== 'All Sites')}
           accountCodes={effectiveAccountCodes}
           onManageAccountCodes={() => setShowAccountCodesModal(true)}
           onClose={() => setShowOpexModal(false)}
           onSaved={() => {
             setShowOpexModal(false);
             loadAll();
-            showToast('OpEx item saved successfully');
+            showToast('OPEX line saved successfully');
           }}
         />
       )}
 
-      {/* --- MODAL: CONFIGURE MASTER ACCOUNT CODES --- */}
       {showAccountCodesModal && (
         <AccountCodesMasterModal
           accountCodes={effectiveAccountCodes}
           onClose={() => setShowAccountCodesModal(false)}
           onRefresh={() => {
             fetchAccountCodes();
-            fetchOpex(selectedFiscalYear, selectedSite, opexAccountFilter, searchQuery);
+            fetchOpex();
           }}
           showToast={showToast}
         />
       )}
 
-      {/* --- IN-APP DELETE / RESET CONFIRMATION MODAL --- */}
       {deleteConfirmItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-100 dark:border-rose-900">
-                <AlertTriangle size={24} />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100">
+                <AlertTriangle size={20} />
               </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                  {deleteConfirmItem.type === 'restore-defaults' ? 'Reset to Standard Template?' : `Delete ${deleteConfirmItem.type.toUpperCase()} Item?`}
+              <div className="text-xs">
+                <h3 className="text-sm font-bold text-slate-900">
+                  {deleteConfirmItem.type === 'restore-defaults' ? 'Reset to Baseline Template?' : `Delete ${deleteConfirmItem.type.toUpperCase()} Item?`}
                 </h3>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  {deleteConfirmItem.type === 'restore-defaults' 
-                    ? `Are you sure you want to reset all CapEx and S-Operation items for FY ${selectedFiscalYear} to the standard Khema Global template? Existing customizations will be overwritten.`
-                    : `Are you sure you want to delete this ${deleteConfirmItem.type === 'capex' ? 'CapEx' : 'OpEx & S-Operation'} line item? Budget summary actuals and planned totals will be automatically recalculated.`
-                  }
+                <p className="text-slate-600 mt-1">
+                  {deleteConfirmItem.type === 'restore-defaults'
+                    ? `Reset all CapEx and OPEX items for FY ${selectedFiscalYear} to the baseline template?`
+                    : `Confirm deletion of "${deleteConfirmItem.name}"?`}
                 </p>
-                <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs">
-                  <span className="font-semibold text-slate-800 dark:text-slate-200 block truncate">
-                    {deleteConfirmItem.name}
-                  </span>
-                  <span className="text-[11px] text-slate-400 block mt-0.5">
-                    Fiscal Year: FY {selectedFiscalYear}
-                  </span>
-                </div>
               </div>
             </div>
-
-            <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmItem(null)}
-                disabled={isDeleting}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDelete}
-                disabled={isDeleting}
-                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm shadow-rose-600/20 disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {isDeleting ? (
-                  <>
-                    <RefreshCw size={13} className="animate-spin" />
-                    <span>Processing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 size={13} />
-                    <span>{deleteConfirmItem.type === 'restore-defaults' ? 'Reset Template' : 'Confirm Delete'}</span>
-                  </>
-                )}
-              </button>
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+              <Button variant="outline" onClick={() => setDeleteConfirmItem(null)} disabled={isDeleting}>Cancel</Button>
+              <Button onClick={handleConfirmDelete} disabled={isDeleting} className="bg-rose-600 hover:bg-rose-700 text-white">
+                {isDeleting ? 'Processing...' : deleteConfirmItem.type === 'restore-defaults' ? 'Reset Template' : 'Confirm Delete'}
+              </Button>
             </div>
           </div>
         </div>
       )}
-    </div>
-  );
-};
 
-// --- SUB-COMPONENT: CAPEX EDIT MODAL ---
-interface CapexModalProps {
-  fiscalYear: number;
-  item: CapExItem | null;
-  sites: string[];
-  assetCategories?: string[];
-  onClose: () => void;
-  onSaved: () => void;
-}
-
-const CapexEditModal: React.FC<CapexModalProps> = ({ fiscalYear, item, sites, assetCategories = [], onClose, onSaved }) => {
-  const availableAssetTypes = useMemo(() => {
-    const list: string[] = [];
-    const seen = new Set<string>();
-    const addType = (t: string) => {
-      const trimmed = (t || '').trim();
-      if (trimmed && !seen.has(trimmed.toLowerCase())) {
-        seen.add(trimmed.toLowerCase());
-        list.push(trimmed);
-      }
-    };
-    if (assetCategories && assetCategories.length > 0) {
-      assetCategories.forEach(addType);
-    }
-    if (item?.asset_type) {
-      addType(item.asset_type);
-    }
-    DEFAULT_ASSET_TYPES.forEach(addType);
-    return list;
-  }, [assetCategories, item]);
-
-  const [description, setDescription] = useState(item?.description || '');
-  const [assetType, setAssetType] = useState(
-    item?.asset_type || (assetCategories.length > 0 ? assetCategories[0] : (DEFAULT_ASSET_TYPES[0] || 'Computer'))
-  );
-  const [site, setSite] = useState(item?.site || 'K1');
-  const [pic, setPic] = useState(item?.pic || 'Braseth');
-  const [costCenter, setCostCenter] = useState(item?.cost_center || 'IT');
-  const [projectOwner, setProjectOwner] = useState(item?.project_owner || 'Braseth');
-  const [department, setDepartment] = useState(item?.department || 'IT Department');
-  const [qty, setQty] = useState(item?.qty || 1);
-  const [unitPrice, setUnitPrice] = useState(item?.unit_price || 0);
-  const [startDate, setStartDate] = useState(item?.start_date ? item.start_date.slice(0, 10) : '');
-  const [completeDate, setCompleteDate] = useState(item?.complete_date ? item.complete_date.slice(0, 10) : '');
-  const [status, setStatus] = useState<any>(item?.status || 'Planned');
-  const [justification, setJustification] = useState(item?.justification || '');
-  const [capexCode, setCapexCode] = useState(item?.capex_code || `Capex#${fiscalYear}-${Math.floor(Math.random() * 900) + 100}`);
-  const [saving, setSaving] = useState(false);
-
-  const requestedAmount = qty * unitPrice;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!description.trim()) return;
-
-    setSaving(true);
-    try {
-      const url = item ? `/api/it-budget/capex/${item.id}` : '/api/it-budget/capex';
-      const method = item ? 'PUT' : 'POST';
-      const token = localStorage.getItem('token');
-
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          fiscal_year: fiscalYear,
-          description: description.trim(),
-          asset_type: assetType,
-          site,
-          pic,
-          cost_center: costCenter,
-          project_owner: projectOwner,
-          department,
-          qty: Number(qty),
-          unit_price: Number(unitPrice),
-          requested_amount: requestedAmount,
-          start_date: startDate || null,
-          complete_date: completeDate || null,
-          status,
-          justification: justification.trim(),
-          capex_code: capexCode
-        })
-      });
-
-      if (res.ok) {
-        onSaved();
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to save CapEx item');
-      }
-    } catch (e: any) {
-      alert('Error saving: ' + e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xl max-w-xl w-full max-h-[90vh] overflow-y-auto space-y-4 animate-in fade-in duration-200">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <Layers size={18} className="text-indigo-600" />
-            <span>{item ? 'Edit CapEx Item' : 'Add New CapEx Item'} (FY {fiscalYear})</span>
-          </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={16} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          <div>
-            <label className="font-semibold text-slate-700">Item Description *</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. Dell AIO Computer, Patient Card Printer"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="flex items-center justify-between">
-                <label className="font-semibold text-slate-700">Asset Type</label>
-                {assetCategories.length > 0 && (
-                  <span className="text-[10px] text-indigo-600 font-semibold flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
-                    Synced ({assetCategories.length})
-                  </span>
-                )}
-              </div>
-              <select
-                value={assetType}
-                onChange={(e) => setAssetType(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800 font-medium"
-              >
-                {availableAssetTypes.map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700">Khema Campus</label>
-              <select
-                value={site}
-                onChange={(e) => setSite(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-              >
-                {sites.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="font-semibold text-slate-700">Quantity</label>
-              <input
-                type="number"
-                min="1"
-                value={qty}
-                onChange={(e) => setQty(parseInt(e.target.value, 10) || 1)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none text-right font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700">Unit Price ($)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(parseFloat(e.target.value) || 0)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none text-right font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700">Requested Amount ($)</label>
-              <input
-                type="text"
-                disabled
-                value={`$${requestedAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                className="w-full mt-1 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-right font-mono font-bold text-indigo-700"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="font-semibold text-slate-700">Status</label>
-              <select
-                value={status}
-                onChange={(e) => setStatus(e.target.value as any)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-              >
-                {CAPEX_STATUSES.map(st => (
-                  <option key={st} value={st}>{st}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700">Start Date</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700">Complete Date</label>
-              <input
-                type="date"
-                value={completeDate}
-                onChange={(e) => setCompleteDate(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="font-semibold text-slate-700">Person In Charge (PIC)</label>
-              <input
-                type="text"
-                value={pic}
-                onChange={(e) => setPic(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-              />
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700">Cost Center</label>
-              <input
-                type="text"
-                value={costCenter}
-                onChange={(e) => setCostCenter(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="font-semibold text-slate-700">Business Justification</label>
-            <textarea
-              rows={2}
-              placeholder="e.g. High-durability patient identification and smart hospital card printing..."
-              value={justification}
-              onChange={(e) => setJustification(e.target.value)}
-              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-            <Button variant="outline" type="button" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">
-              {saving ? 'Saving...' : item ? 'Update Item' : 'Create Item'}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-// --- SUB-COMPONENT: MASTER CRUD CONFIGURE ACCOUNT CODES MODAL ---
-interface AccountCodesMasterModalProps {
-  accountCodes: OpexAccountCode[];
-  onClose: () => void;
-  onRefresh: () => void;
-  showToast: (text: string, type?: 'success' | 'error' | 'info') => void;
-}
-
-const AccountCodesMasterModal: React.FC<AccountCodesMasterModalProps> = ({
-  accountCodes,
-  onClose,
-  onRefresh,
-  showToast
-}) => {
-  const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [category, setCategory] = useState('OpEx');
-  const [editingItem, setEditingItem] = useState<OpexAccountCode | null>(null);
-  const [editCode, setEditCode] = useState('');
-  const [editName, setEditName] = useState('');
-  const [editDescription, setEditDescription] = useState('');
-  const [editCategory, setEditCategory] = useState('OpEx');
-  const [editIsActive, setEditIsActive] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [search, setSearch] = useState('');
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
-  const filteredCodes = useMemo(() => {
-    if (!search.trim()) return accountCodes;
-    const q = search.toLowerCase();
-    return accountCodes.filter(c => 
-      c.code.toLowerCase().includes(q) || 
-      c.name.toLowerCase().includes(q) || 
-      (c.description && c.description.toLowerCase().includes(q))
-    );
-  }, [accountCodes, search]);
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!code.trim() || !name.trim()) return;
-    setSaving(true);
-    try {
-      const res = await fetch('/api/it-budget/account-codes', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          code: code.trim(),
-          name: name.trim(),
-          description: description.trim(),
-          category,
-          sort_order: accountCodes.length + 1,
-          is_active: 1
-        })
-      });
-      if (res.ok) {
-        setCode('');
-        setName('');
-        setDescription('');
-        showToast('Account code created successfully');
-        onRefresh();
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to create account code');
-      }
-    } catch (err: any) {
-      alert('Error creating account code: ' + err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const startEdit = (item: OpexAccountCode) => {
-    setEditingItem(item);
-    setEditCode(item.code);
-    setEditName(item.name);
-    setEditDescription(item.description || '');
-    setEditCategory(item.category || 'OpEx');
-    setEditIsActive(item.is_active !== false && item.is_active !== 0);
-  };
-
-  const handleUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingItem || !editCode.trim() || !editName.trim()) return;
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/it-budget/account-codes/${editingItem.id}`, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          code: editCode.trim(),
-          name: editName.trim(),
-          description: editDescription.trim(),
-          category: editCategory,
-          is_active: editIsActive ? 1 : 0
-        })
-      });
-      if (res.ok) {
-        setEditingItem(null);
-        showToast('Account code updated successfully');
-        onRefresh();
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to update account code');
-      }
-    } catch (err: any) {
-      alert('Error updating account code: ' + err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (id: string, codeName: string) => {
-    if (!id) {
-      alert('Default static code cannot be deleted directly');
-      return;
-    }
-    if (!window.confirm(`Are you sure you want to delete master account code "${codeName}"?`)) return;
-    setDeletingId(id);
-    try {
-      const res = await fetch(`/api/it-budget/account-codes/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      if (res.ok) {
-        showToast(`Account code "${codeName}" deleted`);
-        onRefresh();
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to delete account code');
-      }
-    } catch (err: any) {
-      alert('Error deleting: ' + err.message);
-    } finally {
-      setDeletingId(null);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in duration-200">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4 bg-slate-50/50">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-emerald-100/70 text-emerald-800 border border-emerald-200">
-              <SlidersHorizontal size={20} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-900">Configure Master Account Codes</h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
-                  {accountCodes.length} Codes
-                </span>
-              </div>
-              <p className="text-xs text-slate-500">
-                Manage chart of accounts for IT operational expenses, SLA contracts, and recurring services
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100">
-            <X size={18} />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div className="p-6 space-y-5 overflow-y-auto flex-1">
-          {/* Quick Create Form */}
-          <div className="bg-gradient-to-br from-emerald-50/60 to-slate-50 p-4 rounded-2xl border border-emerald-200/80 shadow-xs">
-            <div className="text-xs font-bold text-emerald-950 mb-3 flex items-center gap-1.5">
-              <Plus size={14} className="text-emerald-600 stroke-[3]" />
-              <span>Add New Account Code</span>
-            </div>
-            <form onSubmit={handleCreate} className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-700">Account Code *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. 630108 - Cybersecurity SLA"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    className="w-full mt-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-700">Account Name *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Cybersecurity SLA"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    className="w-full mt-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="text-[11px] font-semibold text-slate-700">Description / Scope</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Penetration testing, SOC services, endpoint defense licenses"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="w-full mt-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-slate-700">Category</label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    className="w-full mt-1 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="OpEx">OpEx Outside Services</option>
-                    <option value="Cloud/SaaS">Cloud & Software</option>
-                    <option value="Infrastructure">Infrastructure Maintenance</option>
-                    <option value="Telecom">Telecom & Data</option>
-                  </select>
-                </div>
-              </div>
-              <div className="flex justify-end pt-1">
-                <Button type="submit" disabled={saving || !code.trim() || !name.trim()} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-1.5 rounded-xl shadow-xs">
-                  {saving ? 'Adding...' : 'Save Account Code'}
-                </Button>
-              </div>
-            </form>
-          </div>
-
-          {/* List & Search */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <span className="text-xs font-bold text-slate-800">Existing Master Codes ({filteredCodes.length})</span>
-              <div className="relative w-64">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Filter codes..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-1 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 shadow-2xs">
-              {filteredCodes.map((item) => {
-                const isEditing = editingItem?.id === item.id;
-                return (
-                  <div key={item.id || item.code} className="p-3 bg-white hover:bg-slate-50/70 transition-colors">
-                    {isEditing ? (
-                      <form onSubmit={handleUpdate} className="space-y-2.5 bg-amber-50/60 p-3 rounded-xl border border-amber-200">
-                        <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
-                          <Edit2 size={13} />
-                          <span>Edit Account Code: {item.code}</span>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-700">Code *</label>
-                            <input
-                              type="text"
-                              required
-                              value={editCode}
-                              onChange={(e) => setEditCode(e.target.value)}
-                              className="w-full mt-0.5 px-2.5 py-1 text-xs bg-white border border-slate-300 rounded-lg font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-700">Name *</label>
-                            <input
-                              type="text"
-                              required
-                              value={editName}
-                              onChange={(e) => setEditName(e.target.value)}
-                              className="w-full mt-0.5 px-2.5 py-1 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                          <div className="sm:col-span-2">
-                            <label className="text-[10px] font-bold text-slate-700">Description</label>
-                            <input
-                              type="text"
-                              value={editDescription}
-                              onChange={(e) => setEditDescription(e.target.value)}
-                              className="w-full mt-0.5 px-2.5 py-1 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] font-bold text-slate-700">Category</label>
-                            <select
-                              value={editCategory}
-                              onChange={(e) => setEditCategory(e.target.value)}
-                              className="w-full mt-0.5 px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg focus:outline"
-                            >
-                              <option value="OpEx">OpEx Outside Services</option>
-                              <option value="Cloud/SaaS">Cloud & Software</option>
-                              <option value="Infrastructure">Infrastructure Maintenance</option>
-                              <option value="Telecom">Telecom & Data</option>
-                            </select>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between pt-1">
-                          <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={editIsActive}
-                              onChange={(e) => setEditIsActive(e.target.checked)}
-                              className="rounded text-emerald-600 focus:ring-emerald-500"
-                            />
-                            <span className="text-[11px] font-medium">Active Code</span>
-                          </label>
-                          <div className="flex items-center gap-1.5">
-                            <Button type="button" variant="outline" onClick={() => setEditingItem(null)} className="text-xs py-1 px-2.5">
-                              Cancel
-                            </Button>
-                            <Button type="submit" disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs py-1 px-3">
-                              {saving ? 'Saving...' : 'Update'}
-                            </Button>
-                          </div>
-                        </div>
-                      </form>
-                    ) : (
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono font-bold text-slate-900 text-xs bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                              {item.code}
-                            </span>
-                            <span className="text-xs font-bold text-slate-800">{item.name}</span>
-                            <span className="text-[10px] font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.2 rounded-full">
-                              {item.category || 'OpEx'}
-                            </span>
-                            {item.is_active === 0 || item.is_active === false ? (
-                              <span className="text-[9px] font-semibold text-rose-600 bg-rose-50 px-1.5 rounded">Inactive</span>
-                            ) : (
-                              <span className="text-[9px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 rounded">Active</span>
-                            )}
-                          </div>
-                          {item.description && (
-                            <p className="text-[11px] text-slate-500 leading-normal pl-0.5">
-                              {item.description}
-                            </p>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0 pt-0.5">
-                          <button
-                            onClick={() => startEdit(item)}
-                            className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-md transition-colors"
-                            title="Edit Account Code"
-                          >
-                            <Edit2 size={13} />
-                          </button>
-                          {item.id && (
-                            <button
-                              onClick={() => handleDelete(item.id!, item.code)}
-                              disabled={deletingId === item.id}
-                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
-                              title="Delete Account Code"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="border-t border-slate-100 px-6 py-3 bg-slate-50/50 flex justify-end">
-          <Button variant="outline" onClick={onClose} className="text-xs font-semibold px-4 py-1.5">
-            Close
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// --- SUB-COMPONENT: OPEX EDIT MODAL ---
-interface OpexModalProps {
-  fiscalYear: number;
-  item: OpExItem | null;
-  sites: string[];
-  accountCodes?: OpexAccountCode[];
-  onManageAccountCodes?: () => void;
-  onClose: () => void;
-  onSaved: () => void;
-}
-
-const OpexEditModal: React.FC<OpexModalProps> = ({ 
-  fiscalYear, 
-  item, 
-  sites, 
-  accountCodes = [], 
-  onManageAccountCodes = () => {}, 
-  onClose, 
-  onSaved 
-}) => {
-  const [description, setDescription] = useState(item?.description || '');
-  const [accountCode, setAccountCode] = useState(item?.account_code || '630104 - Other Outside Services');
-  const [site, setSite] = useState(item?.site || 'K1');
-  const [pic, setPic] = useState(item?.pic || 'Braseth');
-  const [costCenter, setCostCenter] = useState(item?.cost_center || 'IT');
-  const [billingCycle, setBillingCycle] = useState<any>(item?.billing_cycle || 'Annual');
-  const [renewalDate, setRenewalDate] = useState(item?.renewal_date ? item.renewal_date.slice(0, 10) : '');
-  const [qty, setQty] = useState(item?.qty || 1);
-  const [unitPrice, setUnitPrice] = useState(item?.unit_price || 0);
-  const [justification, setJustification] = useState(item?.justification || '');
-  const [budgetClassification, setBudgetClassification] = useState<'Planned' | 'Unplanned'>(
-    (item?.budget_classification as any) || 'Planned'
-  );
-  const [unplannedReason, setUnplannedReason] = useState(item?.unplanned_reason || '');
-  const [approvalRef, setApprovalRef] = useState(item?.approval_ref || '');
-  const [autoSmartSpread, setAutoSmartSpread] = useState(true);
-  const [saving, setSaving] = useState(false);
-
-  // Pure helper to compute 12-month Smart Spread in real time
-  const computeSmartSpread = (cycle: string, renDate: string, price: number, q: number) => {
-    const total = Number(price || 0) * Number(q || 1);
-    const spending: Record<string, { planned: number; actual: number }> = {};
-    MONTH_KEYS.forEach(m => {
-      spending[m] = { planned: 0, actual: 0 };
-    });
-
-    if (cycle === 'Monthly') {
-      const monthlyAmt = Number(price || 0) * Number(q || 1);
-      MONTH_KEYS.forEach(m => {
-        spending[m] = { planned: monthlyAmt, actual: 0 };
-      });
-    } else if (cycle === 'Quarterly') {
-      const qAmt = total / 4;
-      spending.mar = { planned: qAmt, actual: 0 };
-      spending.jun = { planned: qAmt, actual: 0 };
-      spending.sep = { planned: qAmt, actual: 0 };
-      spending.dec = { planned: qAmt, actual: 0 };
-    } else {
-      // Annual - Allocate full amount to renewal month (safely parsed from YYYY-MM-DD)
-      let targetIdx = 0; // Default Jan
-      if (renDate) {
-        const parts = renDate.slice(0, 10).split('-');
-        if (parts.length >= 2) {
-          const m = parseInt(parts[1], 10);
-          if (!isNaN(m) && m >= 1 && m <= 12) targetIdx = m - 1;
-        }
-      }
-      const mKey = MONTH_KEYS[targetIdx] || 'jan';
-      spending[mKey] = { planned: total, actual: 0 };
-    }
-    return spending;
-  };
-
-  const [monthlySpending, setMonthlySpending] = useState<Record<string, { planned: number; actual: number }>>(() => {
-    if (item?.monthly_spending && typeof item.monthly_spending === 'object' && Object.keys(item.monthly_spending).length > 0) {
-      return item.monthly_spending;
-    }
-    return computeSmartSpread(
-      item?.billing_cycle || 'Annual',
-      item?.renewal_date ? item.renewal_date.slice(0, 10) : '',
-      item?.unit_price || 0,
-      item?.qty || 1
-    );
-  });
-
-  // Automatically recalculate spread when core parameters change and autoSmartSpread is enabled
-  useEffect(() => {
-    if (autoSmartSpread) {
-      const newSpread = computeSmartSpread(billingCycle, renewalDate, unitPrice, qty);
-      setMonthlySpending(newSpread);
-    }
-  }, [billingCycle, renewalDate, unitPrice, qty, autoSmartSpread]);
-
-  const handleToggleSmartSpread = (checked: boolean) => {
-    setAutoSmartSpread(checked);
-    if (checked) {
-      const freshSpread = computeSmartSpread(billingCycle, renewalDate, unitPrice, qty);
-      setMonthlySpending(freshSpread);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!description.trim()) return;
-
-    setSaving(true);
-    try {
-      const url = item ? `/api/it-budget/opex/${item.id}` : '/api/it-budget/opex';
-      const method = item ? 'PUT' : 'POST';
-      const token = localStorage.getItem('token');
-
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          fiscal_year: fiscalYear,
-          description: description.trim(),
-          account_code: accountCode,
-          account_name: accountCode.includes('-') ? accountCode.split('-')[1].trim() : 'Outside Services',
-          site,
-          pic,
-          cost_center: costCenter,
-          billing_cycle: billingCycle,
-          renewal_date: renewalDate || null,
-          qty: Number(qty),
-          unit_price: Number(unitPrice),
-          justification: justification.trim(),
-          budget_classification: budgetClassification,
-          unplanned_reason: budgetClassification === 'Unplanned' ? unplannedReason.trim() : '',
-          approval_ref: budgetClassification === 'Unplanned' ? approvalRef.trim() : '',
-          autoSmartSpread,
-          monthly_spending: monthlySpending
-        })
-      });
-
-      if (res.ok) {
-        onSaved();
-      } else {
-        const err = await res.json();
-        alert(err.error || 'Failed to save OpEx item');
-      }
-    } catch (e: any) {
-      alert('Error saving: ' + e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xl max-w-xl w-full max-h-[90vh] overflow-y-auto space-y-4 animate-in fade-in duration-200">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <TrendingUp size={18} className="text-emerald-600" />
-            <span>{item ? 'Edit OpEx Service' : 'Add New OpEx Service'} (FY {fiscalYear})</span>
-          </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={16} />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {/* FOCUSED ELEMENT (form > div:nth-of-type(1)): Budget Classification & Expense Governance Card */}
-          <div className={`p-4 rounded-2xl border transition-all duration-200 space-y-3 ${
-            budgetClassification === 'Unplanned'
-              ? 'bg-gradient-to-br from-amber-50/80 via-white to-rose-50/40 border-amber-300 shadow-sm ring-2 ring-amber-400/20'
-              : 'bg-gradient-to-br from-slate-50/90 via-white to-emerald-50/30 border-slate-200 shadow-xs'
-          }`}>
-            {/* Header: Classification Mode Selector */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-200/70">
-              <div>
-                <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
-                  Budget Governance & Expense Control
-                </span>
-                <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5 mt-0.5">
-                  Classification:
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                    budgetClassification === 'Unplanned'
-                      ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                  }`}>
-                    {budgetClassification === 'Unplanned' ? '⚡ Out-of-Budget / Unplanned' : '✓ Planned Baseline'}
-                  </span>
-                </span>
-              </div>
-
-              {/* Segmented Control Buttons */}
-              <div className="inline-flex items-center p-1 bg-slate-100/90 rounded-xl border border-slate-200/90 gap-1 self-start sm:self-auto">
-                <button
-                  type="button"
-                  onClick={() => setBudgetClassification('Planned')}
-                  className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 ${
-                    budgetClassification === 'Planned'
-                      ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-slate-200/80'
-                      : 'text-slate-500 hover:text-slate-800'
-                  }`}
-                >
-                  <span className={`w-2 h-2 rounded-full ${budgetClassification === 'Planned' ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                  Planned Budget
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setBudgetClassification('Unplanned')}
-                  className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-all flex items-center gap-1.5 ${
-                    budgetClassification === 'Unplanned'
-                      ? 'bg-amber-500 text-white shadow-sm ring-1 ring-amber-400'
-                      : 'text-amber-800 hover:text-amber-900 bg-amber-50/80 hover:bg-amber-100/80 border border-amber-200/60'
-                  }`}
-                >
-                  <AlertTriangle size={12} className={budgetClassification === 'Unplanned' ? 'text-white' : 'text-amber-600'} />
-                  Out-of-Budget
-                </button>
-              </div>
-            </div>
-
-            {/* Unplanned Expense Control Callout & Required Audit Metadata */}
-            {budgetClassification === 'Unplanned' && (
-              <div className="p-3 bg-amber-500/10 border border-amber-200 rounded-xl space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-200">
-                <div className="flex items-start gap-2">
-                  <AlertCircle size={15} className="text-amber-700 shrink-0 mt-0.5" />
-                  <div className="text-[11px] leading-relaxed text-amber-900">
-                    <span className="font-bold">Unbudgeted Expenditure Control:</span> This service is outside the baseline budget. Register the root cause and approval reference for executive sign-off audit.
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1 border-t border-amber-200/60">
-                  <div>
-                    <label className="font-bold text-[11px] text-amber-950 block mb-1">
-                      Unplanned Root Cause *
-                    </label>
-                    <select
-                      value={unplannedReason}
-                      onChange={(e) => setUnplannedReason(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                    >
-                      <option value="">Select Root Cause Category...</option>
-                      <option value="Critical Outage / Emergency Recovery">Critical Outage / Emergency Recovery</option>
-                      <option value="Unforeseen Vendor SLA / Renewal Hike">Unforeseen Vendor SLA / Renewal Hike</option>
-                      <option value="Regulatory / Clinical Compliance Mandate">Regulatory / Clinical Compliance Mandate</option>
-                      <option value="Hardware Failure Replacement">Hardware Failure Replacement</option>
-                      <option value="New Urgent Clinical Service Request">New Urgent Clinical Service Request</option>
-                      <option value="Other Unbudgeted Operational Need">Other Unbudgeted Operational Need</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="font-bold text-[11px] text-amber-950 block mb-1">
-                      Approval Ref / Exception Code
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. EXC-2026-084 / CIO Signoff"
-                      value={approvalRef}
-                      onChange={(e) => setApprovalRef(e.target.value)}
-                      className="w-full px-2.5 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Service Description Input */}
-            <div>
-              <label className="font-semibold text-slate-700 block mb-1">
-                Service Description *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. eHospital Annual Maintenance Fee, Emergency DR Node Backup"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 font-medium text-slate-900 shadow-2xs"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="font-semibold text-slate-700">Account Code</label>
-                <button
-                  type="button"
-                  onClick={onManageAccountCodes}
-                  className="text-[11px] font-bold text-emerald-600 hover:text-emerald-800 flex items-center gap-1 hover:underline transition-colors"
-                  title="Configure Master Account Codes"
-                >
-                  <SlidersHorizontal size={11} />
-                  <span>Configure Codes</span>
-                </button>
-              </div>
-              <select
-                value={accountCode}
-                onChange={(e) => {
-                  if (e.target.value === '__MANAGE__') {
-                    onManageAccountCodes();
-                  } else {
-                    setAccountCode(e.target.value);
-                  }
-                }}
-                className="w-full px-3 py-2 bg-slate-50 border-2 border-slate-200/90 rounded-xl focus:bg-white focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 font-semibold text-xs text-slate-900 shadow-xs hover:border-emerald-400 transition-all cursor-pointer"
-              >
-                {accountCodes.map(a => (
-                  <option key={a.id || a.code} value={a.code} className="text-slate-900 font-medium py-1">
-                    {a.code}
-                  </option>
-                ))}
-                <option value="__MANAGE__" className="text-emerald-700 font-bold bg-emerald-50 py-1">
-                  ⚙️ + Manage / Configure Account Codes...
-                </option>
-              </select>
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700">Campus / Site</label>
-              <select
-                value={site}
-                onChange={(e) => setSite(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-              >
-                <option value="All Sites">All Sites</option>
-                {sites.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="font-semibold text-slate-700">Billing Cycle</label>
-              <select
-                value={billingCycle}
-                onChange={(e) => setBillingCycle(e.target.value as any)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-              >
-                <option value="Monthly">Monthly</option>
-                <option value="Annual">Annual</option>
-                <option value="Quarterly">Quarterly</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700">Unit Price ($)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={unitPrice}
-                onChange={(e) => setUnitPrice(parseFloat(e.target.value) || 0)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none text-right font-mono"
-              />
-            </div>
-
-            <div>
-              <label className="font-semibold text-slate-700">Renewal Date</label>
-              <input
-                type="date"
-                value={renewalDate}
-                onChange={(e) => setRenewalDate(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <label className="flex items-start gap-3 p-3 rounded-xl border border-emerald-300/80 bg-gradient-to-r from-emerald-50/90 via-teal-50/50 to-white shadow-xs cursor-pointer hover:border-emerald-500 hover:shadow-sm transition-all group">
-            <input
-              type="checkbox"
-              checked={autoSmartSpread}
-              onChange={(e) => handleToggleSmartSpread(e.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer transition-colors"
-            />
-            <span className="flex-1 flex flex-col gap-1 text-slate-800 text-xs">
-              <span className="flex items-center justify-between flex-wrap gap-2">
-                <span className="flex items-center gap-1.5 font-bold text-emerald-950 text-xs">
-                  <Sparkles size={14} className="text-emerald-600 shrink-0" />
-                  <span>Apply Smart Spread in OpEx Services</span>
-                </span>
-                {autoSmartSpread ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shadow-2xs">
-                    <Check size={11} className="text-emerald-700 stroke-[2.5]" />
-                    <span>Active ({billingCycle})</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-500 border border-slate-200">
-                    Manual Phasing
-                  </span>
-                )}
-              </span>
-
-              <span className="text-[11px] text-slate-600 font-normal leading-relaxed">
-                {billingCycle === 'Monthly' && (
-                  <>
-                    Automatically distributes <strong className="text-emerald-700 font-semibold font-mono">${(unitPrice * qty).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>/month evenly across all 12 months (Annual Total: <strong className="text-slate-900 font-semibold font-mono">${(unitPrice * qty * 12).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>).
-                  </>
-                )}
-                {billingCycle === 'Annual' && (
-                  <>
-                    Allocates annual lump sum of <strong className="text-emerald-700 font-semibold font-mono">${(unitPrice * qty).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> directly into renewal month: <span className="font-semibold text-emerald-800 bg-emerald-100/70 px-1 py-0.5 rounded">{renewalDate ? (MONTH_LABELS[parseInt(renewalDate.split('-')[1] || '1', 10) - 1] || 'January') : 'January'}</span>.
-                  </>
-                )}
-                {billingCycle === 'Quarterly' && (
-                  <>
-                    Splits <strong className="text-emerald-700 font-semibold font-mono">${((unitPrice * qty) / 4).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong> per quarter into Mar, Jun, Sep, and Dec (Annual Total: <strong className="text-slate-900 font-semibold font-mono">${(unitPrice * qty).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>).
-                  </>
-                )}
-              </span>
-            </span>
-          </label>
-
-          {/* Live 12-Month Spread Visualization */}
-          <div className="bg-slate-50/90 rounded-xl border border-slate-200/90 p-2.5 space-y-2">
-            <div className="flex items-center justify-between text-[11px]">
-              <span className="font-bold text-slate-700 flex items-center gap-1.5">
-                <Layers size={13} className="text-indigo-600" />
-                <span>12-Month Phasing Preview (FY {fiscalYear})</span>
-              </span>
-              <span className="font-mono font-bold text-emerald-700 text-xs">
-                Annual Planned: ${MONTH_KEYS.reduce((acc, m) => acc + (monthlySpending[m]?.planned || 0), 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-            </div>
-            <div className="grid grid-cols-6 sm:grid-cols-12 gap-1 text-center">
-              {MONTH_KEYS.map((m, mIdx) => {
-                const amt = monthlySpending[m]?.planned || 0;
-                const isNonZero = amt > 0;
-                return (
-                  <div 
-                    key={m} 
-                    className={`p-1 rounded-lg border text-[10px] transition-all ${
-                      isNonZero 
-                        ? 'bg-emerald-50 border-emerald-300 text-emerald-950 font-bold shadow-2xs' 
-                        : 'bg-white border-slate-200/80 text-slate-400'
-                    }`}
-                  >
-                    <div className="text-[9px] uppercase font-semibold text-slate-500">{MONTH_LABELS[mIdx]}</div>
-                    <div className="font-mono mt-0.5 truncate text-[10px]">
-                      ${amt >= 1000 ? `${(amt / 1000).toFixed(1)}k` : amt.toLocaleString()}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="font-semibold text-slate-700">Business Justification</label>
-            <textarea
-              rows={2}
-              placeholder="e.g. Core Hospital Information System 24/7 SLA maintenance..."
-              value={justification}
-              onChange={(e) => setJustification(e.target.value)}
-              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-            />
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-            <Button variant="outline" type="button" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
-              {saving ? 'Saving...' : item ? 'Update Service' : 'Create Service'}
-            </Button>
-          </div>
-        </form>
-      </div>
+      {loading && (
+        <div className="text-center py-2 text-[11px] text-slate-400">Refreshing FY {selectedFiscalYear} budget data...</div>
+      )}
     </div>
   );
 };
