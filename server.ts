@@ -418,8 +418,6 @@ function mapDbToNote(row: any) {
 
 async function startServer() {
   const app = express();
-  // Bind to dynamic hosting environment PORT (GoDaddy, Cloud Run, Passenger) or default to 3000
-  const PORT = process.env.PORT || 3000;
 
   // Non-blocking probe to auto-select remote IP vs local cPanel socket
   probeAndSetBestDatabaseHost().catch(e => console.warn('[DB Probe notice]:', e.message));
@@ -3587,24 +3585,21 @@ export class ErrorOverlay extends HTMLElement {
     });
   }
 
-  // Bind cleanly: GoDaddy cPanel / Phusion Passenger provides process.env.PORT in production;
-  // development (AI Studio preview iframe) always requires port 3000.
-  const isProd = process.env.NODE_ENV === 'production';
-  const rawEnvPort = process.env.PORT;
-  const parsedPort = rawEnvPort && !isNaN(Number(rawEnvPort)) ? Number(rawEnvPort) : null;
-  const listenTarget: number | string = isProd
-    ? (parsedPort || (rawEnvPort ? rawEnvPort : 3000))
-    : 3000;
+  if (process.env.K_SERVICE && process.env.NODE_ENV !== 'production') {
+    // AI Studio Cloud Run dev preview proxy routes traffic to port 3000
+    process.env.PORT = '3000';
+  }
+  const port = process.env.PORT || 3000;
 
   const server = http.createServer(app);
   server.on('error', (err: any) => {
-    console.error(`[Server Port ${listenTarget} Error]:`, err?.message || err);
+    console.error(`[Server Port ${port} Error]:`, err?.message || err);
     if (err?.code === 'EADDRINUSE') {
       process.exit(1);
     }
   });
-  server.on('listening', () => {
-    console.log(`Server running on ${typeof listenTarget === 'number' ? `port ${listenTarget}` : listenTarget}`);
+  server.listen(port, () => {
+    console.log(`Server running on port ${port}`);
     // Non-blocking background verification of local MariaDB replica daemon (if local standalone mode)
     const isRemoteDb = process.env.PRIMARY_DB === 'godaddy' || (process.env.MYSQL_HOST && process.env.MYSQL_HOST !== '127.0.0.1' && process.env.MYSQL_HOST !== 'localhost');
     if (!isRemoteDb && fs.existsSync('./start-db.sh')) {
@@ -3618,12 +3613,6 @@ export class ErrorOverlay extends HTMLElement {
       }).catch(() => {});
     }
   });
-
-  if (typeof listenTarget === 'number') {
-    server.listen(listenTarget, "0.0.0.0");
-  } else {
-    server.listen(listenTarget);
-  }
 }
 
 startServer().catch((err) => {

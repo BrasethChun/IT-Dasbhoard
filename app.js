@@ -22,10 +22,15 @@ const isLocalTsx = fs.existsSync(localTsxBin);
 const bin = isLocalTsx ? localTsxBin : 'npx';
 const args = isLocalTsx ? [serverScript] : ['tsx', serverScript];
 
+const env = {
+  ...process.env,
+  NODE_ENV: process.env.NODE_ENV || 'production'
+};
+
 const child = spawn(bin, args, {
   cwd: __dirname,
   stdio: 'inherit',
-  env: process.env
+  env
 });
 
 child.on('error', (err) => {

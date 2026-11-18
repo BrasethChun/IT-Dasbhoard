@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Save, Bell, HelpCircle, FileText, Plus, Trash2, Edit2, ChevronLeft, Calendar, Send, CheckCircle2, MessageSquare, Users, CheckSquare, Square, Sparkles, MapPin, BellRing, Server, RefreshCw, Copy, Check, KeyRound, Database, Mail, ShieldCheck, GitBranch } from 'lucide-react';
+import { X, Save, Bell, HelpCircle, FileText, Plus, Trash2, Edit2, ChevronLeft, Calendar, Send, CheckCircle2, MessageSquare, Users, CheckSquare, Square, Sparkles, MapPin, BellRing, Server, RefreshCw, Copy, Check, KeyRound, Database, Mail, ShieldCheck, GitBranch, Download } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { SmartModal, SMART_INPUT_CLASS, SMART_TEXTAREA_CLASS } from '../../components/ui/SmartModal';
 
@@ -618,6 +618,55 @@ export const SettingsModal = ({
     return `${m}m ${seconds % 60}s`;
   };
 
+  const handleDownloadGoDaddyEnv = () => {
+    const bytes = new Uint8Array(32);
+    window.crypto.getRandomValues(bytes);
+    const generatedJwtSecret = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+    const keepAliveKey = cronStatus?.keepAliveKey || '';
+
+    const envLines = [
+      '# GoDaddy Production Environment Configuration',
+      'NODE_ENV=production',
+      '',
+      '# Database (Use 118.139.180.163 for GoDaddy Node.js App cloud; use localhost only on same cPanel server)',
+      'PRIMARY_DB=godaddy',
+      'PRIMARY_LOCKED=true',
+      'MYSQL_HOST=118.139.180.163',
+      'MYSQL_PORT=3306',
+      'MYSQL_USER=khema_dbuser',
+      'MYSQL_PASSWORD=YOUR_GODADDY_MYSQL_PASSWORD',
+      'MYSQL_DATABASE=khema_ainotes',
+      'MYSQL_SSL=false',
+      '',
+      '# 30-Day Persistent Login Session',
+      `JWT_SECRET=${generatedJwtSecret}`,
+      'JWT_EXPIRES_IN=30d',
+      '',
+      '# 24H Keep-Alive Cron Key',
+      `CRON_KEEPALIVE_KEY=${keepAliveKey}`,
+      '',
+      '# Optional Integrations',
+      'GEMINI_API_KEY=',
+      'TELEGRAM_BOT_TOKEN=',
+      'TELEGRAM_CHAT_ID=',
+      ''
+    ].join('\n');
+
+    const blob = new Blob([envLines], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'godaddy.env';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setCronMsg({
+      text: 'Downloaded godaddy.env (replace YOUR_GODADDY_MYSQL_PASSWORD before uploading to GoDaddy).',
+      type: 'success'
+    });
+  };
+
   return (
     <>
       <SmartModal
@@ -722,6 +771,16 @@ export const SettingsModal = ({
           ) : activeTab === '24h-deploy' ? (
             <>
               <Button variant="secondary" size="sm" type="button" onClick={onClose}>Close</Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={handleDownloadGoDaddyEnv}
+                className="gap-1.5"
+              >
+                <Download size={14} />
+                <span>Download .env</span>
+              </Button>
               <Button
                 variant="primary"
                 size="sm"
