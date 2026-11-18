@@ -336,6 +336,9 @@ export async function probeAndSetBestDatabaseHost(force = false): Promise<boolea
         prevPool.end().catch(() => {});
       }
       console.log(`[Database Init] Connected to GoDaddy database via ${target.label} (${winner.ms}ms).`);
+      if (primaryPool) {
+        ensureCoreSchema(primaryPool).catch((e: any) => console.warn('[Schema Bootstrap Warning]:', e?.message || e));
+      }
     } else {
       const summary = results.map(r => `${r.target} (${r.code || 'ERR'})`).join(', ');
       lastDbError = {
@@ -512,8 +515,116 @@ const ALLOWED_MIME_EXT: Record<string, string> = {
   'image/svg+xml': '.svg',
 };
 
+let coreSchemaEnsured = false;
+let coreSchemaPromise: Promise<void> | null = null;
+async function ensureCoreSchema(db: any): Promise<void> {
+  if (coreSchemaEnsured) return;
+  if (coreSchemaPromise) {
+    await coreSchemaPromise;
+    return;
+  }
+
+  coreSchemaPromise = (async () => {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id VARCHAR(36) NOT NULL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        password VARCHAR(255) NOT NULL,
+        full_name VARCHAR(255) DEFAULT NULL,
+        display_name VARCHAR(255) DEFAULT NULL,
+        avatar_url TEXT NULL,
+        timezone VARCHAR(100) DEFAULT 'UTC-8 (Pacific Time)',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        telegram_chat_id VARCHAR(255) DEFAULT NULL,
+        telegram_bot_token VARCHAR(255) DEFAULT NULL,
+        telegram_enabled TINYINT(1) DEFAULT 1,
+        telegram_alert_templates TEXT DEFAULT NULL,
+        role VARCHAR(50) DEFAULT 'user',
+        can_access_welcome TINYINT(1) DEFAULT 1,
+        can_access_it TINYINT(1) DEFAULT 0,
+        can_access_pro TINYINT(1) DEFAULT 0,
+        status VARCHAR(50) DEFAULT 'Active',
+        reset_token VARCHAR(255) DEFAULT NULL,
+        reset_token_expires BIGINT DEFAULT NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS notes (
+        id VARCHAR(36) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        title VARCHAR(255) DEFAULT NULL,
+        content LONGTEXT DEFAULT NULL,
+        thumbnail_url VARCHAR(1024) DEFAULT NULL,
+        tags LONGTEXT DEFAULT NULL,
+        attachments LONGTEXT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        meeting_date VARCHAR(100) DEFAULT NULL,
+        agenda TEXT DEFAULT NULL,
+        meeting_venue VARCHAR(255) DEFAULT NULL,
+        telegram_alert_sent TINYINT(1) DEFAULT 0,
+        meeting_priority VARCHAR(50) DEFAULT NULL,
+        linked_source_type VARCHAR(40) DEFAULT NULL,
+        linked_source_id VARCHAR(36) DEFAULT NULL,
+        linked_source_title VARCHAR(255) DEFAULT NULL,
+        KEY idx_notes_user (user_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `).catch(() => {});
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS note_templates (
+        id VARCHAR(36) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        name VARCHAR(100) DEFAULT NULL,
+        title TEXT DEFAULT NULL,
+        content TEXT DEFAULT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `).catch(() => {});
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS invoices (
+        id VARCHAR(36) NOT NULL PRIMARY KEY,
+        invoice_no VARCHAR(50) DEFAULT NULL,
+        date VARCHAR(50) DEFAULT NULL,
+        billed_to TEXT DEFAULT NULL,
+        from_address TEXT DEFAULT NULL,
+        items LONGTEXT DEFAULT NULL,
+        total DECIMAL(10,2) DEFAULT 0.00,
+        payment_method VARCHAR(50) DEFAULT NULL,
+        note TEXT DEFAULT NULL,
+        user_id VARCHAR(36) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `).catch(() => {});
+
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS vendors (
+        id VARCHAR(36) NOT NULL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        category VARCHAR(100) DEFAULT NULL,
+        vendor_type VARCHAR(100) DEFAULT NULL,
+        contact_person VARCHAR(255) DEFAULT NULL,
+        contact_email VARCHAR(255) DEFAULT NULL,
+        vendor VARCHAR(100) DEFAULT NULL,
+        status VARCHAR(50) DEFAULT 'Active',
+        user_id VARCHAR(36) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `).catch(() => {});
+
+    coreSchemaEnsured = true;
+  })().finally(() => {
+    coreSchemaPromise = null;
+  });
+
+  await coreSchemaPromise;
+}
+
 let userProfileColumnsEnsured = false;
 async function ensureUserProfileColumns(db: any) {
+  await ensureCoreSchema(db);
   if (userProfileColumnsEnsured) return;
   try {
     await db.query('ALTER TABLE users ADD COLUMN avatar_url TEXT NULL').catch(() => {});
@@ -618,6 +729,7 @@ async function startServer() {
       const db = getDb();
       await db.query('SELECT 1');
       dbConnected = true;
+      await ensureCoreSchema(db).catch(() => {});
     } catch (err: any) {
       checkError = err?.code ? `${err.code}: ${err.message}` : (err?.message || 'Database unreachable');
       detectOutboundIpInBackground();
@@ -626,6 +738,8 @@ async function startServer() {
       status: 'ok',
       dbConfigured: true,
       dbConnected,
+      schemaReady: coreSchemaEnsured,
+      databaseName: process.env.MYSQL_DATABASE || process.env.DB_NAME || GODADDY_CONFIG.database,
       currentWorkingHost,
       configuredHost: process.env.MYSQL_HOST || process.env.DB_HOST || GODADDY_CONFIG.host,
       configuredPort: getEffectivePort(),
@@ -966,17 +1080,25 @@ async function startServer() {
          return res.status(500).json({ error: 'Database could not be initialized.'});
       }
 
+      await ensureUserProfileColumns(db);
+
       // Check if user already exists
       const [existing]: any = await db.query('SELECT id FROM users WHERE email = ?', [email]);
       if (existing.length > 0) {
         return res.status(400).json({ error: 'Email already in use.' });
       }
-      
-      await ensureUserProfileColumns(db);
+
+      // If this is the very first account in a fresh database, grant Owner & full workspace access
+      const [countRows]: any = await db.query('SELECT COUNT(*) as c FROM users');
+      const isFirstUser = Number(countRows?.[0]?.c || 0) === 0;
+      const initialRole = isFirstUser ? 'owner' : 'user';
+      const initialItAccess = isFirstUser ? 1 : 0;
+      const initialProAccess = isFirstUser ? 1 : 0;
+
       const id = crypto.randomUUID();
       await db.query(
-        'INSERT INTO users (id, email, password, full_name, display_name) VALUES (?, ?, ?, ?, ?)',
-        [id, email, hashedPassword, full_name, display_name]
+        'INSERT INTO users (id, email, password, full_name, display_name, role, can_access_welcome, can_access_it, can_access_pro, status) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)',
+        [id, email, hashedPassword, full_name, display_name, initialRole, initialItAccess, initialProAccess, 'Active']
       );
       const [createdRows]: any = await db.query('SELECT * FROM users WHERE id = ?', [id]);
       const user = mapUserToClient(createdRows?.[0]) || {
@@ -988,10 +1110,10 @@ async function startServer() {
         avatarUrl: null,
         avatar_url: null,
         timezone: 'UTC-8 (Pacific Time)',
-        role: 'user',
+        role: initialRole,
         can_access_welcome: true,
-        can_access_it: false,
-        can_access_pro: false
+        can_access_it: isFirstUser,
+        can_access_pro: isFirstUser
       };
       const token = jwt.sign({ id, email, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({ user, token });
@@ -1012,7 +1134,16 @@ async function startServer() {
       }
       await ensureUserProfileColumns(db);
       const [rows]: any = await db.query('SELECT * FROM users WHERE email = ?', [email]);
-      if (rows.length === 0) return res.status(400).json({ error: 'Invalid email or password' });
+      if (rows.length === 0) {
+        const [countRows]: any = await db.query('SELECT COUNT(*) as c FROM users').catch(() => [[{ c: 1 }]]);
+        if (Number(countRows?.[0]?.c || 0) === 0) {
+          const dbName = process.env.MYSQL_DATABASE || process.env.DB_NAME || GODADDY_CONFIG.database;
+          return res.status(400).json({
+            error: `No accounts exist in database '${dbName}' yet. Click "Sign up" below to create the first Owner account, or import your SQL backup.`
+          });
+        }
+        return res.status(400).json({ error: 'Invalid email or password' });
+      }
       
       const valid = await bcrypt.compare(password, rows[0].password);
       if (!valid) return res.status(400).json({ error: 'Invalid email or password' });
@@ -1035,6 +1166,7 @@ async function startServer() {
     try {
       const email = req.body.email?.trim()?.toLowerCase();
       const db = getDb();
+      await ensureCoreSchema(db);
       // Safely ensure columns exist
       await db.query('ALTER TABLE users ADD COLUMN reset_token VARCHAR(255)').catch(e => {});
       await db.query('ALTER TABLE users ADD COLUMN reset_token_expires BIGINT').catch(e => {});
@@ -1065,6 +1197,7 @@ async function startServer() {
         return res.status(400).json({ error: 'Token and new password are required' });
       }
       const db = getDb();
+      await ensureCoreSchema(db);
       const [rows]: any = await db.query('SELECT * FROM users WHERE reset_token = ? AND reset_token_expires > ?', [token, Date.now()]);
       
       if (rows.length === 0) {
@@ -1135,12 +1268,18 @@ async function startServer() {
       let user;
 
       if (rows.length === 0) {
+        const [countRows]: any = await db.query('SELECT COUNT(*) as c FROM users');
+        const isFirstUser = Number(countRows?.[0]?.c || 0) === 0;
+        const initialRole = isFirstUser ? 'owner' : 'user';
+        const initialIt = isFirstUser ? 1 : 0;
+        const initialPro = isFirstUser ? 1 : 0;
+
         const id = crypto.randomUUID();
         const randomPassword = crypto.randomBytes(16).toString('hex');
         const hashedPassword = await bcrypt.hash(randomPassword, 10);
         await db.query(
-          'INSERT INTO users (id, email, password, full_name, display_name, avatar_url) VALUES (?, ?, ?, ?, ?, ?)',
-          [id, email, hashedPassword, full_name, display_name || full_name, picture]
+          'INSERT INTO users (id, email, password, full_name, display_name, avatar_url, role, can_access_welcome, can_access_it, can_access_pro, status) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)',
+          [id, email, hashedPassword, full_name, display_name || full_name, picture, initialRole, initialIt, initialPro, 'Active']
         );
         const [newRows]: any = await db.query('SELECT * FROM users WHERE id = ?', [id]);
         user = mapUserToClient(newRows?.[0]) || {
@@ -1151,10 +1290,10 @@ async function startServer() {
           display_name: display_name || full_name,
           avatarUrl: picture,
           avatar_url: picture,
-          role: 'user',
+          role: initialRole,
           can_access_welcome: true,
-          can_access_it: false,
-          can_access_pro: false
+          can_access_it: isFirstUser,
+          can_access_pro: isFirstUser
         };
       } else {
         if (!rows[0].avatar_url && picture) {
@@ -1437,6 +1576,7 @@ async function startServer() {
   // Schema helper to run table column checks only once on startup instead of every HTTP request
   let isNotesSchemaReady = false;
   async function ensureNotesSchema(db: mysql.Pool) {
+    await ensureCoreSchema(db);
     if (isNotesSchemaReady) return;
     try {
       await db.query('ALTER TABLE notes ADD COLUMN meeting_date VARCHAR(100)').catch(() => {});
@@ -1912,6 +2052,7 @@ async function startServer() {
   app.get('/api/invoices', authenticateToken, async (req: any, res) => {
     try {
       const db = getDb();
+      await ensureCoreSchema(db);
       const [userRows]: any = await db.query('SELECT * FROM invoices WHERE user_id = ? ORDER BY created_at DESC', [req.user.id]);
       const [userProfile]: any = await db.query('SELECT role FROM users WHERE id = ?', [req.user.id]);
       const role = userProfile?.[0]?.role || req.user.role;
@@ -2127,6 +2268,7 @@ async function startServer() {
   async function ensureItDashboardSchema(db: mysql.Pool) {
     if (isItDashboardSchemaReady) return;
     try {
+      await ensureCoreSchema(db);
       const tables = [
         `CREATE TABLE IF NOT EXISTS it_sites (id VARCHAR(36) PRIMARY KEY, site_name VARCHAR(100) UNIQUE, location VARCHAR(150), status VARCHAR(50))`,
         `CREATE TABLE IF NOT EXISTS it_staffing (id VARCHAR(36) PRIMARY KEY, staff_id VARCHAR(50), site_name VARCHAR(100), employee_name VARCHAR(100), role VARCHAR(100), status VARCHAR(50), performance_score DECIMAL(3,2), monthly_schedule VARCHAR(255))`,
