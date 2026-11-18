@@ -2,6 +2,7 @@ import express from 'express';
 import mysql from 'mysql2/promise';
 import axios from 'axios';
 import cron from 'node-cron';
+import { getDbEnvConfig } from './dbConfig';
 
 export interface TelegramRecipient {
   botToken: string;
@@ -32,19 +33,17 @@ export async function getTelegramRecipients(): Promise<TelegramRecipient[]> {
   const recipients: TelegramRecipient[] = [];
 
   try {
-    const dbHost = process.env.ACTIVE_MYSQL_HOST || process.env.MYSQL_HOST || '118.139.180.163';
-    const dbPort = Number(process.env.MYSQL_PORT) || 3306;
-    const dbUser = process.env.MYSQL_USER || 'khema_dbuser';
-    const dbPassword = process.env.MYSQL_PASSWORD || 'Y+k,C=JAEA4nR+0*';
-    const dbName = process.env.MYSQL_DATABASE || 'khema_ainotes';
+    const envCfg = getDbEnvConfig();
+    const dbHost = process.env.ACTIVE_MYSQL_HOST || envCfg.host;
     const isSocket = dbHost.startsWith('/');
 
     const conn = await mysql.createConnection({
-      ...(isSocket ? { socketPath: dbHost } : { host: dbHost, port: dbPort }),
-      user: dbUser,
-      password: dbPassword,
-      database: dbName,
-      connectTimeout: 4000
+      ...(isSocket ? { socketPath: dbHost } : { host: dbHost, port: envCfg.port }),
+      user: envCfg.user,
+      password: envCfg.password,
+      database: envCfg.database,
+      connectTimeout: 4000,
+      ssl: !isSocket && envCfg.ssl ? { rejectUnauthorized: false } : undefined
     });
 
     try {
@@ -216,7 +215,8 @@ export async function notifyGoDaddyRestored(details: DbAlertDetails) {
 export async function runRemoteHeartbeatCheck(
   onStatusChange?: (isRestored: boolean, latencyMs?: number) => void
 ): Promise<{ isRemote: boolean; ok: boolean; latencyMs?: number; host: string; error?: string }> {
-  const currentHost = process.env.ACTIVE_MYSQL_HOST || process.env.MYSQL_HOST || '127.0.0.1';
+  const envCfg = getDbEnvConfig();
+  const currentHost = process.env.ACTIVE_MYSQL_HOST || envCfg.host;
   const isSocket = currentHost.startsWith('/');
   const isRemote = !isSocket && currentHost !== '127.0.0.1' && currentHost !== 'localhost';
 
@@ -228,12 +228,12 @@ export async function runRemoteHeartbeatCheck(
     const startTime = Date.now();
     const testConn = await mysql.createConnection({
       host: currentHost,
-      port: Number(process.env.MYSQL_PORT) || 3306,
-      user: process.env.MYSQL_USER || 'khema_dbuser',
-      password: process.env.MYSQL_PASSWORD || 'Y+k,C=JAEA4nR+0*',
-      database: process.env.MYSQL_DATABASE || 'khema_ainotes',
+      port: envCfg.port,
+      user: envCfg.user,
+      password: envCfg.password,
+      database: envCfg.database,
       connectTimeout: 8000,
-      ssl: process.env.MYSQL_SSL === 'true' ? { rejectUnauthorized: false } : undefined
+      ssl: envCfg.ssl ? { rejectUnauthorized: false } : undefined
     });
 
     await testConn.query('SELECT 1');

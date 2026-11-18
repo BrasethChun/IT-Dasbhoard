@@ -6,6 +6,7 @@ import crypto from 'crypto';
 import cron from 'node-cron';
 import { exec } from 'child_process';
 import util from 'util';
+import { getDbEnvConfig } from './dbConfig';
 
 const execAsync = util.promisify(exec);
 
@@ -162,9 +163,10 @@ export async function createDatabaseBackup(
   const metaFilePath = path.join(BACKUPS_DIR, `${id}.json`);
 
   const db = getDb();
-  const host = process.env.MYSQL_HOST || '127.0.0.1';
-  const dbName = process.env.MYSQL_DATABASE || 'ainotes_db';
-  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  const envCfg = getDbEnvConfig();
+  const host = process.env.ACTIVE_MYSQL_HOST || envCfg.host;
+  const dbName = envCfg.database;
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host.startsWith('/');
 
   const recordCounts = await queryRecordCounts(db);
   let tableCount = 0;
@@ -309,25 +311,26 @@ export async function restoreDatabaseBackup(
     console.warn('[Database Restore Warning] Pre-restore safety backup failed, continuing with restore:', e.message);
   }
 
-  const host = process.env.MYSQL_HOST || '127.0.0.1';
-  const dbName = process.env.MYSQL_DATABASE || 'ainotes_db';
-  const isLocal = host === 'localhost' || host === '127.0.0.1';
+  const envCfg = getDbEnvConfig();
+  const host = process.env.ACTIVE_MYSQL_HOST || envCfg.host;
+  const dbName = envCfg.database;
+  const isSocket = host.startsWith('/');
+  const isLocal = isSocket || host === 'localhost' || host === '127.0.0.1';
 
-  if (isLocal) {
+  if (isLocal && fs.existsSync('/usr/bin/mariadb')) {
     // Run restore directly into local DB
     const cmd = `mariadb --protocol=socket -u root "${dbName}" < "${sqlFile}"`;
     await execAsync(cmd);
   } else {
-    // Remote GoDaddy database
+    // Remote or GoDaddy managed MySQL database
     const sqlContent = fs.readFileSync(sqlFile, 'utf8');
     const remoteConn = await mysql.createConnection({
-      host,
-      port: Number(process.env.MYSQL_PORT) || 3306,
-      user: process.env.MYSQL_USER,
-      password: process.env.MYSQL_PASSWORD,
+      ...(isSocket ? { socketPath: host } : { host, port: envCfg.port }),
+      user: envCfg.user,
+      password: envCfg.password,
       database: dbName,
       multipleStatements: true,
-      ssl: process.env.MYSQL_SSL === 'true' ? { rejectUnauthorized: false } : undefined
+      ssl: !isSocket && envCfg.ssl ? { rejectUnauthorized: false } : undefined
     });
 
     try {

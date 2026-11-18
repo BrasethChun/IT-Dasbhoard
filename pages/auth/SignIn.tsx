@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { Command, Mail, Lock, Check, CheckCircle } from 'lucide-react';
+import { Command, Mail, Lock, Check, CheckCircle, UserPlus, Upload } from 'lucide-react';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { RoutePath } from '../../types';
@@ -13,20 +13,28 @@ export const SignIn: React.FC = () => {
   const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+  const [attemptedEmail, setAttemptedEmail] = useState<string>(location.state?.email || '');
+  const [restoringSql, setRestoringSql] = useState(false);
+  const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
+  const sqlInputRef = useRef<HTMLInputElement | null>(null);
   const { setUser } = useAuth();
 
   // Retrieve state passed from SignUp
-  const successMessage = location.state?.successMessage;
+  const successMessage = restoreSuccess || location.state?.successMessage;
   const prefilledEmail = location.state?.email || '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setErrorCode(null);
+    setRestoreSuccess(null);
 
     const formData = new FormData(e.currentTarget as HTMLFormElement);
-    const email = formData.get('email') as string;
+    const email = (formData.get('email') as string) || '';
     const password = formData.get('password') as string;
+    setAttemptedEmail(email.trim());
     
     try {
       const data = await apiClient.fetch('/auth/login', {
@@ -44,8 +52,33 @@ export const SignIn: React.FC = () => {
     } catch (err: any) {
       console.error('Login error:', err);
       setError(err.message || 'An unexpected error occurred');
+      setErrorCode(err.code || null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleBootstrapSqlRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRestoringSql(true);
+    setError(null);
+    setRestoreSuccess(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const data = await apiClient.fetch('/db/bootstrap-import', {
+        method: 'POST',
+        body: formData
+      });
+      setError(null);
+      setErrorCode(null);
+      setRestoreSuccess(data?.message || 'SQL backup restored. You can sign in now.');
+    } catch (err: any) {
+      setError(err.message || 'Failed to restore SQL backup.');
+    } finally {
+      setRestoringSql(false);
+      if (sqlInputRef.current) sqlInputRef.current.value = '';
     }
   };
 
@@ -167,12 +200,41 @@ export const SignIn: React.FC = () => {
                   <p className="text-sm font-semibold text-red-700 dark:text-red-300">
                     {error}
                   </p>
-                  <div className="mt-2 pt-2 border-t border-red-100 dark:border-red-900/50 flex items-center justify-between text-xs">
-                    <span className="text-slate-600 dark:text-slate-400">Trouble signing in?</span>
-                    <Link to="/forgot-password" className="font-semibold theme-accent-text underline">
-                      Reset Password →
-                    </Link>
-                  </div>
+                  {errorCode === 'NO_USERS_YET' ? (
+                    <div className="mt-3 pt-3 border-t border-red-200/70 dark:border-red-900/50 flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => navigate(RoutePath.SIGNUP, { state: { email: attemptedEmail } })}
+                        className="w-full flex items-center justify-center gap-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2.5 px-3 transition-colors shadow-sm"
+                      >
+                        <UserPlus size={14} />
+                        Create First Owner Account →
+                      </button>
+                      <input
+                        ref={sqlInputRef}
+                        type="file"
+                        accept=".sql,text/sql"
+                        onChange={handleBootstrapSqlRestore}
+                        className="hidden"
+                      />
+                      <button
+                        type="button"
+                        disabled={restoringSql}
+                        onClick={() => sqlInputRef.current?.click()}
+                        className="w-full flex items-center justify-center gap-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 hover:bg-white dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold py-2 px-3 transition-colors disabled:opacity-60"
+                      >
+                        <Upload size={14} />
+                        {restoringSql ? 'Restoring SQL Backup...' : 'Restore SQL Backup (.sql)'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 pt-2 border-t border-red-100 dark:border-red-900/50 flex items-center justify-between text-xs">
+                      <span className="text-slate-600 dark:text-slate-400">Trouble signing in?</span>
+                      <Link to="/forgot-password" className="font-semibold theme-accent-text underline">
+                        Reset Password →
+                      </Link>
+                    </div>
+                  )}
                 </div>
               )}
               

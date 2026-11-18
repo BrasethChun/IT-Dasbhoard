@@ -107,8 +107,9 @@ export const apiClient = {
         : response.status >= 500
           ? `Server temporarily unavailable (HTTP ${response.status})`
           : `Request failed (HTTP ${response.status})`;
+      let errorData: any = null;
       try {
-         const errorData = await response.json();
+         errorData = await response.json();
          errorMsg = errorData.error || errorMsg;
       } catch (e) {
          if (response.statusText) {
@@ -117,6 +118,8 @@ export const apiClient = {
       }
       const err: any = new Error(errorMsg);
       err.status = response.status;
+      if (errorData?.code) err.code = errorData.code;
+      if (errorData?.databaseName) err.databaseName = errorData.databaseName;
       throw err;
     }
 

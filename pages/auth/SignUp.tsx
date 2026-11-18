@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Command, Mail, Lock, User, Smile } from 'lucide-react';
 import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
@@ -10,9 +10,11 @@ import { ThemeSwitcher } from '../../components/ui/ThemeSwitcher';
 
 export const SignUp: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { setUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const prefilledEmail = (location.state as any)?.email || '';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,6 +159,7 @@ export const SignUp: React.FC = () => {
                   type="email" 
                   autoComplete="email" 
                   required
+                  defaultValue={prefilledEmail}
                   placeholder="name@example.com" 
                   icon={Mail}
                 />

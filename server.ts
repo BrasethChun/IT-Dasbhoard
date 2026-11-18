@@ -4,7 +4,7 @@ import http from 'http';
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.join(__dirname, '.env'), override: true });
+dotenv.config({ path: path.join(__dirname, '.env'), override: false });
 
 process.on('unhandledRejection', (reason: any) => {
   console.warn('[Server UnhandledRejection]:', reason?.code || reason?.message || reason);
@@ -43,6 +43,7 @@ import { setupSystemUpdateRoutes } from './systemUpdateServer';
 import { setupKeepAliveRoutes } from './keepAliveService';
 import { GoogleGenAI } from '@google/genai';
 import { GEMINI_CONFIG } from './src/config/geminiConfig';
+import { getDbEnvConfig, getEffectiveDbPort } from './dbConfig';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
 const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '30d') as jwt.SignOptions['expiresIn'];
@@ -67,7 +68,7 @@ const LOCAL_CONFIG = {
 };
 
 let primaryPool: mysql.Pool | null = null;
-let currentWorkingHost: string = process.env.MYSQL_HOST || process.env.DB_HOST || '118.139.180.163';
+let currentWorkingHost: string = getDbEnvConfig().host;
 let activeDbTarget: { host?: string; socketPath?: string; port: number; label: string } | null = null;
 let isProbingComplete = false;
 let activeProbePromise: Promise<void> | null = null;
@@ -110,11 +111,7 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 function getEffectivePort(overridePort?: number): number {
-  let rawPort = Number(overridePort || process.env.MYSQL_PORT || process.env.DB_PORT);
-  if (!rawPort || isNaN(rawPort) || rawPort <= 0 || rawPort > 65535 || rawPort === 3386) {
-    rawPort = GODADDY_CONFIG.port || 3306;
-  }
-  return rawPort;
+  return getEffectiveDbPort(overridePort);
 }
 
 function createDirectPool(config?: {
@@ -127,16 +124,17 @@ function createDirectPool(config?: {
   ssl?: boolean;
   connectTimeout?: number;
 }): mysql.Pool {
+  const envCfg = getDbEnvConfig();
   const socketPath = config?.socketPath || (!config?.host && activeDbTarget?.socketPath ? activeDbTarget.socketPath : undefined);
   const host = socketPath
     ? undefined
-    : (config?.host || activeDbTarget?.host || process.env.MYSQL_HOST || process.env.DB_HOST || currentWorkingHost || GODADDY_CONFIG.host);
+    : (config?.host || activeDbTarget?.host || (envCfg.hasExplicitHost ? envCfg.host : currentWorkingHost) || GODADDY_CONFIG.host);
 
-  const port = getEffectivePort(config?.port || activeDbTarget?.port);
-  const user = config?.user || process.env.MYSQL_USER || process.env.DB_USER || GODADDY_CONFIG.user;
-  const password = config?.password !== undefined ? config.password : (process.env.MYSQL_PASSWORD ?? process.env.DB_PASSWORD ?? GODADDY_CONFIG.password);
-  const database = config?.database || process.env.MYSQL_DATABASE || process.env.DB_NAME || GODADDY_CONFIG.database;
-  const isSsl = config?.ssl !== undefined ? config.ssl : (process.env.MYSQL_SSL === 'true' || GODADDY_CONFIG.ssl);
+  const port = getEffectivePort(config?.port || activeDbTarget?.port || envCfg.port);
+  const user = config?.user || envCfg.user;
+  const password = config?.password !== undefined ? config.password : envCfg.password;
+  const database = config?.database || envCfg.database;
+  const isSsl = config?.ssl !== undefined ? config.ssl : envCfg.ssl;
 
   const poolConfig: mysql.PoolOptions = {
     ...(socketPath ? { socketPath } : { host, port }),
@@ -168,8 +166,9 @@ interface ProbeCandidate {
 }
 
 function buildProbeCandidates(): ProbeCandidate[] {
-  const port = getEffectivePort();
-  const configured = (process.env.MYSQL_HOST || process.env.DB_HOST || '').trim();
+  const envCfg = getDbEnvConfig();
+  const port = envCfg.port;
+  const configured = envCfg.hasExplicitHost ? envCfg.host : '';
   const seen = new Set<string>();
   const list: ProbeCandidate[] = [];
 
@@ -200,16 +199,19 @@ function buildProbeCandidates(): ProbeCandidate[] {
   }
 
   // Explicitly test both IPv4 127.0.0.1 and localhost, plus cPanel Unix sockets,
-  // because GoDaddy cPanel blocks NAT hairpinning to its own public IP (118.139.180.163)
+  // because GoDaddy cPanel blocks NAT hairpinning to its own public IP
   pushHost('127.0.0.1', 3500);
   pushHost('localhost', 3500);
   pushSocket('/var/lib/mysql/mysql.sock');
   pushSocket('/tmp/mysql.sock');
   pushSocket('/run/mysqld/mysqld.sock');
 
-  // External GoDaddy cPanel host IP & PTR hostname (for external Node.js cloud environments)
-  pushHost(GODADDY_CONFIG.host, 8500);
-  pushHost('163.180.139.118.host.secureserver.net', 7000);
+  // Only probe the legacy GoDaddy cPanel IP if no separate custom remote host was configured
+  const isCustomRemoteHost = configured && configured !== GODADDY_CONFIG.host && configured !== '127.0.0.1' && configured !== 'localhost';
+  if (!isCustomRemoteHost) {
+    pushHost(GODADDY_CONFIG.host, 8500);
+    pushHost('163.180.139.118.host.secureserver.net', 7000);
+  }
 
   return list;
 }
@@ -734,20 +736,93 @@ async function startServer() {
       checkError = err?.code ? `${err.code}: ${err.message}` : (err?.message || 'Database unreachable');
       detectOutboundIpInBackground();
     }
+    const envCfg = getDbEnvConfig();
     res.json({
       status: 'ok',
       dbConfigured: true,
       dbConnected,
       schemaReady: coreSchemaEnsured,
-      databaseName: process.env.MYSQL_DATABASE || process.env.DB_NAME || GODADDY_CONFIG.database,
+      databaseName: envCfg.database,
       currentWorkingHost,
-      configuredHost: process.env.MYSQL_HOST || process.env.DB_HOST || GODADDY_CONFIG.host,
-      configuredPort: getEffectivePort(),
+      configuredHost: envCfg.host,
+      configuredPort: envCfg.port,
       outboundIp: cachedOutboundIp,
       dbError: checkError,
       lastDbError,
       probeResults: lastProbeResults
     });
+  });
+
+  // First-time empty-DB SQL bootstrap restore (ONLY permitted when users table has 0 rows)
+  app.post('/api/db/bootstrap-import', upload.single('file'), async (req: any, res) => {
+    let uploadedTempPath: string | undefined;
+    let importConn: mysql.Connection | null = null;
+    try {
+      const db = getDb();
+      await ensureCoreSchema(db);
+
+      const [userCountRows]: any = await db.query('SELECT COUNT(*) as c FROM users');
+      if (Number(userCountRows?.[0]?.c || 0) > 0) {
+        return res.status(403).json({
+          error: 'Bootstrap SQL import is disabled because user accounts already exist in this database. Please sign in to use Database Migration.'
+        });
+      }
+
+      let rawSql = typeof req.body?.sqlContent === 'string' ? req.body.sqlContent : '';
+      if (!rawSql && req.file?.path) {
+        uploadedTempPath = req.file.path;
+        rawSql = fs.readFileSync(req.file.path, 'utf8');
+      }
+
+      if (!rawSql || !rawSql.trim()) {
+        return res.status(400).json({ error: 'Please select a valid .sql backup file to restore.' });
+      }
+
+      // Strip database-creation/USE directives so dumps from another DB name import cleanly into the current GoDaddy DB
+      const cleanedSql = rawSql
+        .replace(/^\s*CREATE\s+DATABASE\b[^;]*;/gim, '')
+        .replace(/^\s*USE\s+`?[^`;\s]+`?\s*;/gim, '');
+
+      const envCfg = getDbEnvConfig();
+      const targetSocket = activeDbTarget?.socketPath;
+      const targetHost = targetSocket ? undefined : (activeDbTarget?.host || currentWorkingHost || envCfg.host);
+
+      importConn = await mysql.createConnection({
+        ...(targetSocket ? { socketPath: targetSocket } : { host: targetHost, port: envCfg.port }),
+        user: envCfg.user,
+        password: envCfg.password,
+        database: envCfg.database,
+        multipleStatements: true,
+        connectTimeout: 15000,
+        ssl: !targetSocket && envCfg.ssl ? { rejectUnauthorized: false } : undefined
+      });
+
+      await importConn.query(cleanedSql);
+      await importConn.end();
+      importConn = null;
+
+      // Reset column flags so any legacy SQL dump gets newer columns if needed
+      coreSchemaEnsured = false;
+      userProfileColumnsEnsured = false;
+      await ensureUserProfileColumns(db);
+
+      const [restoredCount]: any = await db.query('SELECT COUNT(*) as c FROM users').catch(() => [[{ c: 0 }]]);
+      res.json({
+        success: true,
+        database: envCfg.database,
+        usersImported: Number(restoredCount?.[0]?.c || 0),
+        message: `SQL backup restored into '${envCfg.database}'. You can now sign in with your existing account.`
+      });
+    } catch (err: any) {
+      if (importConn) {
+        try { await importConn.end(); } catch {}
+      }
+      res.status(500).json({ error: err?.message || 'Failed to restore SQL backup.' });
+    } finally {
+      if (uploadedTempPath && fs.existsSync(uploadedTempPath)) {
+        try { fs.unlinkSync(uploadedTempPath); } catch {}
+      }
+    }
   });
 
   // --- DATABASE MIGRATION & GODADDY MYSQL ENDPOINTS ---
@@ -780,7 +855,8 @@ async function startServer() {
         return res.status(403).json({ error: 'Access denied: SQL status is restricted to Owner accounts only for security.' });
       }
 
-      const configuredHost = process.env.MYSQL_HOST || '127.0.0.1';
+      const envCfg = getDbEnvConfig();
+      const configuredHost = envCfg.host;
       const isRemote = configuredHost !== 'localhost' && configuredHost !== '127.0.0.1';
       const isPrimaryLocked = process.env.PRIMARY_LOCKED === 'true' || isRemote;
       const primaryDb = isRemote ? 'godaddy' : 'local';
@@ -789,7 +865,7 @@ async function startServer() {
       await db.query('SELECT 1');
       const pingMs = Date.now() - startTime;
 
-      let activeHost = configuredHost;
+      let activeHost = currentWorkingHost || configuredHost;
       let statusText = 'Connected';
 
       if (isFailoverActive) {
@@ -811,19 +887,19 @@ async function startServer() {
       res.json({
         host: configuredHost,
         activeHost,
-        port: Number(process.env.MYSQL_PORT) || 3306,
-        database: process.env.MYSQL_DATABASE || 'ainotes_db',
-        user: process.env.MYSQL_USER || 'ainotes_user',
+        port: envCfg.port,
+        database: envCfg.database,
+        user: envCfg.user,
         isRemote,
         primaryDb,
         isPrimaryLocked,
         isFailoverActive,
         failoverReason: isFailoverActive ? failoverReason : null,
         lastFailoverAt: isFailoverActive ? lastFailoverAt : null,
-        sslEnabled: process.env.MYSQL_SSL === 'true',
+        sslEnabled: envCfg.ssl,
         status: statusText,
         latencyMs: pingMs,
-        outboundIp: '34.34.254.10',
+        outboundIp: cachedOutboundIp || '34.34.254.10',
         counts: {
           notes: notesCount[0]?.c || 0,
           subscriptions: subsCount[0]?.c || 0,
@@ -836,7 +912,7 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({
         status: 'Error',
-        host: process.env.MYSQL_HOST || '127.0.0.1',
+        host: getDbEnvConfig().host,
         isFailoverActive,
         error: err.message
       });
@@ -1006,7 +1082,8 @@ async function startServer() {
   // Manual trigger to test or resume GoDaddy primary connection immediately
   app.post('/api/db/retry-godaddy', authenticateToken, async (req: any, res) => {
     try {
-      const currentHost = process.env.MYSQL_HOST || '127.0.0.1';
+      const envCfg = getDbEnvConfig();
+      const currentHost = envCfg.host;
       const isRemote = currentHost !== '127.0.0.1' && currentHost !== 'localhost';
 
       if (!isRemote) {
@@ -1016,12 +1093,12 @@ async function startServer() {
       const startTime = Date.now();
       const testConn = await mysql.createConnection({
         host: currentHost,
-        port: Number(process.env.MYSQL_PORT) || 3306,
-        user: process.env.MYSQL_USER,
-        password: process.env.MYSQL_PASSWORD,
-        database: process.env.MYSQL_DATABASE,
+        port: envCfg.port,
+        user: envCfg.user,
+        password: envCfg.password,
+        database: envCfg.database,
         connectTimeout: 6000,
-        ssl: process.env.MYSQL_SSL === 'true' ? { rejectUnauthorized: false } : undefined
+        ssl: envCfg.ssl ? { rejectUnauthorized: false } : undefined
       });
       await testConn.query('SELECT 1');
       const latencyMs = Date.now() - startTime;
@@ -1137,9 +1214,11 @@ async function startServer() {
       if (rows.length === 0) {
         const [countRows]: any = await db.query('SELECT COUNT(*) as c FROM users').catch(() => [[{ c: 1 }]]);
         if (Number(countRows?.[0]?.c || 0) === 0) {
-          const dbName = process.env.MYSQL_DATABASE || process.env.DB_NAME || GODADDY_CONFIG.database;
+          const dbName = getDbEnvConfig().database;
           return res.status(400).json({
-            error: `No accounts exist in database '${dbName}' yet. Click "Sign up" below to create the first Owner account, or import your SQL backup.`
+            code: 'NO_USERS_YET',
+            databaseName: dbName,
+            error: `No accounts exist in database '${dbName}' yet. Click "Create First Owner Account" below or restore your SQL backup.`
           });
         }
         return res.status(400).json({ error: 'Invalid email or password' });
