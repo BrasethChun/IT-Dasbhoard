@@ -67,13 +67,39 @@ const LOCAL_CONFIG = {
 };
 
 let primaryPool: mysql.Pool | null = null;
-let alternatePool: mysql.Pool | null = null;
-let currentWorkingHost: string = process.env.MYSQL_HOST || '118.139.180.163';
+let currentWorkingHost: string = process.env.MYSQL_HOST || process.env.DB_HOST || '118.139.180.163';
+let activeDbTarget: { host?: string; socketPath?: string; port: number; label: string } | null = null;
 let isProbingComplete = false;
+let activeProbePromise: Promise<void> | null = null;
+let lastProbeResults: Array<{ target: string; ok: boolean; code?: string; message?: string; ms: number }> = [];
+let lastDbError: { code?: string; message?: string; target?: string; at?: string } | null = null;
+let cachedOutboundIp: string | null = null;
+let outboundIpFetchStarted = false;
 let fallbackPool: mysql.Pool | null = null;
 let isFailoverActive = false;
 let failoverReason = '';
 let lastFailoverAt: string | null = null;
+
+function detectOutboundIpInBackground() {
+  if (outboundIpFetchStarted || cachedOutboundIp) return;
+  outboundIpFetchStarted = true;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2500);
+  fetch('https://api.ipify.org?format=json', { signal: controller.signal })
+    .then(r => (r.ok ? r.json() : null))
+    .then((data: any) => {
+      if (data?.ip && typeof data.ip === 'string') {
+        cachedOutboundIp = data.ip;
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      clearTimeout(timer);
+      if (!cachedOutboundIp) {
+        outboundIpFetchStarted = false;
+      }
+    });
+}
 
 let geminiAi: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
@@ -83,8 +109,17 @@ function getGeminiClient(): GoogleGenAI {
   return geminiAi;
 }
 
+function getEffectivePort(overridePort?: number): number {
+  let rawPort = Number(overridePort || process.env.MYSQL_PORT || process.env.DB_PORT);
+  if (!rawPort || isNaN(rawPort) || rawPort <= 0 || rawPort > 65535 || rawPort === 3386) {
+    rawPort = GODADDY_CONFIG.port || 3306;
+  }
+  return rawPort;
+}
+
 function createDirectPool(config?: {
   host?: string;
+  socketPath?: string;
   port?: number;
   user?: string;
   password?: string;
@@ -92,80 +127,234 @@ function createDirectPool(config?: {
   ssl?: boolean;
   connectTimeout?: number;
 }): mysql.Pool {
-  const host = config?.host || process.env.MYSQL_HOST || process.env.DB_HOST || currentWorkingHost || GODADDY_CONFIG.host;
-  
-  // Guard against invalid/corrupted ports (e.g. 3386) and default strictly to standard MySQL 3306
-  let rawPort = Number(config?.port || process.env.MYSQL_PORT || process.env.DB_PORT);
-  if (!rawPort || isNaN(rawPort) || rawPort <= 0 || rawPort > 65535 || rawPort === 3386) {
-    rawPort = GODADDY_CONFIG.port || 3306;
-  }
-  const port = rawPort;
+  const socketPath = config?.socketPath || (!config?.host && activeDbTarget?.socketPath ? activeDbTarget.socketPath : undefined);
+  const host = socketPath
+    ? undefined
+    : (config?.host || activeDbTarget?.host || process.env.MYSQL_HOST || process.env.DB_HOST || currentWorkingHost || GODADDY_CONFIG.host);
 
+  const port = getEffectivePort(config?.port || activeDbTarget?.port);
   const user = config?.user || process.env.MYSQL_USER || process.env.DB_USER || GODADDY_CONFIG.user;
   const password = config?.password !== undefined ? config.password : (process.env.MYSQL_PASSWORD ?? process.env.DB_PASSWORD ?? GODADDY_CONFIG.password);
   const database = config?.database || process.env.MYSQL_DATABASE || process.env.DB_NAME || GODADDY_CONFIG.database;
   const isSsl = config?.ssl !== undefined ? config.ssl : (process.env.MYSQL_SSL === 'true' || GODADDY_CONFIG.ssl);
 
-  const pool = mysql.createPool({
-    host,
-    port,
+  const poolConfig: mysql.PoolOptions = {
+    ...(socketPath ? { socketPath } : { host, port }),
     user,
     password,
     database,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
-    connectTimeout: config?.connectTimeout ?? 5000,
+    connectTimeout: config?.connectTimeout ?? 10000,
     enableKeepAlive: true,
     keepAliveInitialDelay: 5000,
-    ssl: isSsl ? { rejectUnauthorized: false } : undefined
-  });
+    ssl: !socketPath && isSsl ? { rejectUnauthorized: false } : undefined
+  };
+
+  const pool = mysql.createPool(poolConfig);
   (pool as any).on('error', (err: any) => {
     console.warn('[MySQL Primary Pool Notice]:', err?.code || err?.message || err);
   });
   return pool;
 }
 
-export async function probeAndSetBestDatabaseHost() {
-  if (isProbingComplete) return;
+interface ProbeCandidate {
+  host?: string;
+  socketPath?: string;
+  port: number;
+  label: string;
+  connectTimeout: number;
+}
 
-  // If user explicitly configured MYSQL_HOST in .env, honor it directly
-  if (process.env.MYSQL_HOST) {
-    console.log(`[Database Init] Using explicit MYSQL_HOST from environment: ${process.env.MYSQL_HOST}`);
-    currentWorkingHost = process.env.MYSQL_HOST;
-    isProbingComplete = true;
-    return;
+function buildProbeCandidates(): ProbeCandidate[] {
+  const port = getEffectivePort();
+  const configured = (process.env.MYSQL_HOST || process.env.DB_HOST || '').trim();
+  const seen = new Set<string>();
+  const list: ProbeCandidate[] = [];
+
+  const pushHost = (h: string, timeout: number) => {
+    const clean = h.trim();
+    if (!clean) return;
+    if (clean.startsWith('/')) {
+      pushSocket(clean);
+      return;
+    }
+    const key = `tcp:${clean}:${port}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    list.push({ host: clean, port, label: `${clean}:${port}`, connectTimeout: timeout });
+  };
+
+  const pushSocket = (sock: string) => {
+    const key = `sock:${sock}`;
+    if (seen.has(key)) return;
+    if (!fs.existsSync(sock)) return;
+    seen.add(key);
+    list.push({ socketPath: sock, port, label: sock, connectTimeout: 3000 });
+  };
+
+  if (configured) {
+    const isLocal = configured === '127.0.0.1' || configured === 'localhost';
+    pushHost(configured, isLocal ? 3500 : 8500);
   }
 
-  // Probe 1: Try remote GoDaddy IP (118.139.180.163) with 2.5s quick timeout
-  const remoteTest = createDirectPool({ host: '118.139.180.163', connectTimeout: 2500 });
+  // Explicitly test both IPv4 127.0.0.1 and localhost, plus cPanel Unix sockets,
+  // because GoDaddy cPanel blocks NAT hairpinning to its own public IP (118.139.180.163)
+  pushHost('127.0.0.1', 3500);
+  pushHost('localhost', 3500);
+  pushSocket('/var/lib/mysql/mysql.sock');
+  pushSocket('/tmp/mysql.sock');
+  pushSocket('/run/mysqld/mysqld.sock');
+
+  // External GoDaddy cPanel host IP & PTR hostname (for external Node.js cloud environments)
+  pushHost(GODADDY_CONFIG.host, 8500);
+  pushHost('163.180.139.118.host.secureserver.net', 7000);
+
+  return list;
+}
+
+async function testCandidate(candidate: ProbeCandidate): Promise<{ candidate: ProbeCandidate; ms: number }> {
+  const start = Date.now();
+  const testPool = createDirectPool({
+    host: candidate.host,
+    socketPath: candidate.socketPath,
+    port: candidate.port,
+    connectTimeout: candidate.connectTimeout
+  });
   try {
-    await remoteTest.query('SELECT 1');
-    console.log('[Database Init] Successfully connected via remote GoDaddy IP (118.139.180.163).');
-    primaryPool = remoteTest;
-    currentWorkingHost = '118.139.180.163';
-    isProbingComplete = true;
-    return;
-  } catch (err: any) {
-    console.warn(`[Database Init] Remote IP 118.139.180.163 unreachable from this environment (${err.code}). Probing local cPanel socket (localhost)...`);
-    try { await remoteTest.end(); } catch {}
+    await testPool.query('SELECT 1');
+    return { candidate, ms: Date.now() - start };
+  } finally {
+    testPool.end().catch(() => {});
+  }
+}
+
+export async function probeAndSetBestDatabaseHost(force = false): Promise<boolean> {
+  if (isProbingComplete && !force) return Boolean(primaryPool);
+  if (activeProbePromise) {
+    await activeProbePromise;
+    return Boolean(primaryPool);
   }
 
-  // Probe 2: Try local socket ('localhost') for when hosted directly on GoDaddy cPanel
-  const localTest = createDirectPool({ host: 'localhost', connectTimeout: 2500 });
-  try {
-    await localTest.query('SELECT 1');
-    console.log('[Database Init] Successfully connected via local cPanel socket (localhost)!');
-    primaryPool = localTest;
-    currentWorkingHost = 'localhost';
-    isProbingComplete = true;
-    return;
-  } catch (localErr: any) {
-    console.warn(`[Database Init] Local socket connection failed (${localErr.code}). Defaulting to remote IP.`);
-    try { await localTest.end(); } catch {}
-  }
+  activeProbePromise = (async () => {
+    const candidates = buildProbeCandidates();
+    const results: Array<{ target: string; ok: boolean; code?: string; message?: string; ms: number }> = [];
 
-  isProbingComplete = true;
+    if (candidates.length === 0) {
+      isProbingComplete = true;
+      return;
+    }
+
+    const [first, ...rest] = candidates;
+    const firstStart = Date.now();
+    let firstFailedFast = false;
+
+    const firstPromise = testCandidate(first)
+      .then((res) => {
+        results.push({ target: first.label, ok: true, ms: res.ms });
+        return res;
+      })
+      .catch((err: any) => {
+        firstFailedFast = true;
+        results.push({
+          target: first.label,
+          ok: false,
+          code: err?.code || 'ERR',
+          message: err?.message || 'Failed',
+          ms: Date.now() - firstStart
+        });
+        throw err;
+      });
+
+    // Give configured/primary candidate a 350ms head start unless it fails immediately
+    const headStartOutcome = await Promise.race([
+      firstPromise.then((res) => ({ won: true as const, res })).catch(() => ({ won: false as const })),
+      new Promise<{ won: false }>((resolve) => setTimeout(() => resolve({ won: false }), 350))
+    ]);
+
+    let winner: { candidate: ProbeCandidate; ms: number } | null = null;
+
+    if (headStartOutcome.won) {
+      winner = headStartOutcome.res;
+    } else {
+      const candidatePromises: Promise<{ candidate: ProbeCandidate; ms: number }>[] = [];
+      if (!firstFailedFast) {
+        candidatePromises.push(firstPromise);
+      }
+      for (const cand of rest) {
+        const start = Date.now();
+        candidatePromises.push(
+          testCandidate(cand)
+            .then((res) => {
+              results.push({ target: cand.label, ok: true, ms: res.ms });
+              return res;
+            })
+            .catch((err: any) => {
+              results.push({
+                target: cand.label,
+                ok: false,
+                code: err?.code || 'ERR',
+                message: err?.message || 'Failed',
+                ms: Date.now() - start
+              });
+              throw err;
+            })
+        );
+      }
+
+      if (candidatePromises.length > 0) {
+        try {
+          winner = await Promise.any(candidatePromises);
+        } catch {
+          winner = null;
+        }
+      }
+    }
+
+    lastProbeResults = results;
+
+    if (winner) {
+      const target = winner.candidate;
+      const prevPool = primaryPool;
+      activeDbTarget = {
+        host: target.host,
+        socketPath: target.socketPath,
+        port: target.port,
+        label: target.label
+      };
+      currentWorkingHost = target.socketPath || target.host || currentWorkingHost;
+      process.env.ACTIVE_MYSQL_HOST = currentWorkingHost;
+      lastDbError = null;
+      primaryPool = createDirectPool({
+        host: target.host,
+        socketPath: target.socketPath,
+        port: target.port,
+        connectTimeout: 10000
+      });
+      if (prevPool && prevPool !== primaryPool) {
+        prevPool.end().catch(() => {});
+      }
+      console.log(`[Database Init] Connected to GoDaddy database via ${target.label} (${winner.ms}ms).`);
+    } else {
+      const summary = results.map(r => `${r.target} (${r.code || 'ERR'})`).join(', ');
+      lastDbError = {
+        code: results[0]?.code || 'ETIMEDOUT',
+        message: results[0]?.message || 'All database endpoints failed',
+        target: summary,
+        at: new Date().toISOString()
+      };
+      detectOutboundIpInBackground();
+      console.warn(`[Database Init] All DB connection routes failed: ${summary}`);
+    }
+
+    isProbingComplete = true;
+  })().finally(() => {
+    activeProbePromise = null;
+  });
+
+  await activeProbePromise;
+  return Boolean(primaryPool);
 }
 
 function getFallbackPool(): mysql.Pool {
@@ -217,6 +406,9 @@ function explicitlySwitchToLocalDb(): mysql.Pool {
     primaryPool = null;
   }
 
+  activeDbTarget = { host: LOCAL_CONFIG.host, port: LOCAL_CONFIG.port, label: `${LOCAL_CONFIG.host}:${LOCAL_CONFIG.port}` };
+  currentWorkingHost = LOCAL_CONFIG.host;
+  process.env.ACTIVE_MYSQL_HOST = LOCAL_CONFIG.host;
   isFailoverActive = false;
   failoverReason = '';
 
@@ -224,90 +416,69 @@ function explicitlySwitchToLocalDb(): mysql.Pool {
   return primaryPool;
 }
 
+const DB_CONNECTION_ERROR_CODES = new Set([
+  'ER_BAD_DB_ERROR',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'EHOSTUNREACH',
+  'ECONNRESET',
+  'PROTOCOL_CONNECTION_LOST',
+  'EPIPE',
+  'ENOENT'
+]);
+
 function getDb(): mysql.Pool {
   if (!primaryPool) {
     primaryPool = createDirectPool({
-      host: process.env.MYSQL_HOST || currentWorkingHost,
-      connectTimeout: 5000
+      host: activeDbTarget?.host || process.env.MYSQL_HOST || process.env.DB_HOST || currentWorkingHost,
+      socketPath: activeDbTarget?.socketPath,
+      connectTimeout: 10000
     });
   }
 
-  // Resilient Proxy that auto-recovers GoDaddy Remote IP (118.139.180.163) or local cPanel socket
+  // Resilient Proxy that waits for startup probe and auto-recovers across remote IP, 127.0.0.1, localhost, and cPanel sockets
   return new Proxy(primaryPool, {
-    get(target, prop, receiver) {
+    get(_target, prop, receiver) {
       if (prop === 'query' || prop === 'execute') {
         return async (...args: any[]) => {
+          if (!isProbingComplete && activeProbePromise) {
+            await activeProbePromise.catch(() => {});
+          }
+          const poolToUse = primaryPool || _target;
           try {
-            return await (target as any)[prop](...args);
+            return await (poolToUse as any)[prop](...args);
           } catch (err: any) {
-            const isConnectionLoss = 
-              err?.code === 'ER_BAD_DB_ERROR' || 
-              err?.code === 'ECONNREFUSED' || 
-              err?.code === 'ETIMEDOUT' ||
-              err?.code === 'ENOTFOUND' ||
-              err?.code === 'EHOSTUNREACH' ||
-              err?.code === 'ECONNRESET' ||
-              err?.code === 'PROTOCOL_CONNECTION_LOST';
-
-            if (isConnectionLoss) {
-              const activeHost = currentWorkingHost;
-              const isLockedToGoDaddy = process.env.PRIMARY_LOCKED === 'true' || process.env.PRIMARY_DB === 'godaddy' || activeHost === '118.139.180.163';
-
-              // If configured for GoDaddy, re-create the pool to GoDaddy remote host rather than attempting non-existent local daemon
-              if (isLockedToGoDaddy) {
-                console.warn(`[GoDaddy DB Connection] Remote host '${activeHost}' reported ${err.code}. Re-establishing pool to GoDaddy MySQL (118.139.180.163:3306)...`);
-                try {
-                  if (primaryPool) {
-                    await primaryPool.end().catch(() => {});
-                  }
-                } catch {}
-                primaryPool = createDirectPool({
-                  host: '118.139.180.163',
-                  port: 3306,
-                  connectTimeout: 5000
-                });
-                currentWorkingHost = '118.139.180.163';
+            if (DB_CONNECTION_ERROR_CODES.has(err?.code)) {
+              console.warn(`[DB Auto-Recovery] '${currentWorkingHost}' failed (${err.code}). Probing alternate routes to database...`);
+              const recovered = await probeAndSetBestDatabaseHost(true).catch(() => false);
+              if (recovered && primaryPool) {
                 try {
                   return await (primaryPool as any)[prop](...args);
                 } catch (retryErr: any) {
-                  console.error(`[GoDaddy DB Connection] Retry on 118.139.180.163 failed (${retryErr.code}: ${retryErr.message}).`);
-                  throw err;
+                  lastDbError = {
+                    code: retryErr?.code || err?.code,
+                    message: retryErr?.message || err?.message,
+                    target: currentWorkingHost,
+                    at: new Date().toISOString()
+                  };
+                  throw retryErr;
                 }
               }
-
-              // Toggle between remote GoDaddy IP and local cPanel socket for local deployments
-              const alternateHost = (activeHost === 'localhost' || activeHost === '127.0.0.1')
-                ? '118.139.180.163'
-                : 'localhost';
-
-              console.warn(`[GoDaddy DB Auto-Detect] '${activeHost}' returned ${err.code}. Attempting alternate host '${alternateHost}'...`);
-
-              if (!alternatePool) {
-                alternatePool = createDirectPool({
-                  host: alternateHost,
-                  port: 3306,
-                  connectTimeout: 4000
-                });
-              }
-
-              try {
-                const res = await (alternatePool as any)[prop](...args);
-                console.log(`[GoDaddy DB Auto-Detect] Successfully connected via '${alternateHost}'! Promoting to active primary pool.`);
-                primaryPool = alternatePool;
-                currentWorkingHost = alternateHost;
-                alternatePool = null;
-                return res;
-              } catch (altErr: any) {
-                console.warn(`[GoDaddy DB Auto-Detect] Alternate host '${alternateHost}' also failed (${altErr.code}: ${altErr.message}).`);
-                throw err;
-              }
+              detectOutboundIpInBackground();
+              lastDbError = {
+                code: err?.code,
+                message: err?.message,
+                target: currentWorkingHost,
+                at: new Date().toISOString()
+              };
             }
-
             throw err;
           }
         };
       }
-      return Reflect.get(target, prop, receiver);
+      const poolToUse = primaryPool || _target;
+      return Reflect.get(poolToUse, prop, receiver);
     }
   });
 }
@@ -440,8 +611,29 @@ async function startServer() {
     });
   };
 
-  app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', dbConfigured: true, currentWorkingHost });
+  app.get('/api/health', async (_req, res) => {
+    let dbConnected = false;
+    let checkError: string | null = null;
+    try {
+      const db = getDb();
+      await db.query('SELECT 1');
+      dbConnected = true;
+    } catch (err: any) {
+      checkError = err?.code ? `${err.code}: ${err.message}` : (err?.message || 'Database unreachable');
+      detectOutboundIpInBackground();
+    }
+    res.json({
+      status: 'ok',
+      dbConfigured: true,
+      dbConnected,
+      currentWorkingHost,
+      configuredHost: process.env.MYSQL_HOST || process.env.DB_HOST || GODADDY_CONFIG.host,
+      configuredPort: getEffectivePort(),
+      outboundIp: cachedOutboundIp,
+      dbError: checkError,
+      lastDbError,
+      probeResults: lastProbeResults
+    });
   });
 
   // --- DATABASE MIGRATION & GODADDY MYSQL ENDPOINTS ---
@@ -748,6 +940,21 @@ async function startServer() {
   });
 
 
+  const formatAuthDbError = (e: any, fallbackMsg: string): { status: number; error: string } => {
+    if (DB_CONNECTION_ERROR_CODES.has(e?.code)) {
+      detectOutboundIpInBackground();
+      const tested = lastProbeResults.length > 0
+        ? lastProbeResults.map(r => `${r.target} (${r.code || 'OK'})`).join(', ')
+        : `${currentWorkingHost}:${getEffectivePort()}`;
+      const ipNote = cachedOutboundIp ? ` This app's outbound IP is ${cachedOutboundIp}.` : '';
+      return {
+        status: 503,
+        error: `Database connection timed out (${e.code}). Tested: ${tested}.${ipNote} Ensure GoDaddy cPanel Remote MySQL allows '%' or this app's outbound IP and outbound port ${getEffectivePort()} is open (or use MYSQL_HOST=localhost on same-server cPanel hosting).`
+      };
+    }
+    return { status: 500, error: e?.message || fallbackMsg };
+  };
+
   // Auth Routes
   app.post('/api/auth/register', async (req, res) => {
     try {
@@ -790,7 +997,8 @@ async function startServer() {
       res.json({ user, token });
     } catch (e: any) {
       console.error(e);
-      res.status(500).json({ error: e.message || 'Registration failed' });
+      const formatted = formatAuthDbError(e, 'Registration failed');
+      res.status(formatted.status).json({ error: formatted.error });
     }
   });
 
@@ -817,7 +1025,9 @@ async function startServer() {
       const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({ user, token });
     } catch (e: any) {
-      res.status(500).json({ error: e.message });
+      console.error(e);
+      const formatted = formatAuthDbError(e, 'Login failed');
+      res.status(formatted.status).json({ error: formatted.error });
     }
   });
 

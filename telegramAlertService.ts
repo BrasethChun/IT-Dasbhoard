@@ -32,15 +32,15 @@ export async function getTelegramRecipients(): Promise<TelegramRecipient[]> {
   const recipients: TelegramRecipient[] = [];
 
   try {
-    const dbHost = process.env.MYSQL_HOST || '118.139.180.163';
+    const dbHost = process.env.ACTIVE_MYSQL_HOST || process.env.MYSQL_HOST || '118.139.180.163';
     const dbPort = Number(process.env.MYSQL_PORT) || 3306;
     const dbUser = process.env.MYSQL_USER || 'khema_dbuser';
     const dbPassword = process.env.MYSQL_PASSWORD || 'Y+k,C=JAEA4nR+0*';
     const dbName = process.env.MYSQL_DATABASE || 'khema_ainotes';
+    const isSocket = dbHost.startsWith('/');
 
     const conn = await mysql.createConnection({
-      host: dbHost,
-      port: dbPort,
+      ...(isSocket ? { socketPath: dbHost } : { host: dbHost, port: dbPort }),
       user: dbUser,
       password: dbPassword,
       database: dbName,
@@ -216,8 +216,9 @@ export async function notifyGoDaddyRestored(details: DbAlertDetails) {
 export async function runRemoteHeartbeatCheck(
   onStatusChange?: (isRestored: boolean, latencyMs?: number) => void
 ): Promise<{ isRemote: boolean; ok: boolean; latencyMs?: number; host: string; error?: string }> {
-  const currentHost = process.env.MYSQL_HOST || '127.0.0.1';
-  const isRemote = currentHost !== '127.0.0.1' && currentHost !== 'localhost';
+  const currentHost = process.env.ACTIVE_MYSQL_HOST || process.env.MYSQL_HOST || '127.0.0.1';
+  const isSocket = currentHost.startsWith('/');
+  const isRemote = !isSocket && currentHost !== '127.0.0.1' && currentHost !== 'localhost';
 
   if (!isRemote) {
     return { isRemote: false, ok: true, host: currentHost };
@@ -228,10 +229,10 @@ export async function runRemoteHeartbeatCheck(
     const testConn = await mysql.createConnection({
       host: currentHost,
       port: Number(process.env.MYSQL_PORT) || 3306,
-      user: process.env.MYSQL_USER,
-      password: process.env.MYSQL_PASSWORD,
-      database: process.env.MYSQL_DATABASE,
-      connectTimeout: 5000,
+      user: process.env.MYSQL_USER || 'khema_dbuser',
+      password: process.env.MYSQL_PASSWORD || 'Y+k,C=JAEA4nR+0*',
+      database: process.env.MYSQL_DATABASE || 'khema_ainotes',
+      connectTimeout: 8000,
       ssl: process.env.MYSQL_SSL === 'true' ? { rejectUnauthorized: false } : undefined
     });
 
