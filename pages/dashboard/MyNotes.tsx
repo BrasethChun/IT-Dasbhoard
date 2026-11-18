@@ -419,11 +419,15 @@ export const MyNotes: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchNotes(searchQuery, periodFrom, periodTo);
     fetchMeetings();
     fetchTelegramConfig();
     fetchPersonalEvents();
     fetchSystemUpdates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    fetchNotes(searchQuery, periodFrom, periodTo);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodFrom, periodTo]);
 

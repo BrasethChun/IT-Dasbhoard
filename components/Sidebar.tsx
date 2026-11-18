@@ -124,8 +124,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (isOwner) {
       fetchDbStatus();
       const interval = setInterval(() => {
-        fetchDbStatus();
-      }, 20000);
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+          fetchDbStatus();
+        }
+      }, 60000);
       return () => clearInterval(interval);
     } else {
       setDbStatus(null);

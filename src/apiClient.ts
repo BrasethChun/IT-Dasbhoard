@@ -9,6 +9,9 @@ export const apiClient = {
   
   setToken(token: string) {
     localStorage.setItem('token', token);
+    try {
+      localStorage.setItem('auth_token_refreshed_at', String(Date.now()));
+    } catch {}
   },
 
   getCachedUser<T = any>(): T | null {
@@ -33,6 +36,7 @@ export const apiClient = {
   clearToken() {
     localStorage.removeItem('token');
     localStorage.removeItem(USER_CACHE_KEY);
+    localStorage.removeItem('auth_token_refreshed_at');
   },
 
   async fetch(endpoint: string, options: RequestInit = {}) {
@@ -61,8 +65,13 @@ export const apiClient = {
           ...options,
           headers
         });
-        if ((response.status === 502 || response.status === 503 || response.status === 504) && attempt < maxAttempts - 1) {
-          await new Promise(resolve => setTimeout(resolve, 600 * (attempt + 1)));
+        const isTransient = response.status === 429 || response.status === 502 || response.status === 503 || response.status === 504;
+        if (isTransient && attempt < maxAttempts - 1) {
+          const retryAfterSec = Number(response.headers.get('Retry-After'));
+          const delayMs = response.status === 429
+            ? Math.min(3500, (retryAfterSec > 0 ? retryAfterSec * 1000 : 1200 * (attempt + 1)))
+            : 600 * (attempt + 1);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
           continue;
         }
         lastNetworkError = null;
@@ -93,9 +102,11 @@ export const apiClient = {
     }
 
     if (!response.ok) {
-      let errorMsg = response.status >= 500
-        ? `Server temporarily unavailable (HTTP ${response.status})`
-        : `Request failed (HTTP ${response.status})`;
+      let errorMsg = response.status === 429
+        ? 'Rate limit temporarily exceeded. Please try again in a moment.'
+        : response.status >= 500
+          ? `Server temporarily unavailable (HTTP ${response.status})`
+          : `Request failed (HTTP ${response.status})`;
       try {
          const errorData = await response.json();
          errorMsg = errorData.error || errorMsg;

@@ -11,6 +11,26 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+const REFRESH_TIMESTAMP_KEY = 'auth_token_refreshed_at';
+const REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+function shouldRefreshToken(): boolean {
+  try {
+    const raw = localStorage.getItem(REFRESH_TIMESTAMP_KEY);
+    if (!raw) return true;
+    const elapsed = Date.now() - Number(raw);
+    return isNaN(elapsed) || elapsed >= REFRESH_INTERVAL_MS;
+  } catch {
+    return false;
+  }
+}
+
+function markTokenRefreshed() {
+  try {
+    localStorage.setItem(REFRESH_TIMESTAMP_KEY, String(Date.now()));
+  } catch {}
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUserState] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -34,17 +54,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const data = await apiClient.fetch('/auth/me');
         if (data && data.user) {
           setUser(data.user);
-          // Silently slide the 30-day JWT expiry forward
-          try {
-            const refreshed = await apiClient.fetch('/auth/refresh', { method: 'POST' });
-            if (refreshed?.token) {
-              apiClient.setToken(refreshed.token);
+          // Silently slide the 30-day JWT expiry forward at most once every 12 hours
+          if (shouldRefreshToken()) {
+            try {
+              const refreshed = await apiClient.fetch('/auth/refresh', { method: 'POST' });
+              if (refreshed?.token) {
+                apiClient.setToken(refreshed.token);
+              }
+              if (refreshed?.user) {
+                setUser(refreshed.user);
+              }
+              markTokenRefreshed();
+            } catch {
+              // Non-fatal: keep existing valid session
             }
-            if (refreshed?.user) {
-              setUser(refreshed.user);
-            }
-          } catch {
-            // Non-fatal: keep existing valid session
           }
         } else {
           apiClient.clearToken();
@@ -52,7 +75,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch (err: any) {
         // Only terminate session when server explicitly rejects credentials (401/403).
-        // Transient 502/503/network errors during GoDaddy Passenger wake-up restore cached session.
+        // Transient 429/502/503/network errors restore cached session.
         if (err?.status === 401 || err?.status === 403) {
           apiClient.clearToken();
           setUserState(null);
@@ -69,13 +92,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     verifyAndRefreshSession();
 
-    // Also silently slide token when user returns to an open browser tab after hours/days
+    // Also silently slide token when returning to an open tab if >=12h elapsed
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && apiClient.getToken()) {
+      if (document.visibilityState === 'visible' && apiClient.getToken() && shouldRefreshToken()) {
         apiClient.fetch('/auth/refresh', { method: 'POST' })
           .then((refreshed) => {
             if (refreshed?.token) apiClient.setToken(refreshed.token);
             if (refreshed?.user) setUser(refreshed.user);
+            markTokenRefreshed();
           })
           .catch((err: any) => {
             if (err?.status === 401 || err?.status === 403) {
