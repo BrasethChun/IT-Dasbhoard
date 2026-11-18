@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "intervalHours": 12,
-  "lastRunAt": "2026-10-27T03:53:21.658Z",
-  "nextRunAt": "2026-10-27T15:53:21.658Z",
+  "lastRunAt": "2026-11-18T10:36:16.138Z",
+  "nextRunAt": "2026-11-18T12:00:00.000Z",
   "keepMax": 30
 }

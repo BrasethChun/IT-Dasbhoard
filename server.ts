@@ -27,7 +27,7 @@ import crypto from 'crypto';
 import cron from 'node-cron';
 import axios from 'axios';
 import { initMailTables, setupMailRoutes } from './mailServer';
-import { setupBackupRoutes } from './backupManager';
+import { setupBackupRoutes, generateLiveSqlDump, sanitizeSqlForTargetDatabase } from './backupManager';
 import { 
   notifyGoDaddyDisconnection, 
   startRemoteDatabaseHeartbeat, 
@@ -706,7 +706,7 @@ async function startServer() {
   // Non-blocking probe to auto-select remote IP vs local cPanel socket
   probeAndSetBestDatabaseHost().catch(e => console.warn('[DB Probe notice]:', e.message));
 
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
   
   // Serve uploaded files statically
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
@@ -778,10 +778,8 @@ async function startServer() {
         return res.status(400).json({ error: 'Please select a valid .sql backup file to restore.' });
       }
 
-      // Strip database-creation/USE directives so dumps from another DB name import cleanly into the current GoDaddy DB
-      const cleanedSql = rawSql
-        .replace(/^\s*CREATE\s+DATABASE\b[^;]*;/gim, '')
-        .replace(/^\s*USE\s+`?[^`;\s]+`?\s*;/gim, '');
+      // Strip database-creation/USE/DEFINER directives so dumps from another DB name import cleanly into the current GoDaddy DB
+      const cleanedSql = sanitizeSqlForTargetDatabase(rawSql, true);
 
       const envCfg = getDbEnvConfig();
       const targetSocket = activeDbTarget?.socketPath;
@@ -827,13 +825,25 @@ async function startServer() {
 
   // --- DATABASE MIGRATION & GODADDY MYSQL ENDPOINTS ---
 
-  // Download GoDaddy phpMyAdmin SQL Migration Dump
-  app.get('/api/db/export-godaddy', (req, res) => {
+  // Download Live GoDaddy phpMyAdmin SQL Migration Dump (falls back to static file if offline)
+  app.get('/api/db/export-godaddy', async (req, res) => {
     try {
+      if (req.query?.static !== 'true') {
+        try {
+          const liveDump = await generateLiveSqlDump(getDb, 'godaddy_export');
+          const safeDbName = (liveDump.database || 'ainotes').replace(/[^a-zA-Z0-9_-]/g, '_');
+          res.setHeader('Content-Disposition', `attachment; filename="godaddy_${safeDbName}_export.sql"`);
+          res.setHeader('Content-Type', 'application/sql; charset=utf-8');
+          return res.send(liveDump.sql);
+        } catch (liveErr: any) {
+          console.warn('[Live GoDaddy SQL Export] Falling back to static dump:', liveErr?.message);
+        }
+      }
+
       const dumpPath = path.join(process.cwd(), 'godaddy_migration_dump.sql');
       const fallbackPath = path.join(process.cwd(), 'ainotes_db.sql');
       const targetFile = fs.existsSync(dumpPath) ? dumpPath : fallbackPath;
-      
+
       if (!fs.existsSync(targetFile)) {
         return res.status(404).json({ error: 'Migration SQL file not found' });
       }
@@ -3874,8 +3884,15 @@ async function startServer() {
   initMailTables(getDb()).catch(e => console.warn('Mail tables init warning:', e.message));
   setupMailRoutes(app, getDb, authenticateToken);
 
-  // Initialize 12-Hour Automated Database Backups & 1-Click Disaster Recovery
-  setupBackupRoutes(app, getDb, authenticateToken);
+  // Initialize 12-Hour Automated Database Backups, GoDaddy SQL Import & 1-Click Disaster Recovery
+  setupBackupRoutes(app, getDb, authenticateToken, {
+    getActiveTarget: () => activeDbTarget,
+    onSchemaRestored: async () => {
+      coreSchemaEnsured = false;
+      userProfileColumnsEnsured = false;
+      await ensureUserProfileColumns(getDb()).catch(() => {});
+    }
+  });
 
   // Initialize IT CapEx & OpEx Planning & Fiscal Control routes
   setupItBudgetRoutes(app, authenticateToken, getDb);

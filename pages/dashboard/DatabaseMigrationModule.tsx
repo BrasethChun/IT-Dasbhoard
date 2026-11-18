@@ -4,7 +4,7 @@ import {
   ExternalLink, Copy, Check, ArrowRight, ShieldCheck, Key, Lock, Globe,
   FileCode, Layers, Info, RotateCcw, Clock, HardDrive, Play, Trash2, 
   Calendar, Shield, Settings2, Sparkles, ArrowDownToLine, AlertTriangle, X,
-  BellRing, Radio, WifiOff, Send
+  BellRing, Radio, WifiOff, Send, Upload, FileUp, FileCheck2
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { SmartModal, SMART_INPUT_CLASS } from '../../components/ui/SmartModal';
@@ -54,10 +54,11 @@ interface BackupMeta {
   createdAt: string;
   sizeBytes: number;
   formattedSize: string;
-  trigger: 'scheduled_12h' | 'manual' | 'pre_restore_safety';
+  trigger: 'scheduled_12h' | 'manual' | 'pre_restore_safety' | 'imported_godaddy';
   database: string;
   host: string;
   tableCount: number;
+  sourceDatabase?: string;
   recordCounts: {
     notes: number;
     subscriptions: number;
@@ -68,6 +69,23 @@ interface BackupMeta {
   };
   status: 'success' | 'failed';
   error?: string;
+}
+
+interface SqlImportPreview {
+  filename: string;
+  targetDatabase: string;
+  targetHost: string;
+  valid: boolean;
+  sizeBytes: number;
+  formattedSize: string;
+  sourceDatabase: string | null;
+  tablesFound: string[];
+  createTableCount: number;
+  dropTableCount: number;
+  insertCount: number;
+  hasCreateDbOrUse: boolean;
+  hasDefiner: boolean;
+  estimatedStatements: number;
 }
 
 interface BackupConfig {
@@ -120,7 +138,19 @@ export const DatabaseMigrationModule: React.FC = () => {
   const [configModalOpen, setConfigModalOpen] = useState(false);
   const [tempInterval, setTempInterval] = useState(12);
   const [tempEnabled, setTempEnabled] = useState(true);
+  const [tempKeepMax, setTempKeepMax] = useState(30);
   const [savingConfig, setSavingConfig] = useState(false);
+
+  // Import GoDaddy SQL Modal State
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importRawSql, setImportRawSql] = useState('');
+  const [importInputMode, setImportInputMode] = useState<'file' | 'paste'>('file');
+  const [importApplyMode, setImportApplyMode] = useState<'apply' | 'vault_only'>('apply');
+  const [analyzingSql, setAnalyzingSql] = useState(false);
+  const [sqlPreview, setSqlPreview] = useState<SqlImportPreview | null>(null);
+  const [importingSql, setImportingSql] = useState(false);
+  const [importModalError, setImportModalError] = useState('');
 
   // Telegram Connection Loss Alert State
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
@@ -174,6 +204,7 @@ export const DatabaseMigrationModule: React.FC = () => {
           setBackupConfig(data.config);
           setTempInterval(data.config.intervalHours || 12);
           setTempEnabled(data.config.enabled ?? true);
+          setTempKeepMax(data.config.keepMax || 30);
         }
       }
     } catch (err) {
@@ -300,7 +331,8 @@ export const DatabaseMigrationModule: React.FC = () => {
         },
         body: JSON.stringify({
           enabled: tempEnabled,
-          intervalHours: Number(tempInterval) || 12
+          intervalHours: Number(tempInterval) || 12,
+          keepMax: Number(tempKeepMax) || 30
         })
       });
       const data = await res.json();
@@ -309,9 +341,130 @@ export const DatabaseMigrationModule: React.FC = () => {
       setConfigModalOpen(false);
       setRestoreSuccess(`Automated backup schedule set to every ${tempInterval} hours (${tempEnabled ? 'Active' : 'Disabled'}).`);
     } catch (err: any) {
-      alert(err.message);
+      setRestoreError(err.message || 'Failed to update schedule');
     } finally {
       setSavingConfig(false);
+    }
+  };
+
+  const openImportModal = () => {
+    setImportFile(null);
+    setImportRawSql('');
+    setImportInputMode('file');
+    setImportApplyMode('apply');
+    setSqlPreview(null);
+    setImportModalError('');
+    setImportModalOpen(true);
+  };
+
+  const analyzeSqlSource = async (params: { file?: File | null; sqlContent?: string }) => {
+    setAnalyzingSql(true);
+    setImportModalError('');
+    setSqlPreview(null);
+    try {
+      const token = localStorage.getItem('token');
+      let res: Response;
+      if (params.file) {
+        const formData = new FormData();
+        formData.append('file', params.file);
+        res = await fetch('/api/db/import-sql/preview', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData
+        });
+      } else {
+        res = await fetch('/api/db/import-sql/preview', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            sqlContent: params.sqlContent || '',
+            filename: 'pasted_godaddy_dump.sql'
+          })
+        });
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to inspect SQL file');
+      if (!data.valid) {
+        setImportModalError('No valid CREATE TABLE or INSERT INTO statements were detected in this file.');
+      }
+      setSqlPreview(data);
+    } catch (err: any) {
+      setImportModalError(err.message || 'Unable to inspect SQL content');
+    } finally {
+      setAnalyzingSql(false);
+    }
+  };
+
+  const handleSelectImportFile = (file: File | null) => {
+    setImportFile(file);
+    if (file) {
+      analyzeSqlSource({ file });
+    } else {
+      setSqlPreview(null);
+      setImportModalError('');
+    }
+  };
+
+  const handleExecuteSqlImport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (importInputMode === 'file' && !importFile) {
+      setImportModalError('Please choose a .sql file first.');
+      return;
+    }
+    if (importInputMode === 'paste' && !importRawSql.trim()) {
+      setImportModalError('Please paste SQL statements first.');
+      return;
+    }
+
+    try {
+      setImportingSql(true);
+      setImportModalError('');
+      setRestoreSuccess('');
+      setRestoreError('');
+
+      const token = localStorage.getItem('token');
+      let res: Response;
+      if (importInputMode === 'file' && importFile) {
+        const formData = new FormData();
+        formData.append('file', importFile);
+        formData.append('mode', importApplyMode);
+        res = await fetch('/api/db/import-sql', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: formData
+        });
+      } else {
+        res = await fetch('/api/db/import-sql', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            sqlContent: importRawSql,
+            filename: 'pasted_godaddy_dump.sql',
+            mode: importApplyMode
+          })
+        });
+      }
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to import GoDaddy SQL');
+
+      setImportModalOpen(false);
+      const rc = data.recordCounts || {};
+      const countSummary = data.mode === 'apply'
+        ? ` Active records — Users: ${rc.users ?? 0}, Notes: ${rc.notes ?? 0}, Subscriptions: ${rc.subscriptions ?? 0}, Assets: ${rc.assets ?? 0}.`
+        : '';
+      setRestoreSuccess(`${data.message}${countSummary}`);
+      await Promise.all([fetchStatus(), fetchBackups()]);
+    } catch (err: any) {
+      setImportModalError(err.message || 'SQL import failed');
+    } finally {
+      setImportingSql(false);
     }
   };
 
@@ -502,7 +655,7 @@ export const DatabaseMigrationModule: React.FC = () => {
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2.5">
             <Button
               onClick={handleCreateBackup}
               disabled={creatingBackup}
@@ -511,6 +664,13 @@ export const DatabaseMigrationModule: React.FC = () => {
             >
               <Shield size={16} className={creatingBackup ? 'animate-spin' : ''} />
               {creatingBackup ? 'Creating Snapshot...' : 'Create Backup Now'}
+            </Button>
+            <Button
+              onClick={openImportModal}
+              size="md"
+              className="bg-violet-600 hover:bg-violet-500 text-white font-semibold shadow-md flex items-center justify-center gap-2 whitespace-nowrap"
+            >
+              <Upload size={16} /> Import GoDaddy SQL
             </Button>
             <Button
               onClick={downloadDump}
@@ -552,14 +712,18 @@ export const DatabaseMigrationModule: React.FC = () => {
           </div>
 
           <div className="bg-white/5 rounded-xl p-3 border border-white/10">
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">12h Auto-Backup</span>
+            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+              {backupConfig?.intervalHours || 12}h Auto-Backup
+            </span>
             <div className="flex items-center gap-1.5 mt-1">
               <span className={`h-2 w-2 rounded-full ${backupConfig?.enabled ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`} />
               <p className="text-xs font-semibold text-white">
-                {backupConfig?.enabled ? 'Active (12h)' : 'Paused'}
+                {backupConfig?.enabled ? `Active (${backupConfig?.intervalHours || 12}h)` : 'Paused'}
               </p>
             </div>
-            <p className="text-[11px] text-emerald-400 mt-0.5 truncate">{getTimeRemaining(backupConfig?.nextRunAt ?? null)}</p>
+            <p className="text-[11px] text-emerald-400 mt-0.5 truncate">
+              {backupConfig?.enabled ? getTimeRemaining(backupConfig?.nextRunAt ?? null) : 'Schedule disabled'}
+            </p>
           </div>
 
           <div className="bg-white/5 rounded-xl p-3 border border-white/10">
@@ -769,14 +933,30 @@ export const DatabaseMigrationModule: React.FC = () => {
                 </span>
               </div>
               <div>
-                <h4 className="text-sm font-bold text-slate-900">12-Hour Automated Interval</h4>
+                <h4 className="text-sm font-bold text-slate-900">
+                  {backupConfig?.intervalHours || 12}-Hour Automated Interval
+                </h4>
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Scheduled daily backups run every 12 hours (00:00 & 12:00 UTC) capturing complete snapshots of all 18 tables.
+                  {backupConfig?.intervalHours === 6
+                    ? 'High-frequency backups run every 6 hours (00:00, 06:00, 12:00, 18:00 UTC) across all database tables.'
+                    : backupConfig?.intervalHours === 24
+                      ? 'Daily automated snapshots run every 24 hours (00:00 UTC) across all database tables.'
+                      : 'Scheduled daily backups run every 12 hours (00:00 & 12:00 UTC) capturing complete snapshots of all tables.'}
                 </p>
               </div>
-              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
-                <span className="text-slate-500">Next Scheduled Run:</span>
-                <span className="font-semibold text-indigo-600">{getTimeRemaining(backupConfig?.nextRunAt ?? null)}</span>
+              <div className="pt-2 border-t border-slate-100 space-y-1 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Last Backup:</span>
+                  <span className="font-semibold text-slate-700">
+                    {backupConfig?.lastRunAt ? formatDateTime(backupConfig.lastRunAt) : 'Pending first snapshot'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Next Scheduled Run:</span>
+                  <span className="font-semibold text-indigo-600">
+                    {backupConfig?.enabled ? getTimeRemaining(backupConfig?.nextRunAt ?? null) : 'Paused'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -790,9 +970,9 @@ export const DatabaseMigrationModule: React.FC = () => {
                 </span>
               </div>
               <div>
-                <h4 className="text-sm font-bold text-slate-900">Pre-Restore Safety Snapshot</h4>
+                <h4 className="text-sm font-bold text-slate-900">Pre-Restore &amp; Pre-Import Safety</h4>
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Before any snapshot is restored, the system automatically takes a pre-restore safety backup so you can revert anytime.
+                  Before any snapshot restore or GoDaddy SQL import runs, the system automatically saves a safety snapshot so you can revert anytime.
                 </p>
               </div>
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
@@ -816,15 +996,18 @@ export const DatabaseMigrationModule: React.FC = () => {
                 </div>
                 <h4 className="text-sm font-bold text-slate-900">Automated Retention Policy</h4>
                 <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Retains the last {backupConfig?.keepMax || 30} full database snapshots locally and on GoDaddy migration tape storage.
+                  Retains the last {backupConfig?.keepMax || 30} full SQL snapshots in the vault for instant 1-click disaster recovery or download.
                 </p>
               </div>
               <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                 <span className="text-slate-500">Storage Used:</span>
                 <span className="font-semibold text-slate-800">
-                  {backups.reduce((acc, b) => acc + (b.sizeBytes || 0), 0) > 0 
-                    ? `${(backups.reduce((acc, b) => acc + (b.sizeBytes || 0), 0) / 1024).toFixed(1)} KB`
-                    : '280 KB'}
+                  {(() => {
+                    const totalBytes = backups.reduce((acc, b) => acc + (b.sizeBytes || 0), 0);
+                    return totalBytes >= 1024 * 1024
+                      ? `${(totalBytes / (1024 * 1024)).toFixed(2)} MB`
+                      : `${(totalBytes / 1024).toFixed(1)} KB`;
+                  })()}
                 </span>
               </div>
             </div>
@@ -839,12 +1022,20 @@ export const DatabaseMigrationModule: React.FC = () => {
                   Database Snapshots & Disaster Recovery Tape
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Click <strong>Restore</strong> on any snapshot to recover missing or lost records into your live database.
+                  Import a GoDaddy <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-[11px]">.sql</code> dump or click <strong>Restore</strong> on any snapshot to recover records into your live database.
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <DensityToggle />
+                <Button
+                  onClick={openImportModal}
+                  variant="secondary"
+                  size="sm"
+                  className="bg-violet-50 hover:bg-violet-100 text-violet-700 border-violet-200 font-semibold flex items-center gap-1.5 whitespace-nowrap"
+                >
+                  <Upload size={14} /> Import GoDaddy SQL
+                </Button>
                 <Button
                   onClick={handleCreateBackup}
                   disabled={creatingBackup}
@@ -923,6 +1114,10 @@ export const DatabaseMigrationModule: React.FC = () => {
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-semibold text-[10px] bg-amber-50 text-amber-700 border border-amber-200">
                               <ShieldCheck size={10} /> Safety Snapshot
                             </span>
+                          ) : b.trigger === 'imported_godaddy' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-semibold text-[10px] bg-violet-50 text-violet-700 border border-violet-200">
+                              <Upload size={10} /> GoDaddy SQL Import
+                            </span>
                           ) : (
                             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-semibold text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200">
                               <Sparkles size={10} /> Manual Backup
@@ -932,7 +1127,11 @@ export const DatabaseMigrationModule: React.FC = () => {
 
                         <td className="py-3.5 px-4 whitespace-nowrap">
                           <div className="font-mono text-slate-700 font-semibold">{b.database}</div>
-                          <div className="text-[10px] text-slate-400">{b.host}</div>
+                          <div className="text-[10px] text-slate-400">
+                            {b.sourceDatabase && b.sourceDatabase !== b.database
+                              ? `from ${b.sourceDatabase}`
+                              : b.host}
+                          </div>
                         </td>
 
                         <td className="py-3.5 px-4">
@@ -1581,16 +1780,289 @@ export const DatabaseMigrationModule: React.FC = () => {
             </p>
           </div>
 
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+              Snapshot Retention Limit
+            </label>
+            <select
+              value={tempKeepMax}
+              onChange={(e) => setTempKeepMax(Number(e.target.value))}
+              className={SMART_INPUT_CLASS}
+            >
+              <option value={10}>Keep last 10 snapshots</option>
+              <option value={30}>Keep last 30 snapshots (Recommended)</option>
+              <option value={60}>Keep last 60 snapshots</option>
+              <option value={100}>Keep last 100 snapshots</option>
+            </select>
+          </div>
+
           <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 rounded-xl text-xs text-slate-600 dark:text-slate-300 space-y-1">
             <div className="flex justify-between">
-              <span>Snapshot Retention:</span>
-              <span className="font-semibold text-slate-800 dark:text-slate-100">Keep last 30 snapshots</span>
+              <span>Last Auto/Manual Run:</span>
+              <span className="font-semibold text-slate-800 dark:text-slate-100">
+                {backupConfig?.lastRunAt ? formatDateTime(backupConfig.lastRunAt) : 'Not yet run'}
+              </span>
             </div>
             <div className="flex justify-between">
               <span>Snapshot Format:</span>
               <span className="font-semibold text-slate-800 dark:text-slate-100">UTF-8 phpMyAdmin SQL</span>
             </div>
           </div>
+        </form>
+      </SmartModal>
+
+      {/* IMPORT GODADDY SQL MODAL */}
+      <SmartModal
+        open={importModalOpen}
+        onClose={() => { if (!importingSql) setImportModalOpen(false); }}
+        title="Import GoDaddy SQL Dump"
+        subtitle="Cross-Database Migration & Disaster Recovery"
+        icon={<Upload size={18} className="text-violet-600 dark:text-violet-400" />}
+        size="lg"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="md"
+              onClick={() => setImportModalOpen(false)}
+              disabled={importingSql}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="import-godaddy-sql-form"
+              size="md"
+              disabled={
+                importingSql ||
+                analyzingSql ||
+                (importInputMode === 'file' ? !importFile : !importRawSql.trim())
+              }
+              className="bg-violet-600 hover:bg-violet-700 text-white font-semibold flex items-center gap-2 whitespace-nowrap"
+            >
+              <Upload size={15} className={importingSql ? 'animate-spin' : ''} />
+              {importingSql
+                ? (importApplyMode === 'apply' ? 'Importing into Database...' : 'Saving to Vault...')
+                : (importApplyMode === 'apply' ? 'Import & Apply to Live DB' : 'Save to Backup Vault')}
+            </Button>
+          </>
+        }
+      >
+        <form id="import-godaddy-sql-form" onSubmit={handleExecuteSqlImport} className="space-y-4">
+          {/* Source Input Tabs */}
+          <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-700 pb-2">
+            <button
+              type="button"
+              onClick={() => {
+                setImportInputMode('file');
+                setImportModalError('');
+                if (importFile) analyzeSqlSource({ file: importFile });
+                else setSqlPreview(null);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                importInputMode === 'file'
+                  ? 'bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+              }`}
+            >
+              Upload .sql File
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setImportInputMode('paste');
+                setImportModalError('');
+                setSqlPreview(null);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                importInputMode === 'paste'
+                  ? 'bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800'
+                  : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'
+              }`}
+            >
+              Paste SQL Statements
+            </button>
+          </div>
+
+          {importInputMode === 'file' ? (
+            <label className="block border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-violet-400 dark:hover:border-violet-500 rounded-2xl p-6 text-center cursor-pointer transition-colors bg-slate-50/70 dark:bg-slate-800/40">
+              <input
+                type="file"
+                accept=".sql,.txt"
+                className="hidden"
+                onChange={(e) => handleSelectImportFile(e.target.files?.[0] || null)}
+              />
+              <div className="w-11 h-11 rounded-xl bg-violet-100 dark:bg-violet-900/50 text-violet-600 dark:text-violet-300 flex items-center justify-center mx-auto mb-2.5">
+                {importFile ? <FileCheck2 size={22} /> : <FileUp size={22} />}
+              </div>
+              {importFile ? (
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{importFile.name}</p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {(importFile.size / 1024).toFixed(1)} KB &bull; Click to choose a different .sql file
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                    Click to select GoDaddy phpMyAdmin / cPanel <span className="font-mono text-violet-600">.sql</span> dump
+                  </p>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Supports cross-database dumps (e.g. from <code className="font-mono">khema_ainotes</code> or <code className="font-mono">ainotes_db</code>) up to 64 MB
+                  </p>
+                </div>
+              )}
+            </label>
+          ) : (
+            <div className="space-y-2">
+              <textarea
+                rows={7}
+                value={importRawSql}
+                onChange={(e) => setImportRawSql(e.target.value)}
+                placeholder="Paste CREATE TABLE / INSERT INTO statements from phpMyAdmin..."
+                className={`${SMART_INPUT_CLASS} font-mono text-[11px]`}
+              />
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!importRawSql.trim() || analyzingSql}
+                  onClick={() => analyzeSqlSource({ sqlContent: importRawSql })}
+                >
+                  {analyzingSql ? 'Inspecting SQL...' : 'Inspect SQL Structure'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {analyzingSql && (
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2">
+              <RefreshCw size={14} className="animate-spin text-violet-600" />
+              <span>Analyzing GoDaddy SQL structure and compatibility...</span>
+            </div>
+          )}
+
+          {sqlPreview && sqlPreview.valid && (
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 space-y-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+                  <FileCheck2 size={15} className="text-emerald-600" />
+                  SQL Dump Verified ({sqlPreview.formattedSize})
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                  {sqlPreview.tablesFound.length} Tables Detected
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[11px] bg-white dark:bg-slate-900 p-3 rounded-lg border border-slate-200/70 dark:border-slate-700">
+                <div>
+                  <span className="text-slate-400 block">Source Database</span>
+                  <strong className="font-mono text-slate-800 dark:text-slate-200">
+                    {sqlPreview.sourceDatabase || 'Auto-detect / Generic'}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Target Active DB</span>
+                  <strong className="font-mono text-indigo-600 dark:text-indigo-400">
+                    {sqlPreview.targetDatabase}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">CREATE / INSERT Statements</span>
+                  <strong className="text-slate-800 dark:text-slate-200">
+                    {sqlPreview.createTableCount} tables &bull; {sqlPreview.insertCount} inserts
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-400 block">Compatibility Rewrite</span>
+                  <strong className="text-emerald-600">
+                    {sqlPreview.hasCreateDbOrUse || sqlPreview.hasDefiner
+                      ? 'Auto-strips USE / DEFINER'
+                      : 'Direct MySQL Ready'}
+                  </strong>
+                </div>
+              </div>
+
+              {sqlPreview.tablesFound.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {sqlPreview.tablesFound.slice(0, 10).map((t) => (
+                    <span
+                      key={t}
+                      className="px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-mono text-[10px] border border-indigo-100 dark:border-indigo-900"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                  {sqlPreview.tablesFound.length > 10 && (
+                    <span className="px-2 py-0.5 rounded bg-slate-200/70 dark:bg-slate-700 text-slate-600 dark:text-slate-300 text-[10px]">
+                      +{sqlPreview.tablesFound.length - 10} more
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Import Mode Selector */}
+          <div className="space-y-2">
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+              Import Action
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <label
+                className={`p-3 rounded-xl border cursor-pointer transition-all text-xs ${
+                  importApplyMode === 'apply'
+                    ? 'border-violet-500 bg-violet-50/70 dark:bg-violet-950/40 ring-1 ring-violet-500'
+                    : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
+                  <input
+                    type="radio"
+                    name="importApplyMode"
+                    checked={importApplyMode === 'apply'}
+                    onChange={() => setImportApplyMode('apply')}
+                    className="text-violet-600"
+                  />
+                  <span>Import &amp; Apply to Live DB</span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 ml-5">
+                  Creates a safety backup first, archives the file, and restores tables into <strong>{dbStatus?.database || 'active DB'}</strong>.
+                </p>
+              </label>
+
+              <label
+                className={`p-3 rounded-xl border cursor-pointer transition-all text-xs ${
+                  importApplyMode === 'vault_only'
+                    ? 'border-violet-500 bg-violet-50/70 dark:bg-violet-950/40 ring-1 ring-violet-500'
+                    : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                }`}
+              >
+                <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
+                  <input
+                    type="radio"
+                    name="importApplyMode"
+                    checked={importApplyMode === 'vault_only'}
+                    onChange={() => setImportApplyMode('vault_only')}
+                    className="text-violet-600"
+                  />
+                  <span>Save to Snapshot Vault Only</span>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 ml-5">
+                  Stores the <code className="font-mono">.sql</code> dump in your Backup Vault so you can restore it later with 1 click.
+                </p>
+              </label>
+            </div>
+          </div>
+
+          {importModalError && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-300 flex items-start gap-2">
+              <AlertCircle size={15} className="shrink-0 mt-0.5" />
+              <span>{importModalError}</span>
+            </div>
+          )}
         </form>
       </SmartModal>
     </div>
