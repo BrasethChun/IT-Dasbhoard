@@ -211,61 +211,72 @@ export async function notifyGoDaddyRestored(details: DbAlertDetails) {
 }
 
 /**
+ * Single on-demand heartbeat probe for Remote GoDaddy MySQL
+ */
+export async function runRemoteHeartbeatCheck(
+  onStatusChange?: (isRestored: boolean, latencyMs?: number) => void
+): Promise<{ isRemote: boolean; ok: boolean; latencyMs?: number; host: string; error?: string }> {
+  const currentHost = process.env.MYSQL_HOST || '127.0.0.1';
+  const isRemote = currentHost !== '127.0.0.1' && currentHost !== 'localhost';
+
+  if (!isRemote) {
+    return { isRemote: false, ok: true, host: currentHost };
+  }
+
+  try {
+    const startTime = Date.now();
+    const testConn = await mysql.createConnection({
+      host: currentHost,
+      port: Number(process.env.MYSQL_PORT) || 3306,
+      user: process.env.MYSQL_USER,
+      password: process.env.MYSQL_PASSWORD,
+      database: process.env.MYSQL_DATABASE,
+      connectTimeout: 5000,
+      ssl: process.env.MYSQL_SSL === 'true' ? { rejectUnauthorized: false } : undefined
+    });
+
+    await testConn.query('SELECT 1');
+    const latencyMs = Date.now() - startTime;
+    await testConn.end();
+
+    if (onStatusChange) {
+      onStatusChange(true, latencyMs);
+    }
+
+    if (isRemoteReportedDown) {
+      await notifyGoDaddyRestored({
+        host: currentHost,
+        database: process.env.MYSQL_DATABASE,
+        latencyMs
+      });
+    }
+
+    return { isRemote: true, ok: true, latencyMs, host: currentHost };
+  } catch (err: any) {
+    console.warn(`[Remote MySQL Heartbeat Failed] (${err.code}: ${err.message})`);
+    if (onStatusChange) {
+      onStatusChange(false);
+    }
+    await notifyGoDaddyDisconnection({
+      host: currentHost,
+      database: process.env.MYSQL_DATABASE,
+      errorCode: err.code || 'CONNECTION_FAILED',
+      errorMessage: err.message || 'Remote heartbeat check failed',
+      actionTaken: 'Heartbeat failure detected. Temporary replica buffering active while auto-reconnecting.'
+    });
+    return { isRemote: true, ok: false, host: currentHost, error: err.message };
+  }
+}
+
+/**
  * Periodic Heartbeat & Health Check Worker for Remote GoDaddy MySQL
  */
 export function startRemoteDatabaseHeartbeat(
   getDb: () => mysql.Pool,
   onStatusChange?: (isRestored: boolean, latencyMs?: number) => void
 ) {
-  // Run heartbeat monitor every 30 seconds for faster recovery
   cron.schedule('*/30 * * * * *', async () => {
-    const currentHost = process.env.MYSQL_HOST || '127.0.0.1';
-    const isRemote = currentHost !== '127.0.0.1' && currentHost !== 'localhost';
-
-    // If app is operating on remote GoDaddy MySQL:
-    if (isRemote) {
-      try {
-        const startTime = Date.now();
-        const testConn = await mysql.createConnection({
-          host: currentHost,
-          port: Number(process.env.MYSQL_PORT) || 3306,
-          user: process.env.MYSQL_USER,
-          password: process.env.MYSQL_PASSWORD,
-          database: process.env.MYSQL_DATABASE,
-          connectTimeout: 5000,
-          ssl: process.env.MYSQL_SSL === 'true' ? { rejectUnauthorized: false } : undefined
-        });
-
-        await testConn.query('SELECT 1');
-        const latencyMs = Date.now() - startTime;
-        await testConn.end();
-
-        if (onStatusChange) {
-          onStatusChange(true, latencyMs);
-        }
-
-        // If it was down, notify restored!
-        if (isRemoteReportedDown) {
-          await notifyGoDaddyRestored({
-            host: currentHost,
-            database: process.env.MYSQL_DATABASE,
-            latencyMs
-          });
-        }
-      } catch (err: any) {
-        console.warn(`[Remote MySQL Heartbeat Failed] (${err.code}: ${err.message})`);
-        if (onStatusChange) {
-          onStatusChange(false);
-        }
-        await notifyGoDaddyDisconnection({
-          host: currentHost,
-          database: process.env.MYSQL_DATABASE,
-          errorCode: err.code || 'CONNECTION_FAILED',
-          errorMessage: err.message || 'Remote heartbeat check failed',
-          actionTaken: 'Heartbeat failure detected. Temporary replica buffering active while auto-reconnecting.'
-        });
-      }
-    }
+    await runRemoteHeartbeatCheck(onStatusChange).catch(() => {});
   });
 
   console.log('[Remote MySQL Monitor] Heartbeat monitor initialized (30-second cycle).');

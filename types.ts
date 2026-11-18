@@ -19,6 +19,9 @@ export interface Note {
   meetingVenue?: string;
   agenda?: string;
   meetingPriority?: string;
+  linkedSourceType?: 'it_meeting' | 'personal_event' | null;
+  linkedSourceId?: string | null;
+  linkedSourceTitle?: string | null;
 }
 
 export interface User {

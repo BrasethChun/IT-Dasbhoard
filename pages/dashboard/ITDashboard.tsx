@@ -6,6 +6,8 @@ import {
   Plus, Edit, Trash2, Save, MapPin
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { SmartModal } from '../../components/ui/SmartModal';
+import { DensityToggle } from '../../components/ui/SmartGrid';
 import { RoutePath } from '../../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, 
@@ -201,8 +203,9 @@ export const ITDashboard: React.FC = () => {
       doc.setFont('helvetica', 'bold');
       doc.text('2. Multi-Facility Operations & Infrastructure Roll-Up', 14, nextY);
 
+      const combinedAssets = [...(Array.isArray(allFixed) ? allFixed : []), ...(Array.isArray(allControl) ? allControl : [])];
       const siteRows = sites.map((s: any) => {
-        const sAssets = (Array.isArray(allAssets) ? allAssets : []).filter(a => a.site_name === s.site_name).length;
+        const sAssets = combinedAssets.filter(a => a.site_name === s.site_name).length;
         const sStaff = (Array.isArray(allStaff) ? allStaff : []).filter(st => st.site_name === s.site_name || (st.monthly_schedule && st.monthly_schedule.includes(s.site_name))).length;
         const sTickets = (Array.isArray(allTickets) ? allTickets : []).filter(t => t.site_name === s.site_name).reduce((sum, t) => 
           sum + (t.in_progress_count || 0) + (t.testing_count || 0) + (t.not_started_count || 0) + (t.completed_count || 0), 0);
@@ -227,36 +230,36 @@ export const ITDashboard: React.FC = () => {
   };
 
   return (
-    <div className="w-full pb-12 animate-in fade-in duration-500">
+    <div className="w-full pb-8 sm:pb-12 animate-in fade-in duration-500">
       {/* Header for IT Tools or Executive Tab */}
       {isToolsView ? (
         <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-indigo-800 to-slate-900 tracking-tight flex items-center gap-2.5">
-              <Wrench size={22} className="text-indigo-600" />
-              <span>IT Tools & Operations</span>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-indigo-800 to-slate-900 tracking-tight flex items-center gap-2.5">
+              <Wrench size={20} className="text-indigo-600 shrink-0" />
+              <span>IT Tools &amp; Operations</span>
             </h1>
             <p className="text-slate-500 mt-1 text-xs font-medium">Manage support tickets, SLAs, technician assignments, and hospital staffing coverage</p>
           </div>
           <button
             onClick={() => handleTabChange('executive')}
-            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-xl transition-colors border border-indigo-200/50 self-start sm:self-auto flex items-center gap-1.5"
+            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-3.5 py-2 rounded-xl transition-colors border border-indigo-200/50 self-start sm:self-auto flex items-center gap-1.5 min-h-[40px] whitespace-nowrap shrink-0 cursor-pointer"
           >
             <span>&larr;</span>
             <span>Back to IT Dashboard</span>
           </button>
         </div>
       ) : activeTab === 'executive' && (
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-indigo-800 to-slate-900 tracking-tight">
+        <div className="mb-5 sm:mb-6">
+          <h1 className="text-2xl sm:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 via-indigo-800 to-slate-900 tracking-tight">
             IT Operations Dashboard
           </h1>
-          <p className="text-slate-500 mt-2 font-medium">Consolidated multi-module reporting framework across {siteFilter}</p>
+          <p className="text-slate-500 mt-1.5 text-sm font-medium">Consolidated multi-module reporting framework across {siteFilter}</p>
         </div>
       )}
 
       {/* Module Navigation Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-6 border-b border-slate-200/60 hide-scrollbar">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-5 sm:mb-6 border-b border-slate-200/60 hide-scrollbar">
         {currentTabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id || (tab.id === 'subscriptions' && activeTab === 'cloud-subscriptions');
@@ -265,7 +268,7 @@ export const ITDashboard: React.FC = () => {
               key={tab.id}
               type="button"
               onClick={() => handleTabChange(tab.id)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 ${
+              className={`min-h-[40px] shrink-0 flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all duration-200 cursor-pointer ${
                 isActive
                   ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/25 ring-2 ring-indigo-600/30'
                   : 'bg-white/80 hover:bg-white text-slate-600 hover:text-slate-900 border border-slate-200/60 shadow-sm'
@@ -279,7 +282,7 @@ export const ITDashboard: React.FC = () => {
       </div>
 
       {/* Content Area */}
-      <div className="bg-white/80 backdrop-blur-2xl rounded-2xl border border-white p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)] min-h-[600px] overflow-x-auto">
+      <div className="bg-white/80 backdrop-blur-2xl rounded-2xl border border-white p-3.5 sm:p-6 shadow-[0_8px_30px_rgba(0,0,0,0.04)] min-h-[420px] sm:min-h-[600px] overflow-x-auto">
         {activeTab === 'executive' && (
           <ExecutiveSummaryModule 
             kpis={dbKpis} 
@@ -315,11 +318,14 @@ const DataTable = ({ title, cols, data }: any) => (
   <div className="animate-in slide-in-from-bottom-4 duration-500">
     <div className="flex justify-between items-center mb-6">
       <h2 className="text-xl font-bold text-slate-800 tracking-tight">{title}</h2>
-      <Button variant="secondary" size="sm" className="bg-white"><Download size={14} className="mr-2"/> Export CSV</Button>
+      <div className="flex items-center gap-2">
+        <DensityToggle />
+        <Button variant="secondary" size="sm" className="bg-white"><Download size={14} className="mr-2"/> Export CSV</Button>
+      </div>
     </div>
-    <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
-      <table className="w-full text-sm text-left whitespace-nowrap">
-        <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+    <div className="overflow-x-auto max-h-[68vh] rounded-xl border border-slate-200 shadow-sm">
+      <table className="smart-grid-table w-full text-sm text-left whitespace-nowrap">
+        <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 border-b border-slate-200">
           <tr>
             {cols.map((c: string, i: number) => <th key={i} className="px-5 py-3.5 font-semibold">{c}</th>)}
           </tr>
@@ -356,7 +362,7 @@ const ExpenseReport = () => (
     </div>
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
        <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-         <table className="w-full text-sm text-left">
+         <table className="smart-grid-table w-full text-sm text-left">
            <thead className="bg-slate-50 border-b">
              <tr><th className="px-4 py-3">Category</th><th className="px-4 py-3">Budget</th><th className="px-4 py-3">Actual</th><th className="px-4 py-3">Variance</th></tr>
            </thead>
@@ -488,9 +494,10 @@ const StaffingReport = ({ sites }: any) => {
 
   return (
     <div className="animate-in slide-in-from-bottom-4 duration-500">
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-6">
         <h2 className="text-xl font-bold text-slate-800 tracking-tight">IT Staffing Report</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <DensityToggle />
           <Button onClick={openAddModal} className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 text-sm shadow-sm">
             <Plus size={16} /> Add Staff
           </Button>
@@ -498,9 +505,9 @@ const StaffingReport = ({ sites }: any) => {
         </div>
       </div>
       
-      <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
-        <table className="w-full text-sm text-left whitespace-nowrap">
-          <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+      <div className="overflow-x-auto max-h-[68vh] rounded-xl border border-slate-200 shadow-sm">
+        <table className="smart-grid-table w-full text-sm text-left whitespace-nowrap">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 border-b border-slate-200">
             <tr>
               <th className="px-5 py-3.5 font-semibold">Staff ID</th>
               <th className="px-5 py-3.5 font-semibold">Site</th>
@@ -554,67 +561,70 @@ const StaffingReport = ({ sites }: any) => {
         </table>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md overflow-hidden flex flex-col">
-            <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="font-semibold text-slate-800">{editingId ? 'Edit Staff Member' : 'Add Staff Member'}</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
-            </div>
-            <form onSubmit={handleSubmit} className="p-5 flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Staff ID</label>
-                  <input required type="text" value={formData.staff_id} onChange={e => setFormData({...formData, staff_id: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Employee Name</label>
-                  <input required type="text" value={formData.employee_name} onChange={e => setFormData({...formData, employee_name: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Site Name</label>
-                  <select value={formData.site_name} onChange={e => setFormData({...formData, site_name: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                    {sites && sites.map((s: any) => <option key={s.id}>{s.site_name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Role/Position</label>
-                  <input required type="text" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. System Admin" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                 <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
-                  <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                    <option>Active</option>
-                    <option>On Leave</option>
-                    <option>Terminated</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Performance (Used if no tickets found)</label>
-                  <input type="number" step="0.1" max="5" value={formData.performance_score} onChange={e => setFormData({...formData, performance_score: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. 4.8" />
-                </div>
-              </div>
-               <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Standby at (Hold Ctrl/Cmd to select multiple)</label>
-                  <select multiple value={formData.monthly_schedule ? formData.monthly_schedule.split(', ') : []} onChange={e => {
-                    const selectedOptions = Array.from(e.target.selectedOptions, option => option.value);
-                    setFormData({...formData, monthly_schedule: selectedOptions.join(', ')});
-                  }} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none min-h-[80px]">
-                    {sites && sites.map((s: any) => <option key={s.id} value={s.site_name}>{s.site_name}</option>)}
-                  </select>
-                </div>
-              <div className="mt-4 flex justify-end gap-3">
-                <Button variant="secondary" onClick={() => setShowModal(false)} type="button">Cancel</Button>
-                <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white"><Save size={16} className="mr-2"/> Save</Button>
-              </div>
-            </form>
+      <SmartModal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        title={editingId ? 'Edit Staff Member' : 'Add Staff Member'}
+        subtitle="Manage IT specialist site assignment and standby coverage"
+        icon={<Users size={18} className="text-indigo-600" />}
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2.5 w-full">
+            <Button variant="secondary" onClick={() => setShowModal(false)} type="button">Cancel</Button>
+            <Button type="submit" form="it-staff-modal-form" className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              <Save size={15} className="mr-1.5" /> Save
+            </Button>
           </div>
-        </div>
-      )}
+        }
+      >
+        <form id="it-staff-modal-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Staff ID</label>
+              <input required type="text" value={formData.staff_id} onChange={e => setFormData({...formData, staff_id: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Employee Name</label>
+              <input required type="text" value={formData.employee_name} onChange={e => setFormData({...formData, employee_name: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Site Name</label>
+              <select value={formData.site_name} onChange={e => setFormData({...formData, site_name: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                {sites && sites.map((s: any) => <option key={s.id}>{s.site_name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Role/Position</label>
+              <input required type="text" value={formData.role} onChange={e => setFormData({...formData, role: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. System Admin" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
+              <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                <option>Active</option>
+                <option>On Leave</option>
+                <option>Terminated</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Performance (If no tickets)</label>
+              <input type="number" step="0.1" max="5" value={formData.performance_score} onChange={e => setFormData({...formData, performance_score: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. 4.8" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Standby at (Hold Ctrl/Cmd to select multiple)</label>
+            <select multiple value={formData.monthly_schedule ? formData.monthly_schedule.split(', ') : []} onChange={e => {
+              const selectedOptions = Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value);
+              setFormData({...formData, monthly_schedule: selectedOptions.join(', ')});
+            }} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none min-h-[84px]">
+              {sites && sites.map((s: any) => <option key={s.id} value={s.site_name}>{s.site_name}</option>)}
+            </select>
+          </div>
+        </form>
+      </SmartModal>
     </div>
   );
 };
@@ -766,71 +776,72 @@ const HelpDeskReport = ({ sites }: any) => {
 
   return (
     <div className="animate-in slide-in-from-bottom-4 duration-500 flex flex-col gap-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-wrap justify-between items-center gap-3">
         <div>
           <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Helpdesk Management</h2>
           <p className="text-sm text-slate-500 mt-1">Track and export ticketing operation reports</p>
         </div>
-        <div className="flex gap-3 items-center">
-          <div className="flex items-center gap-2 bg-white rounded-lg border border-slate-200 p-1">
-            <span className="text-sm text-slate-500 px-2">Report Month:</span>
-            <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="text-sm outline-none bg-transparent mr-1" />
+        <div className="flex flex-wrap gap-2.5 items-center">
+          <div className="flex items-center gap-2 bg-white rounded-xl border border-slate-200 p-1">
+            <span className="text-xs font-medium text-slate-500 px-2">Report Month:</span>
+            <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="text-xs outline-none bg-transparent mr-1" />
             {filterMonth && (
               <button
                 type="button"
                 onClick={() => setFilterMonth('')}
-                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 bg-indigo-50 hover:bg-indigo-100 rounded transition-colors"
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
               >
                 All Months
               </button>
             )}
           </div>
-          <Button variant="outline" onClick={exportToCSV} className="bg-white gap-2 text-sm shadow-sm border-slate-200 text-slate-700 hover:text-indigo-600 font-medium transition-colors">
-            <Download size={16} /> Export Management CSV
+          <DensityToggle />
+          <Button variant="outline" onClick={exportToCSV} className="bg-white gap-2 text-xs shadow-sm border-slate-200 text-slate-700 hover:text-indigo-600 font-medium transition-colors">
+            <Download size={14} /> Export CSV
           </Button>
-          <Button onClick={openAddModal} className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 text-sm shadow-sm transition-colors">
-            <Plus size={16} /> Add Report
+          <Button onClick={openAddModal} className="bg-indigo-600 hover:bg-indigo-700 text-white gap-2 text-xs shadow-sm transition-colors">
+            <Plus size={14} /> Add Report
           </Button>
         </div>
       </div>
       
       {/* Management Summary Cards */}
-      <div className="grid grid-cols-5 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
+      <div className="smart-kpi-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="smart-kpi-card bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Total Reported</p>
-          <p className="text-3xl font-bold text-slate-800">
+          <p className="text-3xl font-bold text-slate-800 tabular-nums">
             {filteredTickets.reduce((acc: any, t: any) => acc + (t.in_progress_count || 0) + (t.testing_count || 0) + (t.not_started_count || 0) + (t.completed_count || 0), 0)}
           </p>
         </div>
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center border-l-4 border-l-slate-400">
+        <div className="smart-kpi-card bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center border-l-4 border-l-slate-400">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Not Started</p>
-          <p className="text-3xl font-bold text-slate-800">
+          <p className="text-3xl font-bold text-slate-800 tabular-nums">
             {filteredTickets.reduce((acc: any, t: any) => acc + (t.not_started_count || 0), 0)}
           </p>
         </div>
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center border-l-4 border-l-amber-400">
+        <div className="smart-kpi-card bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center border-l-4 border-l-amber-400">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">In Progress</p>
-          <p className="text-3xl font-bold text-slate-800">
+          <p className="text-3xl font-bold text-slate-800 tabular-nums">
             {filteredTickets.reduce((acc: any, t: any) => acc + (t.in_progress_count || 0), 0)}
           </p>
         </div>
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center border-l-4 border-l-sky-400">
+        <div className="smart-kpi-card bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center border-l-4 border-l-sky-400">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Testing / Review</p>
-          <p className="text-3xl font-bold text-slate-800">
+          <p className="text-3xl font-bold text-slate-800 tabular-nums">
             {filteredTickets.reduce((acc: any, t: any) => acc + (t.testing_count || 0), 0)}
           </p>
         </div>
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center border-l-4 border-l-emerald-400">
+        <div className="smart-kpi-card bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center border-l-4 border-l-emerald-400">
           <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Completed</p>
-          <p className="text-3xl font-bold text-slate-800">
+          <p className="text-3xl font-bold text-slate-800 tabular-nums">
             {filteredTickets.reduce((acc: any, t: any) => acc + (t.completed_count || 0), 0)}
           </p>
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm mt-2">
-        <table className="w-full text-sm text-left whitespace-nowrap">
-          <thead className="bg-slate-50 text-slate-600 border-b border-slate-200">
+      <div className="overflow-x-auto max-h-[68vh] rounded-xl border border-slate-200 shadow-sm mt-2">
+        <table className="smart-grid-table w-full text-sm text-left whitespace-nowrap">
+          <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 border-b border-slate-200">
             <tr>
               <th className="px-5 py-3.5 font-semibold">Site</th>
               <th className="px-5 py-3.5 font-semibold">Assignee</th>
@@ -873,87 +884,84 @@ const HelpDeskReport = ({ sites }: any) => {
         </table>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-lg overflow-hidden flex flex-col">
-            <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50/50">
-              <h3 className="font-semibold text-slate-800">{editingId ? 'Edit Report' : 'Add Report'}</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-600"><X size={20}/></button>
-            </div>
-            <form onSubmit={handleSubmit} className="p-5 flex flex-col gap-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Helpdesk ID (Auto-gen)</label>
-                  <input disabled={!editingId} type="text" value={formData.helpdesk_id} onChange={e => setFormData({...formData, helpdesk_id: e.target.value})} className="w-full border border-slate-300 bg-slate-50 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder={editingId ? 'e.g. TKT-001' : 'Auto Generated'} />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Site</label>
-                  <select value={formData.site_name} onChange={e => setFormData({...formData, site_name: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                    {sites && sites.map((s: any) => <option key={s.id}>{s.site_name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="col-span-2">
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Assignee</label>
-                  <select value={formData.assignee} onChange={e => {
-                    const emp = e.target.value;
-                    const staffMember = staff.find((s: any) => s.employee_name === emp);
-                    setFormData({
-                      ...formData, 
-                      assignee: emp,
-                      site_name: staffMember ? staffMember.site_name : formData.site_name
-                    });
-                  }} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
-                    <option value="">Unassigned</option>
-                    {staff && staff.map((s: any) => <option key={s.id} value={s.employee_name}>{s.employee_name} ({s.site_name})</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">In-Progress Tickets</label>
-                  <input required type="number" min="0" value={formData.in_progress_count} onChange={e => setFormData({...formData, in_progress_count: parseInt(e.target.value) || 0})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Testing Tickets</label>
-                  <input required type="number" min="0" value={formData.testing_count} onChange={e => setFormData({...formData, testing_count: parseInt(e.target.value) || 0})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Not Started Tickets</label>
-                  <input required type="number" min="0" value={formData.not_started_count} onChange={e => setFormData({...formData, not_started_count: parseInt(e.target.value) || 0})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Completed Tickets</label>
-                  <input required type="number" min="0" value={formData.completed_count} onChange={e => setFormData({...formData, completed_count: parseInt(e.target.value) || 0})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Period From</label>
-                  <input required type="date" value={formData.period_from} onChange={e => setFormData({...formData, period_from: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Period To</label>
-                  <input required type="date" value={formData.period_to} onChange={e => setFormData({...formData, period_to: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-500 mb-1">Create Date Time</label>
-                  <input required type="datetime-local" value={formData.create_date_time} onChange={e => setFormData({...formData, create_date_time: e.target.value})} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
-                </div>
-              </div>
-              <div className="mt-4 flex justify-end gap-3">
-                <Button variant="secondary" onClick={() => setShowModal(false)} type="button">Cancel</Button>
-                <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white"><Save size={16} className="mr-2"/> Save Report</Button>
-              </div>
-            </form>
+      <SmartModal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        title={editingId ? 'Edit Helpdesk Report' : 'Add Helpdesk Report'}
+        subtitle="Record weekly or monthly ticket volume and turnaround status"
+        icon={<Wrench size={18} className="text-indigo-600" />}
+        size="lg"
+        footer={
+          <div className="flex justify-end gap-2.5 w-full">
+            <Button variant="secondary" onClick={() => setShowModal(false)} type="button">Cancel</Button>
+            <Button type="submit" form="it-helpdesk-modal-form" className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              <Save size={15} className="mr-1.5" /> Save Report
+            </Button>
           </div>
-        </div>
-      )}
+        }
+      >
+        <form id="it-helpdesk-modal-form" onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Helpdesk ID (Auto-gen)</label>
+              <input disabled={!editingId} type="text" value={formData.helpdesk_id} onChange={e => setFormData({...formData, helpdesk_id: e.target.value})} className="w-full border border-slate-300 bg-slate-50 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" placeholder={editingId ? 'e.g. TKT-001' : 'Auto Generated'} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Site</label>
+              <select value={formData.site_name} onChange={e => setFormData({...formData, site_name: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                {sites && sites.map((s: any) => <option key={s.id}>{s.site_name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Assignee</label>
+            <select value={formData.assignee} onChange={e => {
+              const emp = e.target.value;
+              const staffMember = staff.find((s: any) => s.employee_name === emp);
+              setFormData({
+                ...formData, 
+                assignee: emp,
+                site_name: staffMember ? staffMember.site_name : formData.site_name
+              });
+            }} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+              <option value="">Unassigned</option>
+              {staff && staff.map((s: any) => <option key={s.id} value={s.employee_name}>{s.employee_name} ({s.site_name})</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">In-Progress</label>
+              <input required type="number" min="0" value={formData.in_progress_count} onChange={e => setFormData({...formData, in_progress_count: parseInt(e.target.value) || 0})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm text-right font-mono tabular-nums focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Testing</label>
+              <input required type="number" min="0" value={formData.testing_count} onChange={e => setFormData({...formData, testing_count: parseInt(e.target.value) || 0})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm text-right font-mono tabular-nums focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Not Started</label>
+              <input required type="number" min="0" value={formData.not_started_count} onChange={e => setFormData({...formData, not_started_count: parseInt(e.target.value) || 0})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm text-right font-mono tabular-nums focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Completed</label>
+              <input required type="number" min="0" value={formData.completed_count} onChange={e => setFormData({...formData, completed_count: parseInt(e.target.value) || 0})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm text-right font-mono tabular-nums focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Period From</label>
+              <input required type="date" value={formData.period_from} onChange={e => setFormData({...formData, period_from: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Period To</label>
+              <input required type="date" value={formData.period_to} onChange={e => setFormData({...formData, period_to: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Create Date Time</label>
+              <input required type="datetime-local" value={formData.create_date_time} onChange={e => setFormData({...formData, create_date_time: e.target.value})} className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+          </div>
+        </form>
+      </SmartModal>
     </div>
   );
 };

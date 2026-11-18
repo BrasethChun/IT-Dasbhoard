@@ -1,0 +1,7 @@
+---
+deployment:
+  tasks:
+    - export PATH=$PATH:/usr/local/bin:/opt/alt/alt-nodejs20/root/usr/bin:/opt/alt/alt-nodejs22/root/usr/bin
+    - /bin/mkdir -p tmp uploads logs
+    - /bin/bash -lc 'for envbin in "$HOME"/nodevenv/*/*/bin "$HOME"/nodevenv/*/*/*/bin; do [ -d "$envbin" ] && export PATH="$envbin:$PATH"; done; npm install --no-audit --no-fund && npm run build'
+    - /bin/touch tmp/restart.txt

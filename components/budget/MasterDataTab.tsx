@@ -210,7 +210,7 @@ export const MasterDataTab: React.FC<MasterDataTabProps> = ({
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="smart-grid-table w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-4">CapEx BU Code</th>
@@ -246,7 +246,7 @@ export const MasterDataTab: React.FC<MasterDataTabProps> = ({
             </p>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="smart-grid-table w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-4 w-28">Dept. Code</th>
@@ -313,7 +313,7 @@ export const MasterDataTab: React.FC<MasterDataTabProps> = ({
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="smart-grid-table w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-4 w-20">Code</th>
@@ -364,7 +364,7 @@ export const MasterDataTab: React.FC<MasterDataTabProps> = ({
             </p>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="smart-grid-table w-full text-left text-xs">
               <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-3">Service Group</th>
@@ -476,7 +476,7 @@ export const MasterDataTab: React.FC<MasterDataTabProps> = ({
 
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="smart-grid-table w-full text-left text-xs">
                 <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                   <tr>
                     <th className="py-2.5 px-4 w-12">#</th>
@@ -654,7 +654,7 @@ export const MasterDataTab: React.FC<MasterDataTabProps> = ({
               <span className="font-mono font-semibold">{filteredCatalog.length} items</span>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="smart-grid-table w-full text-left text-xs">
                 <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                   <tr>
                     <th className="py-2.5 px-3">Category</th>

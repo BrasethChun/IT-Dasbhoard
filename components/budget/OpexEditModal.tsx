@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  TrendingUp, X, AlertTriangle, AlertCircle, SlidersHorizontal,
+  TrendingUp, AlertTriangle, AlertCircle, SlidersHorizontal,
   Sparkles, Check, Layers, Calendar
 } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { SmartModal } from '../ui/SmartModal';
 import {
   COA_SUMMARY_2027,
   MONTH_KEYS,
@@ -224,26 +225,31 @@ export const OpexEditModal: React.FC<OpexModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xl max-w-3xl w-full max-h-[92vh] overflow-y-auto space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <TrendingUp size={18} className="text-emerald-600" />
-            <span>{item ? 'Edit 2027 OPEX Plan Line' : 'New 2027 OPEX Plan Line'} (FY {fiscalYear})</span>
-          </h3>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-            <X size={18} />
-          </button>
+    <SmartModal
+      onClose={onClose}
+      size="xl"
+      icon={<TrendingUp size={18} />}
+      title={item ? 'Edit 2027 OPEX Plan Line' : 'New 2027 OPEX Plan Line'}
+      subtitle={`FY ${fiscalYear} Operational Expenditure Entry`}
+      footer={
+        <>
+          <Button variant="outline" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="opex-plan-form" disabled={saving}>
+            {saving ? 'Saving...' : item ? 'Update OpEx Line' : 'Create OpEx Line'}
+          </Button>
+        </>
+      }
+    >
+      {errorMsg && (
+        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-200 font-medium flex items-center gap-2">
+          <AlertTriangle size={14} className="text-rose-600 shrink-0" />
+          <span>{errorMsg}</span>
         </div>
+      )}
 
-        {errorMsg && (
-          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 font-medium flex items-center gap-2">
-            <AlertTriangle size={14} className="text-rose-600 shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+      <form id="opex-plan-form" onSubmit={handleSubmit} className="space-y-4 text-xs">
           {/* Governance Classification Card */}
           <div className={`p-3.5 rounded-2xl border space-y-3 ${
             budgetClassification === 'Unplanned' ? 'bg-amber-50/70 border-amber-300' : 'bg-slate-50/70 border-slate-200'
@@ -550,17 +556,7 @@ export const OpexEditModal: React.FC<OpexModalProps> = ({
               })}
             </div>
           </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-            <Button variant="outline" type="button" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
-              {saving ? 'Saving...' : item ? 'Update OpEx Line' : 'Create OpEx Line'}
-            </Button>
-          </div>
         </form>
-      </div>
-    </div>
+    </SmartModal>
   );
 };

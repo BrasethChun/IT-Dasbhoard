@@ -5,18 +5,24 @@ interface EditorProps {
   onChange: (value: string) => void;
   placeholder?: string;
   className?: string;
+  onReady?: (quill: any) => void;
 }
 
 // Access the global Quill object from CDN
 declare const Quill: any;
 
-export const Editor: React.FC<EditorProps> = ({ value, onChange, placeholder, className = '' }) => {
+export const Editor: React.FC<EditorProps> = ({ value, onChange, placeholder, className = '', onReady }) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const quillInstance = useRef<any>(null);
+  const lastHtmlRef = useRef<string>(value || '');
+  const onChangeRef = useRef(onChange);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     if (editorRef.current && !quillInstance.current) {
-      // Initialize Quill
       quillInstance.current = new Quill(editorRef.current, {
         theme: 'snow',
         placeholder: placeholder || 'Start typing...',
@@ -33,18 +39,32 @@ export const Editor: React.FC<EditorProps> = ({ value, onChange, placeholder, cl
         }
       });
 
-      // Handle changes
+      if (value) {
+        quillInstance.current.root.innerHTML = value;
+        lastHtmlRef.current = value;
+      }
+
       quillInstance.current.on('text-change', () => {
         const html = quillInstance.current.root.innerHTML;
-        onChange(html === '<p><br></p>' ? '' : html);
+        const normalized = html === '<p><br></p>' ? '' : html;
+        lastHtmlRef.current = normalized;
+        onChangeRef.current(normalized);
       });
-      
-      // Initial value
-      if (value) {
-         quillInstance.current.root.innerHTML = value;
+
+      if (onReady) {
+        onReady(quillInstance.current);
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (!quillInstance.current) return;
+    const nextVal = value || '';
+    if (nextVal !== lastHtmlRef.current) {
+      lastHtmlRef.current = nextVal;
+      quillInstance.current.root.innerHTML = nextVal;
+    }
+  }, [value]);
 
   return <div className={`prose prose-zinc max-w-none ${className}`}><div ref={editorRef} /></div>;
 };

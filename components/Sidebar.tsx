@@ -1,10 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Home, FileText, PlusCircle, Settings, LogOut, Command, LogIn, BarChart, ChevronDown, ChevronRight, User, ReceiptText, Wrench, Database, RefreshCw, Zap, ShieldCheck, AlertCircle, Crown, Lock } from 'lucide-react';
+import {
+  Home, Settings, LogOut, Command, LogIn, BarChart, ChevronDown, ChevronRight,
+  User, Wrench, Database, RefreshCw, Zap, ShieldCheck, AlertCircle, Crown, X,
+  PanelLeftClose, PanelLeftOpen
+} from 'lucide-react';
 import { RoutePath } from '../types';
 import { useAuth } from '../context/AuthContext';
 
-export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }> = ({ isPinned = false, onTogglePin }) => {
+interface SidebarProps {
+  isPinned?: boolean;
+  onTogglePin?: () => void;
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
+  drawerTopSlot?: React.ReactNode;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({
+  isPinned = false,
+  onTogglePin,
+  mobileOpen = false,
+  onCloseMobile,
+  drawerTopSlot,
+}) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { pathname, search } = location;
@@ -44,6 +62,23 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
       setItToolsOpen(true);
     }
   }, [pathname, currentTab]);
+
+  // Lock body scroll & support Escape when mobile/tablet drawer is open
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && onCloseMobile) {
+        onCloseMobile();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [mobileOpen, onCloseMobile]);
 
   const isOwner = user?.role === 'owner';
 
@@ -98,63 +133,15 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
   }, [isOwner]);
 
   const handleLogout = () => {
+    if (onCloseMobile) onCloseMobile();
     logout();
     navigate(RoutePath.HOME);
   };
 
   const handleLogin = () => {
+    if (onCloseMobile) onCloseMobile();
     navigate(RoutePath.LOGIN);
   };
-
-  const navItems = [
-    ...(user?.can_access_welcome !== false && user?.can_access_welcome !== 0 ? [{ icon: Home, label: 'Home', path: RoutePath.HOME }] : []),
-    ...(user?.role === 'admin' || user?.role === 'owner' || user?.can_access_it === true || user?.can_access_it === 1 ? [
-      { 
-        icon: BarChart, 
-        label: 'IT Dashboard', 
-        path: RoutePath.IT_DASHBOARD,
-        isOpen: itDashboardOpen,
-        toggleOpen: () => {
-          if (!getIsActive(RoutePath.IT_DASHBOARD, 'IT Dashboard') || currentTab !== 'executive') {
-            navigate(RoutePath.IT_DASHBOARD);
-            setItDashboardOpen(true);
-          } else {
-            setItDashboardOpen(!itDashboardOpen);
-          }
-        },
-        subItems: [
-          { label: 'Head IT Executive Dashboard', id: 'executive', path: `${RoutePath.IT_DASHBOARD}?tab=executive` },
-          { label: 'IT CapEx & S-Operation Tracking & Planning', id: 'capex-opex', path: `${RoutePath.IT_DASHBOARD}?tab=capex-opex` },
-          { label: 'IT Expenses & Tracking', id: 'expenses', path: `${RoutePath.IT_DASHBOARD}?tab=expenses` },
-          { label: 'IT Assets Management', id: 'assets', path: `${RoutePath.IT_DASHBOARD}?tab=assets` },
-          { label: 'Cloud & HIS Subscription', id: 'subscriptions', path: `${RoutePath.IT_DASHBOARD}?tab=subscriptions` },
-          { label: 'IT HelpDesk', id: 'helpdesk', path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk` }
-        ]
-      },
-      {
-        icon: Wrench,
-        label: 'IT Tools',
-        path: `${RoutePath.IT_DASHBOARD}?tab=staffing`,
-        isOpen: itToolsOpen,
-        toggleOpen: () => {
-          if (!getIsActive(RoutePath.MAIL_ASSISTANT, 'IT Tools')) {
-            navigate(`${RoutePath.IT_DASHBOARD}?tab=staffing`);
-            setItToolsOpen(true);
-          } else {
-            setItToolsOpen(!itToolsOpen);
-          }
-        },
-        subItems: [
-          { label: 'Staffing', id: 'staffing', path: `${RoutePath.IT_DASHBOARD}?tab=staffing` },
-          { label: 'Mail Assistant', id: 'mail', path: RoutePath.MAIL_ASSISTANT },
-          { label: 'IT Notes & Meetings', id: 'notes', path: RoutePath.NOTES },
-          { label: 'Invoices', id: 'invoices', path: RoutePath.INVOICES }
-        ]
-      }
-    ] : []),
-    { icon: User, label: 'Account', path: RoutePath.ACCOUNT },
-    ...(user?.role === 'admin' || user?.role === 'owner' || user?.can_access_it === true || user?.can_access_it === 1 ? [{ icon: Settings, label: 'Settings', path: RoutePath.SETTINGS }] : []),
-  ];
 
   const getIsActive = (path: string, itemLabel?: string) => {
     if (itemLabel === 'IT Tools') {
@@ -181,263 +168,473 @@ export const Sidebar: React.FC<{ isPinned?: boolean; onTogglePin?: () => void }>
     return pathname.startsWith(path);
   };
 
-  return (
-    <aside 
-      onClick={(e) => {
-        if ((e.target as HTMLElement).closest('button, a')) return;
-        if (onTogglePin) onTogglePin();
-      }}
-      className={`fixed left-0 top-0 z-40 h-screen border-r border-white/60 bg-white/45 backdrop-blur-2xl hidden md:flex md:flex-col shadow-[0_4px_15px_rgba(0,0,0,0.03)] overflow-hidden transition-all duration-300 group ${isPinned ? 'w-64 cursor-default' : 'w-20 hover:w-64 cursor-pointer'}`}
-    >
-      <div className="flex h-24 items-center px-8 shrink-0">
-        <div className="flex items-center gap-3 text-slate-900 font-bold tracking-tight group cursor-default">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/25 transition-transform group-hover:scale-105 group-hover:rotate-3">
-            <Command size={20} />
+  const navItems = [
+    ...(user?.can_access_welcome !== false && user?.can_access_welcome !== 0 ? [{ icon: Home, label: 'Home', path: RoutePath.HOME }] : []),
+    ...(user?.role === 'admin' || user?.role === 'owner' || user?.can_access_it === true || user?.can_access_it === 1 ? [
+      { 
+        icon: BarChart, 
+        label: 'IT Dashboard', 
+        path: RoutePath.IT_DASHBOARD,
+        isOpen: itDashboardOpen,
+        toggleOpen: (isDrawer = false) => {
+          if (isDrawer) {
+            setItDashboardOpen((prev) => !prev);
+            return;
+          }
+          if (!getIsActive(RoutePath.IT_DASHBOARD, 'IT Dashboard') || currentTab !== 'executive') {
+            navigate(RoutePath.IT_DASHBOARD);
+            setItDashboardOpen(true);
+          } else {
+            setItDashboardOpen(!itDashboardOpen);
+          }
+        },
+        subItems: [
+          { label: 'Master IT Dashboard', id: 'executive', path: `${RoutePath.IT_DASHBOARD}?tab=executive` },
+          { label: 'IT CapEx & S-Operation Tracking & Planning', id: 'capex-opex', path: `${RoutePath.IT_DASHBOARD}?tab=capex-opex` },
+          { label: 'IT Expenses & Tracking', id: 'expenses', path: `${RoutePath.IT_DASHBOARD}?tab=expenses` },
+          { label: 'IT Assets Management', id: 'assets', path: `${RoutePath.IT_DASHBOARD}?tab=assets` },
+          { label: 'Cloud & HIS Subscription', id: 'subscriptions', path: `${RoutePath.IT_DASHBOARD}?tab=subscriptions` },
+          { label: 'IT HelpDesk', id: 'helpdesk', path: `${RoutePath.IT_DASHBOARD}?tab=helpdesk` }
+        ]
+      },
+      {
+        icon: Wrench,
+        label: 'IT Tools',
+        path: RoutePath.NOTES,
+        isOpen: itToolsOpen,
+        toggleOpen: (isDrawer = false) => {
+          if (isDrawer) {
+            setItToolsOpen((prev) => !prev);
+            return;
+          }
+          if (!getIsActive(RoutePath.NOTES, 'IT Tools')) {
+            navigate(RoutePath.NOTES);
+            setItToolsOpen(true);
+          } else {
+            setItToolsOpen(!itToolsOpen);
+          }
+        },
+        subItems: [
+          { label: 'IT Notes & Meetings', id: 'notes', path: RoutePath.NOTES },
+          { label: 'Staffing', id: 'staffing', path: `${RoutePath.IT_DASHBOARD}?tab=staffing` },
+          { label: 'Mail Assistant', id: 'mail', path: RoutePath.MAIL_ASSISTANT },
+          { label: 'Invoices', id: 'invoices', path: RoutePath.INVOICES }
+        ]
+      }
+    ] : []),
+    { icon: User, label: 'Account', path: RoutePath.ACCOUNT },
+    ...(user?.role === 'admin' || user?.role === 'owner' || user?.can_access_it === true || user?.can_access_it === 1 ? [{ icon: Settings, label: 'Settings', path: RoutePath.SETTINGS }] : []),
+  ];
+
+  const renderDbStatusCard = (expandedAlways: boolean) => {
+    if (!isOwner) return null;
+    return (
+      <div 
+        onClick={() => {
+          if (onCloseMobile) onCloseMobile();
+          navigate(`${RoutePath.SETTINGS}?tab=database`);
+        }}
+        title={dbStatus ? `[Owner Secured] MySQL Host: ${dbStatus.host} (${dbStatus.latencyMs}ms)\nStatus: ${dbStatus.status}` : '[Owner Secured] GoDaddy MySQL: 118.139.180.163 (Connecting...)'}
+        className={`cursor-pointer group/db transition-all duration-200 rounded-2xl border ${
+          dbStatus?.isFailoverActive 
+            ? 'bg-amber-50/90 border-amber-200/90 hover:bg-amber-100/90 shadow-sm' 
+            : dbStatus?.isRemote !== false
+              ? 'bg-gradient-to-br from-emerald-50/90 via-teal-50/50 to-white/95 border-emerald-300/80 hover:border-emerald-400 hover:shadow-md hover:shadow-emerald-500/10'
+              : 'bg-white/90 border-slate-200 hover:bg-slate-50 shadow-sm'
+        } ${expandedAlways || isPinned ? 'p-3' : 'p-1.5 lg:group-hover:p-3'}`}
+      >
+        {!expandedAlways && (
+          <div className={`items-center justify-center relative ${isPinned ? 'hidden' : 'flex lg:group-hover:hidden'}`}>
+            <div className="relative flex items-center justify-center w-11 h-11 rounded-xl bg-white shadow-xs border border-slate-200/80 group-hover/db:scale-105 transition-transform">
+              <Database size={19} className={dbStatus?.isFailoverActive ? 'text-amber-600' : 'text-emerald-600'} />
+              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  dbStatus?.isFailoverActive ? 'bg-amber-400' : 'bg-emerald-400'
+                }`}></span>
+                <span className={`relative inline-flex rounded-full h-3.5 w-3.5 ${
+                  dbStatus?.isFailoverActive ? 'bg-amber-500' : 'bg-emerald-500'
+                }`}></span>
+              </span>
+              <span className="absolute -bottom-1 -left-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-slate-900 text-amber-300 text-[8px] border border-white">
+                <Crown size={8} />
+              </span>
+            </div>
           </div>
-          <span className={`text-xl tracking-tight text-slate-800 transition-opacity whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>IT Dashboard</span>
+        )}
+
+        <div className={`${expandedAlways || isPinned ? 'block' : 'hidden lg:group-hover:block'} animate-in fade-in duration-200 space-y-2`}>
+          <div className="flex items-center justify-between gap-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="relative flex h-2.5 w-2.5 shrink-0">
+                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
+                  dbStatus?.isFailoverActive ? 'bg-amber-400' : 'bg-emerald-400'
+                }`}></span>
+                <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
+                  dbStatus?.isFailoverActive ? 'bg-amber-500' : 'bg-emerald-500'
+                }`}></span>
+              </span>
+              <span className="text-xs font-bold text-slate-800 truncate tracking-tight flex items-center gap-1">
+                <Database size={13} className={dbStatus?.isFailoverActive ? 'text-amber-600' : 'text-emerald-600'} />
+                {dbStatus?.isRemote !== false ? 'GoDaddy MySQL' : 'Local MariaDB'}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              {dbStatus?.latencyMs !== undefined && (
+                <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full tabular-nums ${
+                  dbStatus.latencyMs < 50 
+                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+                    : 'bg-amber-100 text-amber-800 border border-amber-300'
+                }`}>
+                  <Zap size={9} className="text-amber-500 fill-amber-500" />
+                  {dbStatus.latencyMs}ms
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fetchDbStatus(true);
+                }}
+                title="Click to refresh SQL connection test"
+                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-white/80 rounded-md transition-colors"
+              >
+                <RefreshCw size={11} className={dbRefreshing ? 'animate-spin text-indigo-600' : ''} />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-slate-600 font-mono bg-white/80 px-2 py-1 rounded-lg border border-slate-200/60 shadow-2xs">
+            <span className="truncate font-semibold text-slate-800">{dbStatus?.host || '118.139.180.163'}</span>
+            <span className="text-[10px] font-sans text-slate-400 font-medium tabular-nums">:{dbStatus?.port || 3306}</span>
+          </div>
+
+          <div className="flex items-center justify-between gap-1 pt-0.5">
+            <div className="flex items-center gap-1">
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-2xs ${
+                dbStatus?.isFailoverActive
+                  ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                  : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+              }`}>
+                {dbStatus?.isFailoverActive ? (
+                  <>
+                    <AlertCircle size={10} className="text-amber-600 shrink-0" />
+                    Failover
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={11} className="text-emerald-600 shrink-0" />
+                    Locked & Live
+                  </>
+                )}
+              </span>
+              <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-900 text-amber-300 flex items-center gap-0.5 shadow-2xs">
+                <Crown size={9} />
+                Owner
+              </span>
+            </div>
+            <span className="text-[11px] text-indigo-600 group-hover/db:text-indigo-800 font-semibold transition-colors flex items-center gap-0.5">
+              Manage &rarr;
+            </span>
+          </div>
         </div>
       </div>
+    );
+  };
 
-      <div className="flex-1 py-6 px-4 overflow-y-auto hide-scrollbar">
-        <nav className="space-y-2">
-          {navItems.map((item: any) => {
-            const isActive = getIsActive(item.path, item.label);
-            
-            if (item.subItems) {
-              return (
-                <div key={item.label} className="flex flex-col gap-1">
-                  <button
-                    onClick={item.toggleOpen}
-                    className={`flex items-center justify-between rounded-full py-3.5 text-sm transition-all duration-300 ${isPinned ? 'px-5' : 'px-3 md:group-hover:px-5'} ${
-                      isActive
-                        ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-semibold shadow-[0_4px_15px_rgba(129,140,248,0.25)] translate-x-1'
-                        : 'text-slate-600 font-medium hover:bg-white/50 hover:text-slate-900 hover:translate-x-1'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 w-full">
-                      <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} className={`transition-colors shrink-0 ${isActive ? "text-white" : "text-slate-500"}`} />
-                      <span className={`transition-opacity whitespace-nowrap overflow-hidden flex-1 text-left ${isPinned ? 'opacity-100 w-auto' : 'opacity-0 md:group-hover:opacity-100 w-0 md:group-hover:w-auto'}`}>{item.label}</span>
-                    </div>
-                    <div className={`transition-opacity shrink-0 ${isPinned ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'}`}>
-                      {item.isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    </div>
-                  </button>
-                  
-                  {isActive && item.isOpen && (
-                    <div className="pl-6 pr-2 py-2 space-y-1 animate-in slide-in-from-top-2 fade-in duration-200">
-                      {item.subItems.map((subItem: any) => {
-                        const isSubActive = subItem.path 
-                          ? (subItem.path.includes('?tab=') 
-                              ? pathname === subItem.path.split('?')[0] && currentTab === subItem.id 
-                              : (subItem.path === RoutePath.NOTES 
-                                  ? pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE 
-                                  : pathname.startsWith(subItem.path)))
-                          : currentTab === subItem.id;
-                        const isExecutiveItem = subItem.id === 'executive';
-                        const isSubscriptionItem = subItem.id === 'subscriptions';
-                        return (
-                          <Link
-                            key={subItem.id}
-                            to={subItem.path || `${item.path}?tab=${subItem.id}`}
-                            className={`flex items-center justify-between px-3.5 py-2 rounded-xl text-sm transition-all duration-200 whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100' : 'opacity-0 md:group-hover:opacity-100'} ${
-                              isSubActive 
-                                ? isExecutiveItem
-                                  ? 'bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white font-bold shadow-md shadow-indigo-950/30 border border-indigo-700/60 translate-x-1'
-                                  : 'bg-gradient-to-r from-indigo-50 to-blue-50/70 text-indigo-700 font-semibold shadow-xs border border-indigo-200/80 translate-x-1' 
-                                : isExecutiveItem
-                                  ? 'text-indigo-950 font-semibold bg-indigo-50/80 border border-indigo-200/70 hover:bg-indigo-100 hover:text-indigo-950 hover:translate-x-0.5'
-                                  : isSubscriptionItem
-                                    ? 'text-slate-600 font-medium hover:bg-indigo-50/50 hover:text-indigo-900 hover:translate-x-0.5'
-                                    : 'text-slate-500 font-medium hover:bg-white/80 hover:text-slate-800 hover:translate-x-0.5'
-                            }`}
-                          >
-                            <div className="flex items-center min-w-0">
-                              {isSubActive && (
-                                <span className={`w-1.5 h-1.5 rounded-full mr-2 shrink-0 animate-pulse ${
-                                  isExecutiveItem ? 'bg-indigo-400' : 'bg-indigo-600'
-                                }`} />
-                              )}
-                              <span className="truncate">{subItem.label}</span>
-                            </div>
-                            {isExecutiveItem && (
-                              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md font-bold tracking-tight shrink-0 ml-1.5 transition-colors ${
-                                isSubActive
-                                  ? 'bg-indigo-500 text-white shadow-xs'
-                                  : 'bg-indigo-600 text-white'
-                              }`}>
-                                Head IT
-                              </span>
-                            )}
-                            {isSubscriptionItem && (
-                              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md font-semibold tracking-tight shrink-0 ml-1.5 transition-colors ${
-                                isSubActive
-                                  ? 'bg-indigo-600 text-white shadow-xs'
-                                  : 'bg-indigo-100/70 text-indigo-700'
-                              }`}>
-                                HIS
-                              </span>
-                            )}
-                          </Link>
-                        );
-                      })}
-                    </div>
-                  )}
+  return (
+    <>
+      {/* 1. MOBILE & TABLET SLIDE-OVER NAVIGATION DRAWER (< 1024px) */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-50 lg:hidden flex"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Mobile Navigation"
+        >
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-slate-950/55 backdrop-blur-xs animate-in fade-in duration-200"
+            onClick={onCloseMobile}
+          />
+
+          {/* Slide-Over Panel */}
+          <aside className="relative z-10 w-[85vw] max-w-[304px] h-full bg-white/95 dark:bg-slate-900/95 backdrop-blur-2xl border-r border-slate-200/80 dark:border-slate-800 flex flex-col shadow-2xl pb-safe animate-in slide-in-from-left duration-200">
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between px-4 h-16 border-b border-slate-200/70 dark:border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl theme-accent-bg shadow-md">
+                  <Command size={18} />
                 </div>
-              );
-            }
-
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`flex items-center gap-3 rounded-full py-3.5 text-sm transition-all duration-300 ${isPinned ? 'px-5' : 'px-3 md:group-hover:px-5'} ${
-                  isActive
-                    ? 'bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-semibold shadow-[0_4px_15px_rgba(129,140,248,0.25)] translate-x-1'
-                    : 'text-slate-600 font-medium hover:bg-white/50 hover:text-slate-900 hover:translate-x-1'
-                }`}
+                <span className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-100 truncate">
+                  Master IT Dashboard
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={onCloseMobile}
+                aria-label="Close navigation menu"
+                className="min-w-[44px] min-h-[44px] -mr-2 flex items-center justify-center rounded-xl text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
               >
-                <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} className={`transition-colors shrink-0 ${isActive ? "text-white" : "text-slate-500"}`} />
-                <span className={`transition-opacity whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100 w-auto' : 'opacity-0 md:group-hover:opacity-100 w-0 md:group-hover:w-auto'}`}>{item.label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
-
-      <div className={`border-t border-slate-200/60 bg-gradient-to-b from-white/30 to-slate-50/70 backdrop-blur-md shrink-0 transition-all ${isPinned ? 'p-3.5 space-y-3' : 'p-2 md:group-hover:p-3.5 space-y-2 md:group-hover:space-y-3'}`}>
-        {/* SQL Connection Status Card - Strictly restricted to Owner accounts for security */}
-        {isOwner && (
-          <div 
-            onClick={() => navigate(`${RoutePath.SETTINGS}?tab=database`)}
-            title={dbStatus ? `[Owner Secured] MySQL Host: ${dbStatus.host} (${dbStatus.latencyMs}ms)\nStatus: ${dbStatus.status}` : '[Owner Secured] GoDaddy MySQL: 118.139.180.163 (Connecting...)'}
-            className={`cursor-pointer group/db transition-all duration-200 rounded-2xl border ${
-              dbStatus?.isFailoverActive 
-                ? 'bg-amber-50/90 border-amber-200/90 hover:bg-amber-100/90 shadow-sm' 
-                : dbStatus?.isRemote !== false
-                  ? 'bg-gradient-to-br from-emerald-50/90 via-teal-50/50 to-white/95 border-emerald-300/80 hover:border-emerald-400 hover:shadow-md hover:shadow-emerald-500/10'
-                  : 'bg-white/90 border-slate-200 hover:bg-slate-50 shadow-sm'
-            } ${isPinned ? 'p-3' : 'p-1.5 md:group-hover:p-3'}`}
-          >
-            {/* Collapsed View: Compact Database Icon with Live Status Indicator Dot & Security Shield */}
-            <div className={`items-center justify-center relative ${isPinned ? 'hidden' : 'flex md:group-hover:hidden'}`}>
-              <div className="relative flex items-center justify-center w-11 h-11 rounded-xl bg-white shadow-xs border border-slate-200/80 group-hover/db:scale-105 transition-transform">
-                <Database size={19} className={dbStatus?.isFailoverActive ? 'text-amber-600' : 'text-emerald-600'} />
-                <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                    dbStatus?.isFailoverActive ? 'bg-amber-400' : 'bg-emerald-400'
-                  }`}></span>
-                  <span className={`relative inline-flex rounded-full h-3.5 w-3.5 ${
-                    dbStatus?.isFailoverActive ? 'bg-amber-500' : 'bg-emerald-500'
-                  }`}></span>
-                </span>
-                <span className="absolute -bottom-1 -left-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-slate-900 text-amber-300 text-[8px] border border-white">
-                  <Crown size={8} />
-                </span>
-              </div>
+                <X size={20} />
+              </button>
             </div>
 
-            {/* Expanded View: Full SQL Connection Status Panel with Owner Security Badge */}
-            <div className={`${isPinned ? 'block' : 'hidden md:group-hover:block'} animate-in fade-in duration-200 space-y-2`}>
-              {/* Header: Title + Latency & Refresh Button */}
-              <div className="flex items-center justify-between gap-1.5">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="relative flex h-2.5 w-2.5 shrink-0">
-                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${
-                      dbStatus?.isFailoverActive ? 'bg-amber-400' : 'bg-emerald-400'
-                    }`}></span>
-                    <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${
-                      dbStatus?.isFailoverActive ? 'bg-amber-500' : 'bg-emerald-500'
-                    }`}></span>
-                  </span>
-                  <span className="text-xs font-bold text-slate-800 truncate tracking-tight flex items-center gap-1">
-                    <Database size={13} className={dbStatus?.isFailoverActive ? 'text-amber-600' : 'text-emerald-600'} />
-                    {dbStatus?.isRemote !== false ? 'GoDaddy MySQL' : 'Local MariaDB'}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  {dbStatus?.latencyMs !== undefined && (
-                    <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
-                      dbStatus.latencyMs < 50 
-                        ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
-                        : 'bg-amber-100 text-amber-800 border border-amber-300'
-                    }`}>
-                      <Zap size={9} className="text-amber-500 fill-amber-500" />
-                      {dbStatus.latencyMs}ms
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      fetchDbStatus(true);
-                    }}
-                    title="Click to refresh SQL connection test"
-                    className="p-1 text-slate-400 hover:text-slate-700 hover:bg-white/80 rounded-md transition-colors"
-                  >
-                    <RefreshCw size={11} className={dbRefreshing ? 'animate-spin text-indigo-600' : ''} />
-                  </button>
-                </div>
+            {drawerTopSlot && (
+              <div className="px-4 py-2.5 border-b border-slate-200/60 dark:border-slate-800 sm:hidden">
+                {drawerTopSlot}
               </div>
+            )}
 
-              {/* Host Details with Owner Security Tag */}
-              <div className="flex items-center justify-between text-[11px] text-slate-600 font-mono bg-white/80 px-2 py-1 rounded-lg border border-slate-200/60 shadow-2xs">
-                <span className="truncate font-semibold text-slate-800">{dbStatus?.host || '118.139.180.163'}</span>
-                <span className="text-[10px] font-sans text-slate-400 font-medium">:{dbStatus?.port || 3306}</span>
-              </div>
+            {/* Drawer Nav Links (Touch-Friendly 44px+ Hit Targets) */}
+            <div className="flex-1 py-4 px-3 overflow-y-auto">
+              <nav className="space-y-1.5">
+                {navItems.map((item: any) => {
+                  const isActive = getIsActive(item.path, item.label);
+                  if (item.subItems) {
+                    return (
+                      <div key={item.label} className="flex flex-col gap-1">
+                        <button
+                          type="button"
+                          onClick={() => item.toggleOpen(true)}
+                          className={`flex items-center justify-between rounded-2xl px-3.5 min-h-[44px] text-sm transition-colors cursor-pointer ${
+                            isActive
+                              ? 'theme-accent-bg font-semibold shadow-sm'
+                              : 'text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <item.icon size={19} className={isActive ? 'text-white shrink-0' : 'text-slate-500 dark:text-slate-400 shrink-0'} />
+                            <span className="truncate">{item.label}</span>
+                          </div>
+                          {item.isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        </button>
 
-              {/* Badges & Manage Link */}
-              <div className="flex items-center justify-between gap-1 pt-0.5">
-                <div className="flex items-center gap-1">
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md flex items-center gap-1 shadow-2xs ${
-                    dbStatus?.isFailoverActive
-                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                      : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                  }`}>
-                    {dbStatus?.isFailoverActive ? (
-                      <>
-                        <AlertCircle size={10} className="text-amber-600 shrink-0" />
-                        Failover
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck size={11} className="text-emerald-600 shrink-0" />
-                        Locked & Live
-                      </>
-                    )}
-                  </span>
-                  <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded bg-slate-900 text-amber-300 flex items-center gap-0.5 shadow-2xs">
-                    <Crown size={9} />
-                    Owner
-                  </span>
-                </div>
-                <span className="text-[11px] text-indigo-600 group-hover/db:text-indigo-800 font-semibold transition-colors flex items-center gap-0.5">
-                  Manage &rarr;
-                </span>
-              </div>
+                        {item.isOpen && (
+                          <div className="pl-4 pr-1 py-1 space-y-1">
+                            {item.subItems.map((subItem: any) => {
+                              const isSubActive = subItem.path
+                                ? (subItem.path.includes('?tab=')
+                                    ? pathname === subItem.path.split('?')[0] && currentTab === subItem.id
+                                    : (subItem.path === RoutePath.NOTES
+                                        ? pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE
+                                        : pathname.startsWith(subItem.path)))
+                                : currentTab === subItem.id;
+                              return (
+                                <Link
+                                  key={subItem.id}
+                                  to={subItem.path || `${item.path}?tab=${subItem.id}`}
+                                  onClick={onCloseMobile}
+                                  className={`flex items-center justify-between px-3 min-h-[42px] rounded-xl text-xs sm:text-sm transition-colors ${
+                                    isSubActive
+                                      ? 'theme-accent-soft font-semibold border border-slate-200/80 dark:border-slate-700'
+                                      : 'text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-100 dark:hover:bg-slate-800'
+                                  }`}
+                                >
+                                  <span className="truncate">{subItem.label}</span>
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      onClick={onCloseMobile}
+                      className={`flex items-center gap-3 rounded-2xl px-3.5 min-h-[44px] text-sm transition-colors ${
+                        isActive
+                          ? 'theme-accent-bg font-semibold shadow-sm'
+                          : 'text-slate-700 dark:text-slate-200 font-medium hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <item.icon size={19} className={isActive ? 'text-white shrink-0' : 'text-slate-500 dark:text-slate-400 shrink-0'} />
+                      <span className="truncate">{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
             </div>
+
+            {/* Drawer Footer */}
+            <div className="p-3 border-t border-slate-200/70 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/90 space-y-2.5 shrink-0">
+              {renderDbStatusCard(true)}
+              {isAuthenticated ? (
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="flex w-full items-center gap-3 rounded-2xl px-3.5 min-h-[44px] text-sm font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                >
+                  <LogOut size={18} className="shrink-0" />
+                  <span>Sign Out</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleLogin}
+                  className="flex w-full items-center gap-3 rounded-2xl px-3.5 min-h-[44px] text-sm font-semibold text-indigo-600 dark:text-indigo-300 bg-indigo-50/90 dark:bg-indigo-950/60 hover:bg-indigo-100 transition-colors cursor-pointer"
+                >
+                  <LogIn size={18} className="shrink-0" />
+                  <span>Sign In</span>
+                </button>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* 2. DESKTOP & LANDSCAPE TABLET RAIL (>= 1024px) */}
+      <aside 
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest('button, a')) return;
+          if (onTogglePin) onTogglePin();
+        }}
+        className={`fixed left-0 top-0 z-40 h-screen border-r border-slate-200/70 dark:border-slate-800 bg-white/75 dark:bg-slate-900/85 backdrop-blur-2xl hidden lg:flex lg:flex-col shadow-[0_4px_15px_rgba(0,0,0,0.03)] overflow-hidden transition-all duration-300 group ${isPinned ? 'w-64 cursor-default' : 'w-20 hover:w-64 cursor-pointer'}`}
+      >
+        <div className={`flex h-20 items-center justify-between shrink-0 ${isPinned ? 'px-5' : 'px-5 lg:group-hover:px-5'}`}>
+          <div className="flex items-center gap-3 text-slate-900 dark:text-slate-100 font-bold tracking-tight cursor-default min-w-0">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl theme-accent-bg shadow-lg transition-transform group-hover:scale-105 group-hover:rotate-3">
+              <Command size={20} />
+            </div>
+            <span className={`text-lg tracking-tight text-slate-800 dark:text-slate-100 transition-opacity whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100' : 'opacity-0 lg:group-hover:opacity-100'}`}>Master IT</span>
           </div>
-        )}
 
-        {/* User Auth Action (Sign Out / Sign In) */}
-        {isAuthenticated ? (
-          <button
-            onClick={handleLogout}
-            className={`flex w-full items-center gap-3 rounded-full py-2.5 text-sm font-medium text-slate-600 hover:bg-white/80 hover:text-red-600 transition-all hover:shadow-sm ${isPinned ? 'px-4' : 'px-3 md:group-hover:px-4'}`}
-          >
-            <LogOut size={18} strokeWidth={2} className="opacity-70 shrink-0" />
-            <span className={`transition-opacity whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100 w-auto' : 'opacity-0 md:group-hover:opacity-100 w-0 md:group-hover:w-auto'}`}>Sign Out</span>
-          </button>
-        ) : (
-          <button
-            onClick={handleLogin}
-            className={`flex w-full items-center gap-3 rounded-full py-2.5 text-sm font-medium text-indigo-600 bg-indigo-50/80 hover:bg-indigo-100 transition-all shadow-sm ${isPinned ? 'px-4' : 'px-3 md:group-hover:px-4'}`}
-          >
-            <LogIn size={18} strokeWidth={2} className="opacity-70 shrink-0" />
-            <span className={`transition-opacity whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100 w-auto' : 'opacity-0 md:group-hover:opacity-100 w-0 md:group-hover:w-auto'}`}>Sign In</span>
-          </button>
-        )}
-      </div>
-    </aside>
+          {onTogglePin && (
+            <button
+              type="button"
+              onClick={onTogglePin}
+              title={isPinned ? 'Collapse sidebar' : 'Pin sidebar open'}
+              className={`p-1.5 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-opacity cursor-pointer shrink-0 ${isPinned ? 'opacity-100' : 'opacity-0 lg:group-hover:opacity-100'}`}
+            >
+              {isPinned ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+            </button>
+          )}
+        </div>
+
+        <div className="flex-1 py-4 px-4 overflow-y-auto hide-scrollbar">
+          <nav className="space-y-2">
+            {navItems.map((item: any) => {
+              const isActive = getIsActive(item.path, item.label);
+              
+              if (item.subItems) {
+                return (
+                  <div key={item.label} className="flex flex-col gap-1">
+                    <button
+                      onClick={() => item.toggleOpen(false)}
+                      className={`flex items-center justify-between rounded-full py-3.5 text-sm transition-all duration-300 ${isPinned ? 'px-5' : 'px-3 lg:group-hover:px-5'} ${
+                        isActive
+                          ? 'theme-accent-bg font-semibold shadow-md translate-x-1'
+                          : 'text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-100/80 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-white hover:translate-x-1'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 w-full">
+                        <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} className={`transition-colors shrink-0 ${isActive ? "text-white" : "text-slate-500 dark:text-slate-400"}`} />
+                        <span className={`transition-opacity whitespace-nowrap overflow-hidden flex-1 text-left ${isPinned ? 'opacity-100 w-auto' : 'opacity-0 lg:group-hover:opacity-100 w-0 lg:group-hover:w-auto'}`}>{item.label}</span>
+                      </div>
+                      <div className={`transition-opacity shrink-0 ${isPinned ? 'opacity-100' : 'opacity-0 lg:group-hover:opacity-100'}`}>
+                        {item.isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </div>
+                    </button>
+                    
+                    {isActive && item.isOpen && (
+                      <div className="pl-6 pr-2 py-2 space-y-1 animate-in slide-in-from-top-2 fade-in duration-200">
+                        {item.subItems.map((subItem: any) => {
+                          const isSubActive = subItem.path 
+                            ? (subItem.path.includes('?tab=') 
+                                ? pathname === subItem.path.split('?')[0] && currentTab === subItem.id 
+                                : (subItem.path === RoutePath.NOTES 
+                                    ? pathname.startsWith(RoutePath.NOTES) && pathname !== RoutePath.CREATE_NOTE 
+                                    : pathname.startsWith(subItem.path)))
+                            : currentTab === subItem.id;
+                          const isExecutiveItem = subItem.id === 'executive';
+                          const isSubscriptionItem = subItem.id === 'subscriptions';
+                          return (
+                            <Link
+                              key={subItem.id}
+                              to={subItem.path || `${item.path}?tab=${subItem.id}`}
+                              className={`flex items-center justify-between px-3.5 py-2 rounded-xl text-sm transition-all duration-200 whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100' : 'opacity-0 lg:group-hover:opacity-100'} ${
+                                isSubActive 
+                                  ? isExecutiveItem
+                                    ? 'bg-slate-900 dark:bg-slate-800 text-white font-bold shadow-md border border-slate-700 translate-x-1'
+                                    : 'theme-accent-soft font-semibold shadow-xs border border-slate-200/80 dark:border-slate-700 translate-x-1' 
+                                  : isExecutiveItem
+                                    ? 'text-slate-900 dark:text-slate-100 font-semibold bg-slate-100/80 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 hover:bg-slate-200/80 dark:hover:bg-slate-800 hover:translate-x-0.5'
+                                    : isSubscriptionItem
+                                      ? 'text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-100/70 dark:hover:bg-slate-800/70 hover:text-slate-900 dark:hover:text-white hover:translate-x-0.5'
+                                      : 'text-slate-500 dark:text-slate-400 font-medium hover:bg-slate-100/80 dark:hover:bg-slate-800/70 hover:text-slate-800 dark:hover:text-slate-100 hover:translate-x-0.5'
+                              }`}
+                            >
+                              <div className="flex items-center min-w-0">
+                                <span className="truncate">{subItem.label}</span>
+                              </div>
+                              {isExecutiveItem && (
+                                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md font-bold tracking-tight shrink-0 ml-1.5 transition-colors theme-accent-bg`}>
+                                  Head IT
+                                </span>
+                              )}
+                              {isSubscriptionItem && (
+                                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded-md font-semibold tracking-tight shrink-0 ml-1.5 transition-colors ${
+                                  isSubActive
+                                    ? 'theme-accent-bg shadow-xs'
+                                    : 'theme-accent-soft'
+                                }`}>
+                                  HIS
+                                </span>
+                              )}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              return (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  className={`flex items-center gap-3 rounded-full py-3.5 text-sm transition-all duration-300 ${isPinned ? 'px-5' : 'px-3 lg:group-hover:px-5'} ${
+                    isActive
+                      ? 'theme-accent-bg font-semibold shadow-md translate-x-1'
+                      : 'text-slate-600 dark:text-slate-300 font-medium hover:bg-slate-100/80 dark:hover:bg-slate-800/80 hover:text-slate-900 dark:hover:text-white hover:translate-x-1'
+                  }`}
+                >
+                  <item.icon size={20} strokeWidth={isActive ? 2.5 : 2} className={`transition-colors shrink-0 ${isActive ? "text-white" : "text-slate-500 dark:text-slate-400"}`} />
+                  <span className={`transition-opacity whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100 w-auto' : 'opacity-0 lg:group-hover:opacity-100 w-0 lg:group-hover:w-auto'}`}>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+        </div>
+
+        <div className={`border-t border-slate-200/60 dark:border-slate-800 bg-white/50 dark:bg-slate-900/90 backdrop-blur-md shrink-0 transition-all ${isPinned ? 'p-3.5 space-y-3' : 'p-2 lg:group-hover:p-3.5 space-y-2 lg:group-hover:space-y-3'}`}>
+          {renderDbStatusCard(false)}
+
+          {/* User Auth Action (Sign Out / Sign In) */}
+          {isAuthenticated ? (
+            <button
+              onClick={handleLogout}
+              className={`flex w-full items-center gap-3 rounded-full py-2.5 text-sm font-medium text-slate-600 hover:bg-white/80 hover:text-red-600 transition-all hover:shadow-sm ${isPinned ? 'px-4' : 'px-3 lg:group-hover:px-4'}`}
+            >
+              <LogOut size={18} strokeWidth={2} className="opacity-70 shrink-0" />
+              <span className={`transition-opacity whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100 w-auto' : 'opacity-0 lg:group-hover:opacity-100 w-0 lg:group-hover:w-auto'}`}>Sign Out</span>
+            </button>
+          ) : (
+            <button
+              onClick={handleLogin}
+              className={`flex w-full items-center gap-3 rounded-full py-2.5 text-sm font-medium text-indigo-600 bg-indigo-50/80 hover:bg-indigo-100 transition-all shadow-sm ${isPinned ? 'px-4' : 'px-3 lg:group-hover:px-4'}`}
+            >
+              <LogIn size={18} strokeWidth={2} className="opacity-70 shrink-0" />
+              <span className={`transition-opacity whitespace-nowrap overflow-hidden ${isPinned ? 'opacity-100 w-auto' : 'opacity-0 lg:group-hover:opacity-100 w-0 lg:group-hover:w-auto'}`}>Sign In</span>
+            </button>
+          )}
+        </div>
+      </aside>
+    </>
   );
 };

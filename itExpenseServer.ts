@@ -110,6 +110,44 @@ export async function initItExpenseTables(db: any) {
       console.warn('[IT Expense Categories Columns Migration]:', e.message);
     }
 
+    // Vendors Master Table (with contact: phone, email, address, remark)
+    await db.query(`CREATE TABLE IF NOT EXISTS it_expense_vendors (
+      id VARCHAR(36) PRIMARY KEY,
+      vendor_name VARCHAR(150) NOT NULL UNIQUE,
+      code VARCHAR(50) DEFAULT '',
+      contact_person VARCHAR(150) DEFAULT '',
+      phone VARCHAR(100) DEFAULT '',
+      email VARCHAR(150) DEFAULT '',
+      address TEXT,
+      remark TEXT,
+      status ENUM('Active', 'Inactive') DEFAULT 'Active',
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_exp_vendor_name (vendor_name),
+      INDEX idx_exp_vendor_status (status)
+    )`);
+
+    try {
+      const [vndCols]: any = await db.query('DESCRIBE it_expense_vendors');
+      if (!vndCols.some((c: any) => c.Field === 'contact_person')) {
+        await db.query("ALTER TABLE it_expense_vendors ADD COLUMN contact_person VARCHAR(150) DEFAULT ''");
+      }
+      if (!vndCols.some((c: any) => c.Field === 'phone')) {
+        await db.query("ALTER TABLE it_expense_vendors ADD COLUMN phone VARCHAR(100) DEFAULT ''");
+      }
+      if (!vndCols.some((c: any) => c.Field === 'email')) {
+        await db.query("ALTER TABLE it_expense_vendors ADD COLUMN email VARCHAR(150) DEFAULT ''");
+      }
+      if (!vndCols.some((c: any) => c.Field === 'address')) {
+        await db.query('ALTER TABLE it_expense_vendors ADD COLUMN address TEXT');
+      }
+      if (!vndCols.some((c: any) => c.Field === 'remark')) {
+        await db.query('ALTER TABLE it_expense_vendors ADD COLUMN remark TEXT');
+      }
+    } catch (e: any) {
+      console.warn('[IT Expense Vendors Columns Migration]:', e.message);
+    }
+
     // Seed default categories if table is empty
     const [catCount]: any = await db.query('SELECT COUNT(*) as c FROM it_expense_categories').catch(() => [[{ c: 0 }]]);
     if (!catCount[0]?.c) {
@@ -202,6 +240,9 @@ export async function initItExpenseTables(db: any) {
     // Sync distinct CapEx asset_types and OpEx account_codes into it_expense_categories
     await syncBudgetCategoriesIntoExpenseCategories(db);
 
+    // Sync distinct vendor_name entries from it_expense_transactions into it_expense_vendors
+    await syncTransactionsVendorsIntoMaster(db);
+
     // One-time consolidation of existing expense transactions & cleanup of legacy 0-count categories
     try {
       const [consMeta]: any = await db.query(
@@ -287,6 +328,42 @@ async function syncBudgetCategoriesIntoExpenseCategories(db: any) {
     }
   } catch (err: any) {
     console.warn('[IT Expense Categories Sync Warning]:', err.message);
+  }
+}
+
+async function ensureVendorInMaster(db: any, vendorName: string) {
+  const cleanName = (vendorName || '').trim();
+  if (!cleanName) return;
+  try {
+    const [existing]: any = await db.query(
+      'SELECT id FROM it_expense_vendors WHERE LOWER(TRIM(vendor_name)) = LOWER(?)',
+      [cleanName]
+    );
+    if (existing.length === 0) {
+      const words = cleanName.split(/\s+/).filter(Boolean);
+      const shortCode = words.length >= 2
+        ? words.map(w => w[0]).join('').replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase()
+        : cleanName.replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase();
+      await db.query(
+        'INSERT IGNORE INTO it_expense_vendors (id, vendor_name, code, contact_person, phone, email, address, remark, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [crypto.randomUUID(), cleanName, shortCode || 'VND', '', '', '', '', '', 'Active']
+      );
+    }
+  } catch (err: any) {
+    console.warn('[IT Expense Vendor Ensure Warning]:', err.message);
+  }
+}
+
+async function syncTransactionsVendorsIntoMaster(db: any) {
+  try {
+    const [txVendors]: any = await db.query(
+      "SELECT DISTINCT TRIM(vendor_name) AS vendor_name FROM it_expense_transactions WHERE vendor_name IS NOT NULL AND TRIM(vendor_name) != ''"
+    );
+    for (const row of txVendors) {
+      await ensureVendorInMaster(db, row.vendor_name);
+    }
+  } catch (err: any) {
+    console.warn('[IT Expense Vendors Sync Warning]:', err.message);
   }
 }
 
@@ -689,6 +766,7 @@ export function setupItExpenseRoutes(app: Express, authenticateToken: any, getDb
       const toDate = req.query.to_date as string;
       const budgetType = req.query.budget_type as string;
       const category = req.query.category as string;
+      const vendor = req.query.vendor as string;
       const linkedBudgetId = req.query.linked_budget_id as string;
 
       let whereSql = 'WHERE fiscal_year = ?';
@@ -712,6 +790,11 @@ export function setupItExpenseRoutes(app: Express, authenticateToken: any, getDb
       if (category && category !== 'All Categories' && category !== 'All') {
         whereSql += ' AND category = ?';
         params.push(category);
+      }
+
+      if (vendor && vendor !== 'All Vendors' && vendor !== 'All') {
+        whereSql += ' AND vendor_name = ?';
+        params.push(vendor);
       }
 
       // Snapshot contextual scope BEFORE applying budget_type / classification / linked_budget_id filters
@@ -1091,6 +1174,9 @@ export function setupItExpenseRoutes(app: Express, authenticateToken: any, getDb
         ]
       );
 
+      // Ensure vendor exists in vendors master
+      await ensureVendorInMaster(db, vendor_name.trim());
+
       // Auto-synchronize this transaction into the linked CapEx or OpEx monthly actual
       if (linked_budget_id) {
         await syncExpensesToBudget(db, budget_type, linked_budget_id, fy);
@@ -1141,6 +1227,11 @@ export function setupItExpenseRoutes(app: Express, authenticateToken: any, getDb
           statusSettlement, id
         ]
       );
+
+      // Ensure vendor exists in vendors master
+      if (vendor_name) {
+        await ensureVendorInMaster(db, vendor_name);
+      }
 
       // Recalculate old linked item if changed
       if (oldRecord?.linked_budget_id && oldRecord.linked_budget_id !== linked_budget_id) {
@@ -1379,6 +1470,184 @@ export function setupItExpenseRoutes(app: Express, authenticateToken: any, getDb
       res.json({
         success: true,
         message: `Category "${deletedCat.category_name}" deleted. Linked expenses reassigned to "${targetCategory}".`,
+        reassigned_count: reassignRes?.affectedRows || 0
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- 9. IT EXPENSE VENDORS MASTER CRUD (with Contact: phone, email, address, remark) ---
+  app.get('/api/expense-vendors', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      await syncTransactionsVendorsIntoMaster(db);
+      const [rows]: any = await db.query(`
+        SELECT v.*,
+          COALESCE((SELECT COUNT(*) FROM it_expense_transactions e WHERE e.vendor_name = v.vendor_name), 0) AS expense_count,
+          COALESCE((SELECT SUM(e.amount) FROM it_expense_transactions e WHERE e.vendor_name = v.vendor_name), 0) AS total_expense_amount
+        FROM it_expense_vendors v
+        ORDER BY v.vendor_name ASC
+      `);
+      res.json(rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/expense-vendors', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const { vendor_name, code, contact_person, phone, email, address, remark, status } = req.body;
+      if (!vendor_name || !String(vendor_name).trim()) {
+        return res.status(400).json({ error: 'Vendor name is required' });
+      }
+      const trimmedName = String(vendor_name).trim();
+      const words = trimmedName.split(/\s+/).filter(Boolean);
+      const defaultCode = words.length >= 2
+        ? words.map(w => w[0]).join('').replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase()
+        : trimmedName.replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase();
+      const trimmedCode = (code ? String(code).trim() : '') || defaultCode || 'VND';
+
+      const [existing]: any = await db.query(
+        'SELECT id FROM it_expense_vendors WHERE LOWER(vendor_name) = LOWER(?)',
+        [trimmedName]
+      );
+      if (existing.length > 0) {
+        return res.status(400).json({ error: `Vendor "${trimmedName}" already exists` });
+      }
+
+      const id = crypto.randomUUID();
+      await db.query(
+        'INSERT INTO it_expense_vendors (id, vendor_name, code, contact_person, phone, email, address, remark, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          id,
+          trimmedName,
+          trimmedCode,
+          contact_person ? String(contact_person).trim() : '',
+          phone ? String(phone).trim() : '',
+          email ? String(email).trim() : '',
+          address ? String(address).trim() : '',
+          remark ? String(remark).trim() : '',
+          status || 'Active'
+        ]
+      );
+
+      res.json({
+        id,
+        vendor_name: trimmedName,
+        code: trimmedCode,
+        contact_person: contact_person ? String(contact_person).trim() : '',
+        phone: phone ? String(phone).trim() : '',
+        email: email ? String(email).trim() : '',
+        address: address ? String(address).trim() : '',
+        remark: remark ? String(remark).trim() : '',
+        status: status || 'Active',
+        expense_count: 0,
+        total_expense_amount: 0
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put('/api/expense-vendors/:id', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const { vendor_name, code, contact_person, phone, email, address, remark, status, sync_expenses = true } = req.body;
+
+      if (!vendor_name || !String(vendor_name).trim()) {
+        return res.status(400).json({ error: 'Vendor name is required' });
+      }
+      const trimmedName = String(vendor_name).trim();
+      const trimmedCode = (code ? String(code).trim() : '') || trimmedName.replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase() || 'VND';
+
+      const [existing]: any = await db.query('SELECT * FROM it_expense_vendors WHERE id = ?', [id]);
+      if (existing.length === 0) {
+        return res.status(404).json({ error: 'Vendor not found' });
+      }
+      const prevName = existing[0].vendor_name;
+
+      if (prevName.toLowerCase() !== trimmedName.toLowerCase()) {
+        const [dup]: any = await db.query(
+          'SELECT id FROM it_expense_vendors WHERE LOWER(vendor_name) = LOWER(?) AND id != ?',
+          [trimmedName, id]
+        );
+        if (dup.length > 0) {
+          return res.status(400).json({ error: `Another vendor with name "${trimmedName}" already exists` });
+        }
+      }
+
+      await db.query(
+        'UPDATE it_expense_vendors SET vendor_name = ?, code = ?, contact_person = ?, phone = ?, email = ?, address = ?, remark = ?, status = ? WHERE id = ?',
+        [
+          trimmedName,
+          trimmedCode,
+          contact_person ? String(contact_person).trim() : '',
+          phone ? String(phone).trim() : '',
+          email ? String(email).trim() : '',
+          address ? String(address).trim() : '',
+          remark ? String(remark).trim() : '',
+          status || 'Active',
+          id
+        ]
+      );
+
+      let updatedExpenses = 0;
+      if (sync_expenses && prevName !== trimmedName) {
+        const [updateRes]: any = await db.query(
+          'UPDATE it_expense_transactions SET vendor_name = ? WHERE vendor_name = ?',
+          [trimmedName, prevName]
+        ).catch(() => [{ affectedRows: 0 }]);
+        updatedExpenses = updateRes?.affectedRows || 0;
+      }
+
+      res.json({
+        success: true,
+        id,
+        vendor_name: trimmedName,
+        code: trimmedCode,
+        contact_person: contact_person ? String(contact_person).trim() : '',
+        phone: phone ? String(phone).trim() : '',
+        email: email ? String(email).trim() : '',
+        address: address ? String(address).trim() : '',
+        remark: remark ? String(remark).trim() : '',
+        status: status || 'Active',
+        updatedExpenses
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete('/api/expense-vendors/:id', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const { id } = req.params;
+      const { reassign_to } = req.body || {};
+
+      const [existing]: any = await db.query('SELECT * FROM it_expense_vendors WHERE id = ?', [id]);
+      if (existing.length === 0) {
+        return res.status(404).json({ error: 'Vendor not found' });
+      }
+      const deletedVendor = existing[0];
+      const targetVendor = (reassign_to && String(reassign_to).trim()) || 'General Vendor';
+
+      const [reassignRes]: any = await db.query(
+        'UPDATE it_expense_transactions SET vendor_name = ? WHERE vendor_name = ?',
+        [targetVendor, deletedVendor.vendor_name]
+      ).catch(() => [{ affectedRows: 0 }]);
+
+      if (reassignRes?.affectedRows > 0) {
+        await ensureVendorInMaster(db, targetVendor);
+      }
+
+      await db.query('DELETE FROM it_expense_vendors WHERE id = ?', [id]);
+
+      res.json({
+        success: true,
+        message: `Vendor "${deletedVendor.vendor_name}" deleted. Linked expenses reassigned to "${targetVendor}".`,
         reassigned_count: reassignRes?.affectedRows || 0
       });
     } catch (e: any) {

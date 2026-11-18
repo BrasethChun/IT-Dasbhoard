@@ -531,7 +531,7 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
       {/* ========================================================================= */}
       {/* EXECUTIVE HEADER & MISSION CONTROL BANNER */}
       {/* ========================================================================= */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 lg:p-8 text-white shadow-xl relative overflow-hidden border border-slate-800">
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl sm:rounded-3xl p-4 sm:p-6 lg:p-8 text-white shadow-xl relative overflow-hidden border border-slate-800">
         <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 rounded-full bg-indigo-500/10 blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 right-40 -mb-20 w-80 h-80 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
 
@@ -1390,7 +1390,7 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
               </Button>
             </div>
 
-            <div className="grid grid-cols-4 gap-2 text-center my-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center my-4">
               <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
                 <span className="text-[11px] text-slate-500 uppercase block font-semibold">Total</span>
                 <span className="text-xl font-bold text-slate-900 dark:text-white">{ticketMetrics.total}</span>
@@ -1442,7 +1442,7 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
               </Button>
             </div>
 
-            <div className="grid grid-cols-3 gap-3 text-center my-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center my-4">
               <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/50">
                 <span className="text-[11px] text-slate-500 uppercase block font-semibold">Specialists</span>
                 <span className="text-xl font-bold text-slate-900 dark:text-white">{staffMetrics.total}</span>
@@ -1458,7 +1458,7 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
             </div>
           </div>
 
-          <div className="p-4 rounded-2xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900 flex items-center justify-between text-xs">
+          <div className="p-4 rounded-2xl bg-teal-50/60 dark:bg-teal-950/30 border border-teal-100 dark:border-teal-900 flex flex-wrap items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2 text-teal-800 dark:text-teal-300">
               <ShieldCheck size={16} />
               <span>Hospital Technical Coverage:</span>
@@ -1487,9 +1487,9 @@ export const ExecutiveSummaryModule: React.FC<ExecutiveSummaryProps> = ({
           </span>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs whitespace-nowrap">
-            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200 dark:border-slate-700">
+        <div className="overflow-x-auto max-h-[60vh]">
+          <table className="smart-grid-table w-full text-left text-xs whitespace-nowrap">
+            <thead className="sticky top-0 z-10 bg-slate-50 dark:bg-slate-800 text-slate-500 uppercase tracking-wider font-semibold border-b border-slate-200 dark:border-slate-700">
               <tr>
                 <th className="py-3 px-4">Hospital / Facility</th>
                 <th className="py-3 px-4">Core Clinical & Cloud Platform</th>

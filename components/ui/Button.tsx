@@ -15,23 +15,23 @@ export const Button: React.FC<ButtonProps> = ({
   disabled,
   ...props 
 }) => {
-  const baseStyles = "inline-flex items-center justify-center rounded-full font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:ring-offset-2 focus:ring-offset-white disabled:opacity-50 disabled:pointer-events-none select-none relative overflow-hidden active:scale-[0.98]";
+  const baseStyles = "inline-flex items-center justify-center rounded-full font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:ring-offset-2 focus:ring-offset-white dark:focus:ring-offset-slate-900 disabled:opacity-50 disabled:pointer-events-none select-none relative overflow-hidden active:scale-[0.98] whitespace-nowrap shrink-0";
   
   const variants = {
-    // iOS 26 / VisionOS Primary
-    primary: "bg-gradient-to-b from-indigo-500 to-indigo-600 text-white shadow-[0_8px_20px_-6px_rgba(79,70,229,0.4),inset_0_1px_0_rgba(255,255,255,0.2)] hover:shadow-[0_12px_28px_-6px_rgba(79,70,229,0.5),inset_0_1px_0_rgba(255,255,255,0.2)] hover:brightness-105 border border-indigo-600/10 hover:-translate-y-0.5",
+    // Theme-aware Primary
+    primary: "theme-accent-bg shadow-sm hover:brightness-105 border border-black/5 dark:border-white/10 hover:-translate-y-0.5",
     
     // Glass Secondary
-    secondary: "bg-white/70 backdrop-blur-md text-slate-700 border border-white/80 shadow-[0_2px_10px_rgba(0,0,0,0.03)] hover:bg-white hover:text-slate-900 hover:shadow-[0_8px_20px_rgba(0,0,0,0.06)] hover:border-white hover:-translate-y-0.5",
+    secondary: "bg-white/85 dark:bg-slate-800/90 backdrop-blur-md text-slate-700 dark:text-slate-200 border border-slate-200/80 dark:border-slate-700 shadow-xs hover:bg-white dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white",
     
     // Outline
-    outline: "border border-slate-300/60 bg-transparent text-slate-600 hover:bg-white/50 hover:text-slate-900 hover:border-slate-400",
+    outline: "border border-slate-300/80 dark:border-slate-700 bg-transparent text-slate-700 dark:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-slate-800 hover:border-slate-400",
     
     // Ghost
-    ghost: "bg-transparent text-slate-600 hover:bg-slate-100/50 hover:text-slate-900",
+    ghost: "bg-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white",
     
     // Danger
-    danger: "bg-red-50/50 text-red-600 border border-red-100 hover:bg-red-100/80 hover:border-red-200 shadow-sm",
+    danger: "bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-800/70 hover:bg-rose-100 dark:hover:bg-rose-900/60 shadow-xs",
   };
 
   const sizes = {

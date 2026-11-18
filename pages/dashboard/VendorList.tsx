@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Button } from '../../components/ui/Button';
-import { Plus, Upload, Trash2, Search, Edit } from 'lucide-react';
+import { SmartModal } from '../../components/ui/SmartModal';
+import { DensityToggle } from '../../components/ui/SmartGrid';
+import { Plus, Upload, Trash2, Search, Edit, Building2, AlertTriangle } from 'lucide-react';
 import Papa from 'papaparse';
 
 interface Vendor {
@@ -194,14 +196,14 @@ export const VendorList: React.FC = () => {
   const totalRentalVendors = vendors.filter(v => v.vendor_type?.toLowerCase() === 'rental').length;
 
   return (
-    <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 animate-in fade-in zoom-in-95 duration-500">
-      <div className="flex justify-between items-center mb-8">
+    <div className="max-w-7xl mx-auto py-4 sm:py-8 px-1 sm:px-6 lg:px-8 animate-in fade-in zoom-in-95 duration-500">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 sm:mb-8">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">Vendor Management</h1>
-          <p className="text-slate-500 mt-2">Manage your IT vendors, contracts, and vendors.</p>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900">Vendor Management</h1>
+          <p className="text-slate-500 mt-1.5 text-sm">Manage your IT vendors, contracts, and suppliers.</p>
         </div>
-        <div className="flex gap-4">
-          <Button variant="outline" onClick={downloadTemplate}>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button variant="outline" onClick={downloadTemplate} className="whitespace-nowrap">
             Template
           </Button>
           <div>
@@ -212,12 +214,12 @@ export const VendorList: React.FC = () => {
               ref={fileInputRef} 
               onChange={handleFileUpload} 
             />
-            <Button variant="outline" className="flex items-center gap-2" onClick={() => fileInputRef.current?.click()}>
+            <Button variant="outline" className="flex items-center gap-2 whitespace-nowrap" onClick={() => fileInputRef.current?.click()}>
               <Upload size={18} />
               Import CSV
             </Button>
           </div>
-          <Button onClick={() => setShowModal(true)} className="flex items-center gap-2">
+          <Button onClick={() => setShowModal(true)} className="flex items-center gap-2 whitespace-nowrap">
             <Plus size={18} />
             Add Vendor
           </Button>
@@ -230,44 +232,45 @@ export const VendorList: React.FC = () => {
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+      <div className="smart-kpi-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-8">
+        <div className="smart-kpi-card bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <div className="text-sm font-medium text-slate-500 mb-1">Total Vendors</div>
-          <div className="text-3xl font-bold text-slate-900">{vendors.length}</div>
+          <div className="text-3xl font-bold text-slate-900 tabular-nums">{vendors.length}</div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="smart-kpi-card bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <div className="text-sm font-medium text-slate-500 mb-1">Total Subscription vendors</div>
-          <div className="text-3xl font-bold text-slate-900">{totalSubscriptionVendors}</div>
+          <div className="text-3xl font-bold text-slate-900 tabular-nums">{totalSubscriptionVendors}</div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="smart-kpi-card bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <div className="text-sm font-medium text-slate-500 mb-1">Total Purchase Device Vendors</div>
-          <div className="text-3xl font-bold text-slate-900">{totalDeviceVendors}</div>
+          <div className="text-3xl font-bold text-slate-900 tabular-nums">{totalDeviceVendors}</div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+        <div className="smart-kpi-card bg-white rounded-xl shadow-sm border border-slate-200 p-6">
           <div className="text-sm font-medium text-slate-500 mb-1">Total Rental vendors</div>
-          <div className="text-3xl font-bold text-slate-900">{totalRentalVendors}</div>
+          <div className="text-3xl font-bold text-slate-900 tabular-nums">{totalRentalVendors}</div>
         </div>
       </div>
 
       <div className="bg-white shadow-sm border border-slate-200 rounded-2xl overflow-hidden">
-        <div className="p-4 border-b border-slate-200">
-          <div className="relative max-w-sm">
+        <div className="p-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+          <div className="relative flex-1 min-w-[220px] max-w-sm">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
               <Search className="h-5 w-5 text-slate-400" />
             </div>
             <input
               type="text"
-              className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg leading-5 bg-white placeholder-slate-500 focus:outline-none focus:placeholder-slate-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
+              className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-xl leading-5 bg-white placeholder-slate-500 focus:outline-none focus:placeholder-slate-400 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition duration-150 ease-in-out"
               placeholder="Search vendors..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
+          <DensityToggle />
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200">
-            <thead className="bg-slate-50">
+        <div className="overflow-x-auto max-h-[68vh]">
+          <table className="smart-grid-table min-w-full divide-y divide-slate-200">
+            <thead className="sticky top-0 z-20 bg-slate-50">
               <tr>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Vendor Name</th>
                 <th className="px-6 py-4 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider whitespace-nowrap">Vendor Type</th>
@@ -327,84 +330,85 @@ export const VendorList: React.FC = () => {
         </div>
       </div>
 
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="text-lg font-semibold text-slate-900">{formData.id ? 'Edit Vendor' : 'Add New Vendor'}</h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-slate-500">
-                &times;
-              </button>
-            </div>
-            
-            <form onSubmit={handleSave} className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Vendor Name</label>
-                <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Vendor Type</label>
-                <select required value={formData.vendor_type} onChange={e => setFormData({...formData, vendor_type: e.target.value})} className="w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-                  <option value="" disabled>Select vendor type</option>
-                  <option value="Devices">Devices</option>
-                  <option value="Rental">Rental</option>
-                  <option value="Subscription">Subscription</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-                <input type="text" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Contact Person</label>
-                  <input type="text" value={formData.contact_person} onChange={e => setFormData({...formData, contact_person: e.target.value})} className="w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-                  <input type="email" value={formData.contact_email} onChange={e => setFormData({...formData, contact_email: e.target.value})} className="w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Vendor</label>
-                  <div className="relative">
-                    <input type="text" required value={formData.vendor} onChange={e => setFormData({...formData, vendor: e.target.value})} className="w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
-                  <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
-                </div>
-              </div>
+      <SmartModal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        title={formData.id ? 'Edit Vendor' : 'Add New Vendor'}
+        subtitle="Maintain IT supplier directory, contact details, and status"
+        icon={<Building2 size={18} className="text-indigo-600" />}
+        size="md"
+        footer={
+          <div className="flex justify-end gap-2.5 w-full">
+            <Button type="button" variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
+            <Button type="submit" form="vendor-modal-form">Save Vendor</Button>
+          </div>
+        }
+      >
+        <form id="vendor-modal-form" onSubmit={handleSave} className="space-y-4 text-xs">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">Vendor Name *</label>
+            <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" />
+          </div>
 
-              <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <Button type="button" variant="outline" onClick={() => setShowModal(false)}>Cancel</Button>
-                <Button type="submit">Save Vendor</Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-      {confirmDeleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4 animate-in zoom-in-95 duration-200">
-            <h3 className="text-lg font-semibold text-slate-900">Delete Vendor</h3>
-            <p className="text-sm text-slate-500">Are you sure you want to delete this vendor? This action cannot be undone.</p>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
-              <Button type="button" onClick={confirmDelete} className="bg-red-600 hover:bg-red-700 text-white">Delete</Button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Vendor Type *</label>
+              <select required value={formData.vendor_type} onChange={e => setFormData({...formData, vendor_type: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm">
+                <option value="" disabled>Select vendor type</option>
+                <option value="Devices">Devices</option>
+                <option value="Rental">Rental</option>
+                <option value="Subscription">Subscription</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Category</label>
+              <input type="text" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" />
             </div>
           </div>
-        </div>
-      )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Contact Person</label>
+              <input type="text" value={formData.contact_person} onChange={e => setFormData({...formData, contact_person: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Email</label>
+              <input type="email" value={formData.contact_email} onChange={e => setFormData({...formData, contact_email: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Vendor / Brand *</label>
+              <input type="text" required value={formData.vendor} onChange={e => setFormData({...formData, vendor: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Status</label>
+              <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-sm">
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+          </div>
+        </form>
+      </SmartModal>
+
+      <SmartModal
+        open={Boolean(confirmDeleteId)}
+        onClose={() => setConfirmDeleteId(null)}
+        title="Delete Vendor?"
+        subtitle="This action cannot be undone"
+        icon={<AlertTriangle size={18} className="text-rose-600" />}
+        size="sm"
+        footer={
+          <div className="flex justify-end gap-2.5 w-full">
+            <Button type="button" variant="outline" onClick={() => setConfirmDeleteId(null)}>Cancel</Button>
+            <Button type="button" onClick={confirmDelete} className="bg-red-600 hover:bg-red-700 text-white">Delete</Button>
+          </div>
+        }
+      >
+        <p className="text-sm text-slate-600">Are you sure you want to delete this vendor? This action cannot be undone.</p>
+      </SmartModal>
     </div>
   );
 };

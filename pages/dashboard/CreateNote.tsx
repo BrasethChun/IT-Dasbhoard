@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Save, ArrowLeft, Image as ImageIcon, Wand2, X, Calendar, Loader2, Paperclip, File as FileIcon, FileText, Zap, Sparkles, ChevronRight } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { SmartModal } from '../../components/ui/SmartModal';
 import { Editor } from '../../components/ui/Editor';
 import { noteService } from '../../services/noteService';
 import { storageService } from '../../services/storageService';
@@ -446,15 +447,15 @@ export const CreateNote: React.FC = () => {
   const canEnhance = hasContent;
 
   return (
-    <div className="mx-auto max-w-4xl animate-in fade-in duration-500 pb-20">
-      <nav className="sticky top-4 z-50 mb-8 flex items-center justify-between rounded-2xl border border-slate-200 bg-white/80 px-4 py-3 shadow-sm backdrop-blur-2xl transition-all">
-        <div className="flex items-center gap-3">
-           <Button variant="ghost" size="sm" onClick={() => navigate(-1)} className="text-slate-500 hover:text-slate-900">
-             <ArrowLeft className="mr-2 h-4 w-4" />
+    <div className="mx-auto max-w-4xl animate-in fade-in duration-500 pb-8 sm:pb-20">
+      <nav className="sticky top-16 lg:top-4 z-30 mb-5 sm:mb-8 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-white/90 px-3 sm:px-4 py-2.5 sm:py-3 shadow-sm backdrop-blur-2xl transition-all">
+        <div className="flex items-center gap-2 sm:gap-3">
+           <Button variant="ghost" size="sm" onClick={() => navigate(-1)} className="text-slate-500 hover:text-slate-900 px-2 sm:px-3">
+             <ArrowLeft className="mr-1.5 h-4 w-4" />
              Back
            </Button>
            <div className="h-4 w-px bg-slate-200"></div>
-           <span className="text-sm font-medium text-slate-500">
+           <span className="text-xs sm:text-sm font-medium text-slate-500">
               {id ? 'Edit Note' : 'New Draft'}
            </span>
         </div>
@@ -463,13 +464,13 @@ export const CreateNote: React.FC = () => {
             <Button 
               variant="secondary" 
               size="sm" 
-              className="hidden sm:flex border-purple-100 bg-purple-50 text-purple-700 hover:bg-purple-100" 
+              className="border-purple-100 bg-purple-50 text-purple-700 hover:bg-purple-100 px-2.5 sm:px-3" 
               disabled={!canEnhance || enhancing}
               onClick={handleAiEnhance}
               isLoading={enhancing}
             >
-                <Wand2 className="mr-2 h-3.5 w-3.5 text-purple-600" />
-                <span>AI Enhance</span>
+                <Wand2 className="sm:mr-2 h-3.5 w-3.5 text-purple-600" />
+                <span className="hidden sm:inline">AI Enhance</span>
             </Button>
             <Button 
               onClick={handleSave} 
@@ -478,21 +479,21 @@ export const CreateNote: React.FC = () => {
               isLoading={saving} 
               disabled={!canSave}
             >
-              <Save className="mr-2 h-3.5 w-3.5" />
+              <Save className="mr-1.5 sm:mr-2 h-3.5 w-3.5" />
               Save Note
             </Button>
         </div>
       </nav>
 
-      <div className="relative min-h-[70vh] rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50 overflow-hidden flex flex-col">
+      <div className="relative min-h-[70vh] rounded-2xl sm:rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/50 overflow-hidden flex flex-col">
         {imagePreview && (
-          <div className="relative aspect-[21/9] w-full group bg-slate-50 border-b border-slate-100">
+          <div className="relative aspect-[16/9] sm:aspect-[21/9] w-full group bg-slate-50 border-b border-slate-100">
               <StorageImage 
                 path={imagePreview} 
                 alt="Cover" 
                 className="h-full w-full object-cover" 
               />
-              <div className="absolute top-4 right-4 flex gap-2 opacity-0 translate-y-2 group-hover:opacity-100 group-hover:translate-y-0 transition-all duration-300">
+              <div className="absolute top-3 right-3 sm:top-4 sm:right-4 flex flex-wrap gap-1.5 sm:gap-2 opacity-100 sm:opacity-0 sm:translate-y-2 sm:group-hover:opacity-100 sm:group-hover:translate-y-0 transition-all duration-300">
                   <button 
                       type="button"
                       onClick={() => setShowSampleCoverModal(true)}
@@ -516,14 +517,14 @@ export const CreateNote: React.FC = () => {
           </div>
         )}
 
-        <div className="flex-1 px-8 py-10 md:px-16 md:py-12">
-            <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+        <div className="flex-1 px-4 py-6 sm:px-8 sm:py-10 md:px-16 md:py-12">
+            <div className="mb-6 sm:mb-8 flex flex-wrap items-center justify-between gap-3 sm:gap-4">
                 <div className="flex items-center gap-2 text-xs font-medium text-slate-400 uppercase tracking-wider">
                     <Calendar size={13} />
                     <span>{new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                    {!id && (
                      <select 
                        className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 outline-none hover:bg-white hover:text-slate-800 transition-all cursor-pointer shadow-sm max-w-[200px] truncate"
@@ -532,7 +533,7 @@ export const CreateNote: React.FC = () => {
                      >
                        <option value="" disabled>Apply Template...</option>
                        <optgroup label="System Templates">
-                          <option value="it-meeting">IT Notes & Meetings</option>
+                          <option value="it-meeting">IT Notes &amp; Meetings</option>
                           <option value="ops-meeting">KHEMA - OPERATIONS MANAGEMENT Meeting</option>
                        </optgroup>
                        {customTemplates.length > 0 && (
@@ -544,7 +545,7 @@ export const CreateNote: React.FC = () => {
                        )}
                      </select>
                    )}
-                   <label className="group flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 transition-all hover:bg-white hover:text-indigo-600 hover:border-indigo-200 hover:shadow-sm">
+                   <label className="group flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 transition-all hover:bg-white hover:text-indigo-600 hover:border-indigo-200 hover:shadow-sm whitespace-nowrap">
                       <Paperclip size={14} className="text-slate-400 group-hover:text-indigo-500" />
                       <span>Attach File</span>
                       <input type="file" multiple className="hidden" onChange={handleAttachmentUpload} />
@@ -552,14 +553,14 @@ export const CreateNote: React.FC = () => {
                    <button
                       type="button"
                       onClick={() => setShowSampleCoverModal(true)}
-                      className="group flex cursor-pointer items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50/70 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-all hover:bg-indigo-100 hover:text-indigo-800 hover:shadow-sm"
+                      className="group flex cursor-pointer items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50/70 px-3 py-1.5 text-xs font-medium text-indigo-700 transition-all hover:bg-indigo-100 hover:text-indigo-800 hover:shadow-sm whitespace-nowrap"
                       title="Browse curated IT & Meeting sample covers"
                    >
                       <Sparkles size={14} className="text-indigo-600" />
                       <span>Sample Covers</span>
                    </button>
                    {!imagePreview && (
-                      <label className="group flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 transition-all hover:bg-white hover:text-slate-800 hover:border-slate-300 hover:shadow-sm">
+                      <label className="group flex cursor-pointer items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 transition-all hover:bg-white hover:text-slate-800 hover:border-slate-300 hover:shadow-sm whitespace-nowrap">
                          <ImageIcon size={14} className="text-slate-400 group-hover:text-slate-600" />
                          <span>Upload Cover</span>
                          <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
@@ -574,7 +575,7 @@ export const CreateNote: React.FC = () => {
                   placeholder="My notes"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full border-none bg-transparent text-4xl sm:text-5xl font-extrabold text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-0 p-0 mb-8 tracking-tight leading-tight pr-12"
+                  className="w-full border-none bg-transparent text-2xl sm:text-4xl md:text-5xl font-extrabold text-slate-900 placeholder:text-slate-300 focus:outline-none focus:ring-0 p-0 mb-6 sm:mb-8 tracking-tight leading-tight pr-12"
                   autoFocus
               />
               {!title && hasContent && (
@@ -615,7 +616,7 @@ export const CreateNote: React.FC = () => {
                       </div>
                       <button 
                         onClick={() => removeExistingAttachment(att)}
-                        className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-white text-slate-400 border border-slate-200 shadow-sm flex items-center justify-center opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100 hover:text-red-500 hover:border-red-200 transition-all duration-200"
+                        className="absolute -top-2 -right-2 h-7 w-7 rounded-full bg-white text-slate-500 border border-slate-200 shadow-sm flex items-center justify-center opacity-100 sm:opacity-0 sm:scale-90 sm:group-hover:opacity-100 sm:group-hover:scale-100 hover:text-red-500 hover:border-red-200 transition-all duration-200"
                         title="Remove attachment"
                       >
                         <X size={12} strokeWidth={2.5} />
@@ -642,7 +643,7 @@ export const CreateNote: React.FC = () => {
                       </div>
                       <button 
                         onClick={() => removeNewAttachment(index)}
-                        className="absolute -top-2 -right-2 h-6 w-6 rounded-full bg-white text-slate-400 border border-slate-200 shadow-sm flex items-center justify-center opacity-0 scale-90 group-hover:opacity-100 group-hover:scale-100 hover:text-red-500 hover:border-red-200 transition-all duration-200"
+                        className="absolute -top-2 -right-2 h-7 w-7 rounded-full bg-white text-slate-500 border border-slate-200 shadow-sm flex items-center justify-center opacity-100 sm:opacity-0 sm:scale-90 sm:group-hover:opacity-100 sm:group-hover:scale-100 hover:text-red-500 hover:border-red-200 transition-all duration-200"
                       >
                         <X size={12} strokeWidth={2.5} />
                       </button>
@@ -661,98 +662,85 @@ export const CreateNote: React.FC = () => {
       </div>
 
       {/* Sample Covers Gallery Modal */}
-      {showSampleCoverModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="flex justify-between items-center px-6 py-5 border-b border-slate-100 bg-slate-50/70">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                  <Sparkles size={16} />
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-900 text-base">Sample IT & Meeting Covers</h3>
-                  <p className="text-xs text-slate-500">Pick a curated cover image or leave blank for automatic selection</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowSampleCoverModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-              {SAMPLE_IT_COVERS.map((cover) => {
-                const isSelected = imagePreview === cover.url;
-                return (
-                  <div
-                    key={cover.id}
-                    onClick={() => {
-                      setImagePreview(cover.url);
-                      setShowSampleCoverModal(false);
-                    }}
-                    className={`group cursor-pointer rounded-2xl border overflow-hidden transition-all duration-200 flex flex-col hover:-translate-y-1 hover:shadow-lg ${
-                      isSelected
-                        ? 'border-indigo-600 ring-2 ring-indigo-500/30 shadow-md'
-                        : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <div className="relative h-28 w-full overflow-hidden bg-slate-100">
-                      <img
-                        src={cover.url}
-                        alt={cover.title}
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
-                      <div className="absolute top-2 left-2 z-10">
-                        <span className="rounded bg-slate-900/70 backdrop-blur-sm px-1.5 py-0.5 text-[9px] font-semibold text-white">
-                          {cover.badge}
-                        </span>
-                      </div>
-                      {isSelected && (
-                        <div className="absolute inset-0 bg-indigo-600/20 backdrop-blur-[1px] flex items-center justify-center z-10">
-                          <span className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow">
-                            Active
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-3 bg-white flex-1 flex flex-col justify-between">
-                      <h4 className="text-xs font-bold text-slate-900 group-hover:text-indigo-600 transition-colors line-clamp-1">
-                        {cover.title}
-                      </h4>
-                      <p className="text-[10px] text-slate-500 mt-1 line-clamp-2 leading-relaxed">
-                        {cover.description}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-              <button
-                type="button"
+      <SmartModal
+        open={showSampleCoverModal}
+        onClose={() => setShowSampleCoverModal(false)}
+        title="Sample IT & Meeting Covers"
+        subtitle="Pick a curated cover image or leave blank for automatic selection"
+        icon={<Sparkles size={17} />}
+        size="xl"
+        footer={
+          <div className="w-full flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setImagePreview(null);
+                setShowSampleCoverModal(false);
+              }}
+              className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 font-medium cursor-pointer"
+            >
+              Reset to Auto Default
+            </button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowSampleCoverModal(false)}
+              className="text-xs"
+            >
+              Close
+            </Button>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
+          {SAMPLE_IT_COVERS.map((cover) => {
+            const isSelected = imagePreview === cover.url;
+            return (
+              <div
+                key={cover.id}
                 onClick={() => {
-                  setImagePreview(null);
+                  setImagePreview(cover.url);
                   setShowSampleCoverModal(false);
                 }}
-                className="text-xs text-slate-500 hover:text-slate-800 font-medium"
+                className={`group cursor-pointer rounded-2xl border overflow-hidden transition-all duration-200 flex flex-col hover:-translate-y-0.5 hover:shadow-lg ${
+                  isSelected
+                    ? 'border-indigo-600 ring-2 ring-indigo-500/30 shadow-md'
+                    : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                }`}
               >
-                Reset to Auto Default
-              </button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowSampleCoverModal(false)}
-                className="text-xs"
-              >
-                Close
-              </Button>
-            </div>
-          </div>
+                <div className="relative h-28 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+                  <img
+                    src={cover.url}
+                    alt={cover.title}
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  />
+                  <div className="absolute top-2 left-2 z-10">
+                    <span className="rounded bg-slate-900/70 backdrop-blur-sm px-1.5 py-0.5 text-[9px] font-semibold text-white">
+                      {cover.badge}
+                    </span>
+                  </div>
+                  {isSelected && (
+                    <div className="absolute inset-0 bg-indigo-600/20 backdrop-blur-[1px] flex items-center justify-center z-10">
+                      <span className="bg-indigo-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow">
+                        Active
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="p-3 bg-white dark:bg-slate-900 flex-1 flex flex-col justify-between">
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 group-hover:text-indigo-600 transition-colors line-clamp-1">
+                    {cover.title}
+                  </h4>
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2 leading-relaxed">
+                    {cover.description}
+                  </p>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      )}
+      </SmartModal>
     </div>
   );
 };

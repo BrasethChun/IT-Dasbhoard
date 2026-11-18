@@ -6,7 +6,8 @@ import {
   AlertCircle, AlertTriangle, Building2, Layers, Tag, CreditCard, 
   ArrowUpRight, ArrowDownRight, ExternalLink, X, FileText, Check,
   SlidersHorizontal, ChevronDown, CheckSquare, Sparkles, BarChart3,
-  PieChart as PieIcon, ArrowRight, Settings2, MapPin, Calculator
+  PieChart as PieIcon, ArrowRight, Settings2, MapPin, Calculator,
+  Store, Phone, Mail, User
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, 
@@ -14,6 +15,8 @@ import {
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import { Button } from '../../components/ui/Button';
+import { SmartModal } from '../../components/ui/SmartModal';
+import { DensityToggle } from '../../components/ui/SmartGrid';
 
 export interface ITExpenseTransaction {
   id: string;
@@ -66,6 +69,22 @@ export interface ITExpenseCategory {
   gl_account_code?: string;
   budget_type?: 'CapEx' | 'OpEx' | 'Both';
   description?: string;
+  status: 'Active' | 'Inactive';
+  expense_count?: number;
+  total_expense_amount?: number | string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ITExpenseVendor {
+  id: string;
+  vendor_name: string;
+  code: string;
+  contact_person?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  remark?: string;
   status: 'Active' | 'Inactive';
   expense_count?: number;
   total_expense_amount?: number | string;
@@ -243,7 +262,7 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
   
   // Khema Campus & Expense Configuration Modal State
   const [showCampusManageModal, setShowCampusManageModal] = useState<boolean>(false);
-  const [configActiveSection, setConfigActiveSection] = useState<'campuses' | 'categories'>('campuses');
+  const [configActiveSection, setConfigActiveSection] = useState<'campuses' | 'categories' | 'vendors'>('campuses');
 
   // Campus CRUD State
   const [campusManageTab, setCampusManageTab] = useState<'list' | 'form'>('list');
@@ -278,6 +297,28 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
   const [categoryDeletingItem, setCategoryDeletingItem] = useState<ITExpenseCategory | null>(null);
   const [categoryReassignTarget, setCategoryReassignTarget] = useState<string>('General IT Services');
   const [isDeletingCategoryCrud, setIsDeletingCategoryCrud] = useState<boolean>(false);
+
+  // Vendors Master CRUD State (with Contact: phone, email, address, remark)
+  const [expenseVendorsData, setExpenseVendorsData] = useState<ITExpenseVendor[]>([]);
+  const [selectedVendor, setSelectedVendor] = useState<string>('All Vendors');
+  const [vendorManageTab, setVendorManageTab] = useState<'list' | 'form'>('list');
+  const [vendorFormMode, setVendorFormMode] = useState<'create' | 'edit'>('create');
+  const [editingVendorItem, setEditingVendorItem] = useState<ITExpenseVendor | null>(null);
+  const [vendorFormName, setVendorFormName] = useState<string>('');
+  const [vendorFormCode, setVendorFormCode] = useState<string>('');
+  const [vendorFormContactPerson, setVendorFormContactPerson] = useState<string>('');
+  const [vendorFormPhone, setVendorFormPhone] = useState<string>('');
+  const [vendorFormEmail, setVendorFormEmail] = useState<string>('');
+  const [vendorFormAddress, setVendorFormAddress] = useState<string>('');
+  const [vendorFormRemark, setVendorFormRemark] = useState<string>('');
+  const [vendorFormStatus, setVendorFormStatus] = useState<'Active' | 'Inactive'>('Active');
+  const [syncExpensesOnVendorRename, setSyncExpensesOnVendorRename] = useState<boolean>(true);
+  const [vendorSearchQuery, setVendorSearchQuery] = useState<string>('');
+  const [vendorStatusFilter, setVendorStatusFilter] = useState<'All' | 'Active' | 'Inactive'>('All');
+  const [isSavingVendorCrud, setIsSavingVendorCrud] = useState<boolean>(false);
+  const [vendorDeletingItem, setVendorDeletingItem] = useState<ITExpenseVendor | null>(null);
+  const [vendorReassignTarget, setVendorReassignTarget] = useState<string>('General Vendor');
+  const [isDeletingVendorCrud, setIsDeletingVendorCrud] = useState<boolean>(false);
 
   // Backward compatibility aliases
   const showAddCampusModal = showCampusManageModal;
@@ -413,7 +454,8 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
     toD: string = toDate,
     cat: string = selectedCategory,
     classification: string = selectedClassification,
-    linkedId: string = selectedLinkedBudgetId
+    linkedId: string = selectedLinkedBudgetId,
+    vendor: string = selectedVendor
   ) => {
     try {
       const params = new URLSearchParams({ fiscal_year: String(fy) });
@@ -421,6 +463,7 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
       if (bType !== 'All Types' && bType !== 'All') params.append('budget_type', bType);
       if (status !== 'All Statuses') params.append('payment_status', status);
       if (cat && cat !== 'All Categories' && cat !== 'All') params.append('category', cat);
+      if (vendor && vendor !== 'All Vendors' && vendor !== 'All') params.append('vendor', vendor);
       if (linkedId && linkedId !== 'All' && linkedId !== 'All Items') params.append('linked_budget_id', linkedId);
       if (classification && classification !== 'All' && classification !== 'All Classifications') {
         const cVal = classification.includes('Unplanned') 
@@ -457,13 +500,15 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
     classification: string = selectedClassification,
     bType: string = selectedBudgetType,
     cat: string = selectedCategory,
-    linkedId: string = selectedLinkedBudgetId
+    linkedId: string = selectedLinkedBudgetId,
+    vendor: string = selectedVendor
   ) => {
     try {
       const params = new URLSearchParams({ fiscal_year: String(fy) });
       if (site !== 'All Sites') params.append('site', site);
       if (bType !== 'All Types' && bType !== 'All') params.append('budget_type', bType);
       if (cat && cat !== 'All Categories' && cat !== 'All') params.append('category', cat);
+      if (vendor && vendor !== 'All Vendors' && vendor !== 'All') params.append('vendor', vendor);
       if (linkedId && linkedId !== 'All' && linkedId !== 'All Items') params.append('linked_budget_id', linkedId);
       if (fromD && fromD.trim()) params.append('from_date', fromD.trim());
       if (toD && toD.trim()) params.append('to_date', toD.trim());
@@ -587,18 +632,205 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
     return [];
   };
 
-  const handleOpenManageCampuses = (section: 'campuses' | 'categories' = 'campuses') => {
+  // Fetch IT Expense Vendors Master with contact info and live statistics
+  const fetchExpenseVendors = async () => {
+    try {
+      const res = await fetch('/api/expense-vendors', {
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setExpenseVendorsData(data);
+          return data;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch /api/expense-vendors:', e);
+    }
+    return [];
+  };
+
+  const handleOpenManageCampuses = (section: 'campuses' | 'categories' | 'vendors' = 'campuses') => {
     setConfigActiveSection(section);
     if (section === 'campuses') {
       setCampusManageTab('list');
-    } else {
+    } else if (section === 'categories') {
       setCategoryManageTab('list');
+    } else {
+      setVendorManageTab('list');
     }
     setShowCampusManageModal(true);
   };
 
   const handleOpenManageCategories = () => {
     handleOpenManageCampuses('categories');
+  };
+
+  const handleOpenManageVendors = () => {
+    handleOpenManageCampuses('vendors');
+  };
+
+  const handleOpenCreateVendor = () => {
+    setConfigActiveSection('vendors');
+    setVendorManageTab('form');
+    setVendorFormMode('create');
+    setEditingVendorItem(null);
+    setVendorFormName('');
+    setVendorFormCode('');
+    setVendorFormContactPerson('');
+    setVendorFormPhone('');
+    setVendorFormEmail('');
+    setVendorFormAddress('');
+    setVendorFormRemark('');
+    setVendorFormStatus('Active');
+    setSyncExpensesOnVendorRename(true);
+    setShowCampusManageModal(true);
+  };
+
+  const handleOpenEditVendor = (vnd: ITExpenseVendor) => {
+    setConfigActiveSection('vendors');
+    setVendorManageTab('form');
+    setVendorFormMode('edit');
+    setEditingVendorItem(vnd);
+    setVendorFormName(vnd.vendor_name || '');
+    setVendorFormCode(vnd.code || '');
+    setVendorFormContactPerson(vnd.contact_person || '');
+    setVendorFormPhone(vnd.phone || '');
+    setVendorFormEmail(vnd.email || '');
+    setVendorFormAddress(vnd.address || '');
+    setVendorFormRemark(vnd.remark || '');
+    setVendorFormStatus(vnd.status || 'Active');
+    setSyncExpensesOnVendorRename(true);
+    setShowCampusManageModal(true);
+  };
+
+  const handleSaveVendorCrud = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const vndName = vendorFormName.trim();
+    if (!vndName) {
+      alert('Please enter a vendor name.');
+      return;
+    }
+
+    setIsSavingVendorCrud(true);
+    try {
+      if (vendorFormMode === 'create') {
+        const res = await fetch('/api/expense-vendors', {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            vendor_name: vndName,
+            code: vendorFormCode.trim(),
+            contact_person: vendorFormContactPerson.trim(),
+            phone: vendorFormPhone.trim(),
+            email: vendorFormEmail.trim(),
+            address: vendorFormAddress.trim(),
+            remark: vendorFormRemark.trim(),
+            status: vendorFormStatus
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Failed to create vendor');
+        }
+
+        showToast(`Vendor "${vndName}" added to Master Directory!`, 'success');
+      } else if (vendorFormMode === 'edit' && editingVendorItem) {
+        const oldName = editingVendorItem.vendor_name;
+        const res = await fetch(`/api/expense-vendors/${editingVendorItem.id}`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            vendor_name: vndName,
+            code: vendorFormCode.trim(),
+            contact_person: vendorFormContactPerson.trim(),
+            phone: vendorFormPhone.trim(),
+            email: vendorFormEmail.trim(),
+            address: vendorFormAddress.trim(),
+            remark: vendorFormRemark.trim(),
+            status: vendorFormStatus,
+            sync_expenses: syncExpensesOnVendorRename
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || 'Failed to update vendor');
+        }
+
+        const data = await res.json();
+        const updatedCount = data.updatedExpenses || 0;
+
+        if (selectedVendor === oldName) {
+          setSelectedVendor(vndName);
+        }
+
+        showToast(
+          syncExpensesOnVendorRename && updatedCount > 0
+            ? `Vendor updated! ${updatedCount} expense record${updatedCount > 1 ? 's' : ''} synchronized to "${vndName}".`
+            : `Vendor "${vndName}" updated successfully!`,
+          'success'
+        );
+      }
+
+      setVendorManageTab('list');
+      await fetchExpenseVendors();
+      await fetchTransactions(selectedFiscalYear, selectedSite, selectedBudgetType, selectedPaymentStatus, searchQuery, fromDate, toDate, selectedCategory, selectedClassification, selectedLinkedBudgetId, selectedVendor);
+    } catch (err: any) {
+      alert('Error saving vendor: ' + err.message);
+    } finally {
+      setIsSavingVendorCrud(false);
+    }
+  };
+
+  const handlePromptDeleteVendor = (vnd: ITExpenseVendor) => {
+    setVendorDeletingItem(vnd);
+    const fallback = expenseVendorsData.find(v => v.vendor_name !== vnd.vendor_name && v.status === 'Active')?.vendor_name
+      || 'General Vendor';
+    setVendorReassignTarget(fallback);
+  };
+
+  const handleConfirmDeleteVendor = async () => {
+    if (!vendorDeletingItem) return;
+    setIsDeletingVendorCrud(true);
+    try {
+      const res = await fetch(`/api/expense-vendors/${vendorDeletingItem.id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          reassign_to: vendorReassignTarget
+        })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to delete vendor');
+      }
+
+      const data = await res.json();
+      const reassignedCount = data.reassigned_count || 0;
+
+      if (selectedVendor === vendorDeletingItem.vendor_name) {
+        setSelectedVendor('All Vendors');
+      }
+
+      showToast(
+        reassignedCount > 0
+          ? `Vendor deleted. ${reassignedCount} linked expense${reassignedCount > 1 ? 's' : ''} reassigned to "${vendorReassignTarget}".`
+          : `Vendor "${vendorDeletingItem.vendor_name}" deleted.`,
+        'info'
+      );
+
+      setVendorDeletingItem(null);
+      await fetchExpenseVendors();
+      await fetchTransactions(selectedFiscalYear, selectedSite, selectedBudgetType, selectedPaymentStatus, searchQuery, fromDate, toDate, selectedCategory, selectedClassification, selectedLinkedBudgetId, selectedVendor);
+    } catch (err: any) {
+      alert('Error deleting vendor: ' + err.message);
+    } finally {
+      setIsDeletingVendorCrud(false);
+    }
   };
 
   const handleOpenCreateCategory = () => {
@@ -924,12 +1156,13 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
     const curFrom = activeSubView === 'analytics' ? execFromDate : fromDate;
     const curTo = activeSubView === 'analytics' ? execToDate : toDate;
     await Promise.all([
-      fetchTransactions(selectedFiscalYear, selectedSite, selectedBudgetType, selectedPaymentStatus, searchQuery, curFrom, curTo, selectedCategory, selectedClassification, selectedLinkedBudgetId),
-      fetchAnalytics(selectedFiscalYear, selectedSite, curFrom, curTo, selectedClassification, selectedBudgetType, selectedCategory, selectedLinkedBudgetId),
+      fetchTransactions(selectedFiscalYear, selectedSite, selectedBudgetType, selectedPaymentStatus, searchQuery, curFrom, curTo, selectedCategory, selectedClassification, selectedLinkedBudgetId, selectedVendor),
+      fetchAnalytics(selectedFiscalYear, selectedSite, curFrom, curTo, selectedClassification, selectedBudgetType, selectedCategory, selectedLinkedBudgetId, selectedVendor),
       fetchBudgetOptions(selectedFiscalYear),
       fetchAssetCategories(),
       fetchSites(),
-      fetchExpenseCategories()
+      fetchExpenseCategories(),
+      fetchExpenseVendors()
     ]);
     setLoading(false);
   };
@@ -952,9 +1185,9 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
   useEffect(() => {
     const curFrom = activeSubView === 'analytics' ? execFromDate : fromDate;
     const curTo = activeSubView === 'analytics' ? execToDate : toDate;
-    fetchTransactions(selectedFiscalYear, selectedSite, selectedBudgetType, selectedPaymentStatus, searchQuery, curFrom, curTo, selectedCategory, selectedClassification, selectedLinkedBudgetId);
-    fetchAnalytics(selectedFiscalYear, selectedSite, curFrom, curTo, selectedClassification, selectedBudgetType, selectedCategory, selectedLinkedBudgetId);
-  }, [activeSubView, selectedSite, selectedCategory, selectedBudgetType, selectedPaymentStatus, selectedClassification, selectedLinkedBudgetId, searchQuery, fromDate, toDate, execFromDate, execToDate]);
+    fetchTransactions(selectedFiscalYear, selectedSite, selectedBudgetType, selectedPaymentStatus, searchQuery, curFrom, curTo, selectedCategory, selectedClassification, selectedLinkedBudgetId, selectedVendor);
+    fetchAnalytics(selectedFiscalYear, selectedSite, curFrom, curTo, selectedClassification, selectedBudgetType, selectedCategory, selectedLinkedBudgetId, selectedVendor);
+  }, [activeSubView, selectedSite, selectedCategory, selectedVendor, selectedBudgetType, selectedPaymentStatus, selectedClassification, selectedLinkedBudgetId, searchQuery, fromDate, toDate, execFromDate, execToDate]);
 
   // Delete transaction with safe in-app confirmation modal (eliminates blocked window.confirm in iframes)
   const handleDelete = (id: string, desc: string, amount?: number, vendor?: string) => {
@@ -1250,12 +1483,58 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                 </select>
                 <button
                   type="button"
-                  onClick={handleOpenManageCampuses}
-                  title="Configure Khema Campuses (CRUD, Rename & Auto-sync Expenses)"
+                  onClick={() => handleOpenManageCampuses('campuses')}
+                  title="Configure Campuses, Categories & Vendors Master (CRUD, Contact & Auto-sync)"
                   className="p-1 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs hover:shadow-xs"
                 >
                   <Settings2 size={12} className="text-emerald-600" />
                   <span className="text-[11px]">Configure</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Vendors Filter Selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                <Store size={13} /> Vendor:
+              </span>
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={selectedVendor}
+                  onChange={(e) => {
+                    if (e.target.value === '__manage_vendors__') {
+                      handleOpenManageVendors();
+                    } else if (e.target.value === '__add_new_vendor__') {
+                      handleOpenCreateVendor();
+                    } else {
+                      setSelectedVendor(e.target.value);
+                    }
+                  }}
+                  className={`border text-xs font-semibold rounded-xl px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 max-w-[190px] truncate ${
+                    selectedVendor !== 'All Vendors'
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                      : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                  title="Filter by Vendor / Supplier"
+                >
+                  <option value="All Vendors">All Vendors</option>
+                  {expenseVendorsData.map(v => (
+                    <option key={v.id || v.vendor_name} value={v.vendor_name}>
+                      {v.vendor_name} ({v.expense_count ?? 0})
+                    </option>
+                  ))}
+                  <option disabled value="">──────────</option>
+                  <option value="__manage_vendors__" className="text-emerald-700 font-bold">⚙ Configure Vendors (Master)...</option>
+                  <option value="__add_new_vendor__" className="text-emerald-700 font-semibold">+ Add New Vendor...</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={handleOpenManageVendors}
+                  title="Configure Vendors Master (Contact, Phone, Email, Address & Remark)"
+                  className="p-1 px-2 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 text-xs font-semibold flex items-center gap-1 transition-colors shadow-2xs hover:shadow-xs"
+                >
+                  <Store size={12} className="text-emerald-600" />
+                  <span className="text-[11px] hidden sm:inline">Vendors</span>
                 </button>
               </div>
             </div>
@@ -1453,6 +1732,12 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                   </span>
                 )}
 
+                {selectedVendor !== 'All Vendors' && (
+                  <span className="text-[11px] font-semibold bg-teal-50 text-teal-800 px-2 py-0.5 rounded-md border border-teal-200 truncate max-w-[180px]">
+                    Vendor: {selectedVendor}
+                  </span>
+                )}
+
                 {execMonthPreset !== 'all-year' && (
                   <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-md border border-emerald-200 flex items-center gap-1">
                     <Calendar size={11} className="text-emerald-600" />
@@ -1463,7 +1748,7 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                 )}
               </div>
 
-              {(selectedClassification !== 'All' || selectedBudgetType !== 'All Types' || selectedLinkedBudgetId !== 'All' || selectedCategory !== 'All Categories' || selectedSite !== 'All Sites' || execMonthPreset !== 'all-year') && (
+              {(selectedClassification !== 'All' || selectedBudgetType !== 'All Types' || selectedLinkedBudgetId !== 'All' || selectedCategory !== 'All Categories' || selectedVendor !== 'All Vendors' || selectedSite !== 'All Sites' || execMonthPreset !== 'all-year') && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1471,6 +1756,7 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                     setSelectedBudgetType('All Types');
                     setSelectedLinkedBudgetId('All');
                     setSelectedCategory('All Categories');
+                    setSelectedVendor('All Vendors');
                     setSelectedSite('All Sites');
                     applyExecMonthPreset('all-year');
                   }}
@@ -1702,6 +1988,35 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                           ))}
                       </optgroup>
                     )}
+                  </select>
+                </div>
+
+                {/* Vendor Filter in Executive Summary */}
+                <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1.5 rounded-xl shadow-xs">
+                  <Store size={13} className="text-emerald-600 shrink-0" />
+                  <span className="text-[11px] font-semibold text-slate-500">Vendor:</span>
+                  <select
+                    value={selectedVendor}
+                    onChange={(e) => {
+                      if (e.target.value === '__manage_vendors__') {
+                        handleOpenManageVendors();
+                      } else if (e.target.value === '__add_new_vendor__') {
+                        handleOpenCreateVendor();
+                      } else {
+                        setSelectedVendor(e.target.value);
+                      }
+                    }}
+                    className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer max-w-[190px] truncate"
+                  >
+                    <option value="All Vendors">All Vendors</option>
+                    {expenseVendorsData.map(v => (
+                      <option key={v.id || v.vendor_name} value={v.vendor_name}>
+                        {v.vendor_name} ({v.expense_count ?? 0})
+                      </option>
+                    ))}
+                    <option disabled value="">──────────</option>
+                    <option value="__manage_vendors__" className="text-emerald-700 font-bold">⚙ Configure Vendors...</option>
+                    <option value="__add_new_vendor__" className="text-emerald-700 font-semibold">+ Add New Vendor...</option>
                   </select>
                 </div>
               </div>
@@ -2838,6 +3153,49 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                 </button>
               </div>
 
+              {/* Vendor / Supplier Filter */}
+              <div className={`flex items-center gap-1.5 border px-2.5 py-1 rounded-xl shadow-xs transition-colors ${
+                selectedVendor !== 'All Vendors'
+                  ? 'bg-emerald-50 border-emerald-300'
+                  : 'bg-white border-slate-200'
+              }`}>
+                <Store size={13} className="text-emerald-600 shrink-0" />
+                <span className="text-[11px] font-semibold text-slate-500">Vendor:</span>
+                <select
+                  value={selectedVendor}
+                  onChange={(e) => {
+                    if (e.target.value === '__manage_vendors__') {
+                      handleOpenManageVendors();
+                    } else if (e.target.value === '__add_new_vendor__') {
+                      handleOpenCreateVendor();
+                    } else {
+                      setSelectedVendor(e.target.value);
+                    }
+                  }}
+                  className="bg-transparent text-slate-800 text-xs font-bold focus:outline-none cursor-pointer max-w-[190px] truncate"
+                  title="Filter expense records by Vendor / Supplier"
+                >
+                  <option value="All Vendors">All Vendors</option>
+                  {expenseVendorsData.map(v => (
+                    <option key={v.id || v.vendor_name} value={v.vendor_name}>
+                      {v.vendor_name} ({v.expense_count ?? 0})
+                    </option>
+                  ))}
+                  <option disabled value="">──────────</option>
+                  <option value="__manage_vendors__" className="text-emerald-700 font-bold">⚙ Configure Vendors (CRUD)...</option>
+                  <option value="__add_new_vendor__" className="text-emerald-700 font-semibold">+ Add New Vendor...</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={handleOpenManageVendors}
+                  title="Configure Vendors Master (Contact Phone, Mail, Address & Remark)"
+                  className="p-1 px-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80 text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                >
+                  <Settings2 size={11} className="text-emerald-600" />
+                  <span>Config</span>
+                </button>
+              </div>
+
               <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1 rounded-xl shadow-xs">
                 <span className="text-[11px] font-medium text-slate-500">From:</span>
                 <input
@@ -2873,6 +3231,7 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                   <span>Reset All Year</span>
                 </button>
               )}
+              <DensityToggle />
             </div>
           </div>
         </div>
@@ -2940,9 +3299,9 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
           </div>
         )}
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+        <div className="overflow-x-auto max-h-[68vh]">
+          <table className="smart-grid-table w-full text-left text-xs">
+            <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
               <tr>
                 <th className="py-3 px-3 w-8">#</th>
                 <th className="py-3 px-3">Date</th>
@@ -3188,8 +3547,10 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
           sites={campusList.filter(s => s !== 'All Sites')}
           assetCategories={assetCategories}
           configuredCategories={expenseCategoriesData}
+          configuredVendors={expenseVendorsData}
           onConfigureCampuses={() => handleOpenManageCampuses('campuses')}
           onConfigureCategories={() => handleOpenManageCampuses('categories')}
+          onConfigureVendors={() => handleOpenManageCampuses('vendors')}
           onClose={() => setShowModal(false)}
           onSaved={() => {
             setShowModal(false);
@@ -3200,37 +3561,77 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
       )}
 
       {/* --- SETTLE UNPLANNED EXPENSE MODAL --- */}
-      {settlingTransaction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200 space-y-4">
-            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 flex items-center justify-center border border-amber-200 dark:border-amber-900 shrink-0">
-                  <Sparkles size={20} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    Settle Unplanned IT Expense
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Link and absorb this non-linked expense into an approved budget line
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSettlingTransaction(null)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
+      <SmartModal
+        open={Boolean(settlingTransaction)}
+        onClose={() => !isSubmittingSettle && setSettlingTransaction(null)}
+        title="Settle Unplanned IT Expense"
+        subtitle="Link and absorb this non-linked expense into an approved budget line"
+        icon={<Sparkles size={18} className="text-amber-600" />}
+        size="md"
+        footer={
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setSettlingTransaction(null)}
+              disabled={isSubmittingSettle}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!settleBudgetId || isSubmittingSettle}
+              onClick={async () => {
+                if (!settleBudgetId || !settlingTransaction) return;
+                setIsSubmittingSettle(true);
+                try {
+                  const res = await fetch(`/api/it-expenses/${settlingTransaction.id}/settle`, {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({
+                      budget_type: settleBudgetType,
+                      linked_budget_id: settleBudgetId,
+                      linked_item_name: settleItemName || 'Settled Item'
+                    })
+                  });
+                  if (res.ok) {
+                    setSettlingTransaction(null);
+                    await loadAll();
+                    showToast(`Unplanned expense successfully settled against ${settleItemName || 'budget item'}!`, 'success');
+                  } else {
+                    const data = await res.json();
+                    showToast(data.error || 'Failed to settle expense', 'error');
+                  }
+                } catch (e: any) {
+                  showToast('Error settling expense: ' + e.message, 'error');
+                } finally {
+                  setIsSubmittingSettle(false);
+                }
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {isSubmittingSettle ? (
+                <>
+                  <RefreshCw size={13} className="animate-spin mr-1.5" />
+                  <span>Settling...</span>
+                </>
+              ) : (
+                <>
+                  <Check size={13} className="mr-1.5" />
+                  <span>Confirm Settlement</span>
+                </>
+              )}
+            </Button>
+          </div>
+        }
+      >
+        {settlingTransaction && (
+          <div className="space-y-4">
             {/* Expense details summary */}
             <div className="bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-900/50 rounded-2xl p-4 text-xs space-y-2">
               <div className="flex justify-between items-center">
                 <span className="font-bold text-amber-950 dark:text-amber-200 truncate pr-2">{settlingTransaction.description}</span>
-                <span className="font-mono font-bold text-amber-950 dark:text-amber-200 text-sm shrink-0">
+                <span className="font-mono tabular-nums font-bold text-amber-950 dark:text-amber-200 text-sm shrink-0">
                   ${Number(settlingTransaction.amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </span>
               </div>
@@ -3257,7 +3658,7 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                 <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1.5">
                   Target Budget Classification *
                 </label>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
                     type="button"
                     onClick={() => {
@@ -3323,188 +3724,137 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                 Settling will link this expenditure to the selected line item and update monthly actual disbursements in the IT budget ledger.
               </div>
             </div>
-
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setSettlingTransaction(null)}
-                disabled={isSubmittingSettle}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!settleBudgetId || isSubmittingSettle}
-                onClick={async () => {
-                  if (!settleBudgetId) return;
-                  setIsSubmittingSettle(true);
-                  try {
-                    const res = await fetch(`/api/it-expenses/${settlingTransaction.id}/settle`, {
-                      method: 'POST',
-                      headers: getAuthHeaders(),
-                      body: JSON.stringify({
-                        budget_type: settleBudgetType,
-                        linked_budget_id: settleBudgetId,
-                        linked_item_name: settleItemName || 'Settled Item'
-                      })
-                    });
-                    if (res.ok) {
-                      setSettlingTransaction(null);
-                      await loadAll();
-                      showToast(`Unplanned expense successfully settled against ${settleItemName || 'budget item'}!`, 'success');
-                    } else {
-                      const data = await res.json();
-                      alert(data.error || 'Failed to settle expense');
-                    }
-                  } catch (e: any) {
-                    alert('Error settling expense: ' + e.message);
-                  } finally {
-                    setIsSubmittingSettle(false);
-                  }
-                }}
-                className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {isSubmittingSettle ? (
-                  <>
-                    <RefreshCw size={13} className="animate-spin" />
-                    <span>Settling...</span>
-                  </>
-                ) : (
-                  <>
-                    <Check size={13} />
-                    <span>Confirm Settlement</span>
-                  </>
-                )}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+      </SmartModal>
 
       {/* --- IN-APP DELETE CONFIRMATION MODAL --- */}
-      {deleteModalItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-100 dark:border-rose-900">
-                <AlertTriangle size={24} />
+      <SmartModal
+        open={Boolean(deleteModalItem)}
+        onClose={() => !deleting && setDeleteModalItem(null)}
+        title="Delete Expense Record?"
+        subtitle="Linked CapEx/OpEx actuals will be automatically recalculated"
+        icon={<AlertTriangle size={18} className="text-rose-600" />}
+        size="sm"
+        footer={
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setDeleteModalItem(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmDelete}
+              disabled={deleting}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              {deleting ? (
+                <>
+                  <RefreshCw size={13} className="animate-spin mr-1.5" />
+                  <span>Deleting...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 size={13} className="mr-1.5" />
+                  <span>Confirm Delete</span>
+                </>
+              )}
+            </Button>
+          </div>
+        }
+      >
+        {deleteModalItem && (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Are you sure you want to delete this expense transaction? Linked CapEx/OpEx actuals will be automatically recalculated.
+            </p>
+            <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/80 dark:border-slate-700 text-xs space-y-1">
+              <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                {deleteModalItem.description}
               </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-                  Delete Expense Record?
-                </h3>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  Are you sure you want to delete this expense transaction? Linked CapEx/OpEx actuals will be automatically recalculated.
-                </p>
-                <div className="mt-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-800 text-xs space-y-1">
-                  <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
-                    {deleteModalItem.description}
-                  </div>
-                  {deleteModalItem.vendor && (
-                    <div className="text-slate-500">
-                      Vendor: <span className="font-medium text-slate-700 dark:text-slate-300">{deleteModalItem.vendor}</span>
-                    </div>
-                  )}
-                  {deleteModalItem.amount > 0 && (
-                    <div className="text-slate-500">
-                      Amount: <span className="font-bold text-rose-600">${deleteModalItem.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                    </div>
-                  )}
+              {deleteModalItem.vendor && (
+                <div className="text-slate-500">
+                  Vendor: <span className="font-medium text-slate-700 dark:text-slate-300">{deleteModalItem.vendor}</span>
                 </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setDeleteModalItem(null)}
-                disabled={deleting}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDelete}
-                disabled={deleting}
-                className="px-4 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm shadow-rose-600/20 disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {deleting ? (
-                  <>
-                    <RefreshCw size={13} className="animate-spin" />
-                    <span>Deleting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 size={13} />
-                    <span>Confirm Delete</span>
-                  </>
-                )}
-              </button>
+              )}
+              {deleteModalItem.amount > 0 && (
+                <div className="text-slate-500">
+                  Amount: <span className="font-bold font-mono tabular-nums text-rose-600">${deleteModalItem.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                </div>
+              )}
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </SmartModal>
 
-      {/* --- KHEMA CAMPUS & EXPENSE CONFIGURATION & MANAGEMENT MODAL --- */}
-      {showCampusManageModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
-            {/* Modal Header */}
-            <div className="flex items-start justify-between border-b border-slate-100 dark:border-slate-800 pb-3 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-100 dark:border-emerald-900 shrink-0">
-                  {configActiveSection === 'campuses' ? <Building2 size={20} /> : <Tag size={20} />}
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                      Khema Campus Management & Configuration
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold">
-                      Live Sync Enabled
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Maintain Khema branches, General IT expense categories, GL account codes, and live financial synchronizers
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowCampusManageModal(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg"
-              >
-                <X size={18} />
-              </button>
-            </div>
+      {/* --- KHEMA CAMPUS, CATEGORY & VENDOR MASTER CONFIGURATION MODAL --- */}
+      <SmartModal
+        open={showCampusManageModal}
+        onClose={() => setShowCampusManageModal(false)}
+        title="Khema IT Expense Configuration Master"
+        subtitle="Maintain Khema campuses, expense categories, GL codes, and vendor contacts (phone, mail, address & remark)"
+        icon={
+          configActiveSection === 'campuses'
+            ? <Building2 size={18} className="text-emerald-600" />
+            : configActiveSection === 'categories'
+            ? <Tag size={18} className="text-emerald-600" />
+            : <Store size={18} className="text-emerald-600" />
+        }
+        size="xl"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+              Live Sync Enabled
+            </span>
+            <Button variant="outline" type="button" onClick={() => setShowCampusManageModal(false)}>
+              Close
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
 
-            {/* Primary Section Switcher: Campuses & Sites vs General IT & Expense Categories */}
-            <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl shrink-0 my-3">
+            {/* Primary Section Switcher: Campuses & Sites vs General IT & Expense Categories vs Vendors Master */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-800/80 rounded-2xl shrink-0 my-3">
               <button
                 type="button"
                 onClick={() => setConfigActiveSection('campuses')}
-                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
                   configActiveSection === 'campuses'
                     ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Building2 size={14} />
-                <span>Campuses & Sites ({campusesData.length})</span>
+                <span>Campuses ({campusesData.length})</span>
               </button>
               <button
                 type="button"
                 onClick={() => setConfigActiveSection('categories')}
-                className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
                   configActiveSection === 'categories'
                     ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-xs'
                     : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Tag size={14} />
-                <span>General IT & Expense Categories ({expenseCategoriesData.length})</span>
+                <span>Categories ({expenseCategoriesData.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfigActiveSection('vendors')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                  configActiveSection === 'vendors'
+                    ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Store size={14} />
+                <span>Vendors Master ({expenseVendorsData.length})</span>
               </button>
             </div>
 
@@ -4144,34 +4494,477 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                 </div>
               </>
             )}
-          </div>
+
+            {/* SECTION 3: VENDORS MASTER & CONTACT DIRECTORY CRUD */}
+            {configActiveSection === 'vendors' && (
+              <>
+                {/* Navigation Tabs */}
+                <div className="flex items-center gap-2 pb-2 shrink-0 border-b border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setVendorManageTab('list')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                      vendorManageTab === 'list'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Store size={13} />
+                    <span>All Vendors ({expenseVendorsData.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleOpenCreateVendor}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                      vendorManageTab === 'form' && vendorFormMode === 'create'
+                        ? 'bg-emerald-600 text-white shadow-sm'
+                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    }`}
+                  >
+                    <Plus size={13} />
+                    <span>Add New Vendor</span>
+                  </button>
+                </div>
+
+                {/* Vendor Body */}
+                <div className="flex-1 overflow-y-auto py-3">
+                  {vendorManageTab === 'list' ? (
+                    <div className="space-y-3">
+                      {/* Search & Status Filter Strip */}
+                      <div className="flex items-center justify-between gap-3 flex-wrap">
+                        <div className="relative flex-1 min-w-[200px]">
+                          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            type="text"
+                            placeholder="Search vendor name, phone, email, address, remark..."
+                            value={vendorSearchQuery}
+                            onChange={(e) => setVendorSearchQuery(e.target.value)}
+                            className="w-full pl-8 pr-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1 p-0.5 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                          {(['All', 'Active', 'Inactive'] as const).map((st) => (
+                            <button
+                              key={st}
+                              type="button"
+                              onClick={() => setVendorStatusFilter(st)}
+                              className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-all ${
+                                vendorStatusFilter === st
+                                  ? 'bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 shadow-2xs'
+                                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                              }`}
+                            >
+                              {st}
+                            </button>
+                          ))}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleOpenCreateVendor}
+                          className="text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1 text-[11px] shrink-0"
+                        >
+                          <Plus size={12} /> Add Vendor
+                        </button>
+                      </div>
+
+                      {/* Vendors Master Grid */}
+                      <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-2xs divide-y divide-slate-100 dark:divide-slate-800">
+                        {expenseVendorsData.filter(vnd => {
+                          const q = vendorSearchQuery.trim().toLowerCase();
+                          const matchesQuery = !q ||
+                            vnd.vendor_name.toLowerCase().includes(q) ||
+                            (vnd.code && vnd.code.toLowerCase().includes(q)) ||
+                            (vnd.contact_person && vnd.contact_person.toLowerCase().includes(q)) ||
+                            (vnd.phone && vnd.phone.toLowerCase().includes(q)) ||
+                            (vnd.email && vnd.email.toLowerCase().includes(q)) ||
+                            (vnd.address && vnd.address.toLowerCase().includes(q)) ||
+                            (vnd.remark && vnd.remark.toLowerCase().includes(q));
+                          const matchesStatus = vendorStatusFilter === 'All' || vnd.status === vendorStatusFilter;
+                          return matchesQuery && matchesStatus;
+                        }).length > 0 ? (
+                          expenseVendorsData
+                            .filter(vnd => {
+                              const q = vendorSearchQuery.trim().toLowerCase();
+                              const matchesQuery = !q ||
+                                vnd.vendor_name.toLowerCase().includes(q) ||
+                                (vnd.code && vnd.code.toLowerCase().includes(q)) ||
+                                (vnd.contact_person && vnd.contact_person.toLowerCase().includes(q)) ||
+                                (vnd.phone && vnd.phone.toLowerCase().includes(q)) ||
+                                (vnd.email && vnd.email.toLowerCase().includes(q)) ||
+                                (vnd.address && vnd.address.toLowerCase().includes(q)) ||
+                                (vnd.remark && vnd.remark.toLowerCase().includes(q));
+                              const matchesStatus = vendorStatusFilter === 'All' || vnd.status === vendorStatusFilter;
+                              return matchesQuery && matchesStatus;
+                            })
+                            .map((vnd) => (
+                              <div
+                                key={vnd.id || vnd.vendor_name}
+                                className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
+                              >
+                                <div className="flex items-start gap-3 min-w-0">
+                                  <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono font-bold text-[11px] flex items-center justify-center shrink-0 border border-slate-200/80 dark:border-slate-700">
+                                    {vnd.code || vnd.vendor_name.slice(0, 3).toUpperCase()}
+                                  </div>
+
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-bold text-slate-900 dark:text-white text-xs">
+                                        {vnd.vendor_name}
+                                      </span>
+                                      <span
+                                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                          vnd.status === 'Active'
+                                            ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                            : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                        }`}
+                                      >
+                                        {vnd.status || 'Active'}
+                                      </span>
+                                      {vnd.contact_person && (
+                                        <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded">
+                                          <User size={10} className="text-slate-400" />
+                                          {vnd.contact_person}
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Contact details: Phone, Mail, Address, Remark */}
+                                    <div className="flex flex-wrap items-center gap-x-3.5 gap-y-1 mt-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+                                      <span className="inline-flex items-center gap-1">
+                                        <Phone size={11} className="text-emerald-600 shrink-0" />
+                                        <span>{vnd.phone || <span className="text-slate-400 italic">No phone</span>}</span>
+                                      </span>
+                                      <span className="inline-flex items-center gap-1">
+                                        <Mail size={11} className="text-sky-600 shrink-0" />
+                                        <span>{vnd.email || <span className="text-slate-400 italic">No email</span>}</span>
+                                      </span>
+                                      {vnd.address && (
+                                        <span className="inline-flex items-center gap-1 max-w-xs truncate" title={vnd.address}>
+                                          <MapPin size={11} className="text-amber-600 shrink-0" />
+                                          <span className="truncate">{vnd.address}</span>
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {vnd.remark && (
+                                      <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1 mt-1 line-clamp-2">
+                                        <FileText size={11} className="text-slate-400 shrink-0 mt-0.5" />
+                                        <span>{vnd.remark}</span>
+                                      </p>
+                                    )}
+
+                                    <div className="flex items-center gap-3 mt-1.5 text-[11px]">
+                                      <span className="text-slate-500">
+                                        Linked Expenses:{' '}
+                                        <strong className="text-slate-800 dark:text-slate-200 font-mono">
+                                          {vnd.expense_count || 0}
+                                        </strong>{' '}
+                                        records
+                                      </span>
+                                      {(Number(vnd.total_expense_amount) > 0) && (
+                                        <span className="text-emerald-600 font-mono font-semibold">
+                                          ${Number(vnd.total_expense_amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedVendor(vnd.vendor_name);
+                                      setShowCampusManageModal(false);
+                                    }}
+                                    title="Filter IT expenses to this vendor"
+                                    className="p-1.5 px-2 text-xs font-semibold rounded-lg text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 flex items-center gap-1 transition-colors"
+                                  >
+                                    <Filter size={11} />
+                                    <span className="text-[11px]">Filter</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditVendor(vnd)}
+                                    title="Edit vendor contact details (phone, mail, address & remark)"
+                                    className="p-1.5 px-2 text-xs font-semibold rounded-lg text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-slate-200 dark:border-slate-700 flex items-center gap-1 transition-colors"
+                                  >
+                                    <Edit2 size={12} />
+                                    <span className="hidden sm:inline text-[11px]">Edit</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handlePromptDeleteVendor(vnd)}
+                                    title="Delete vendor and safely reassign expenses"
+                                    className="p-1.5 px-2 text-xs font-semibold rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 border border-slate-200 dark:border-slate-700 flex items-center gap-1 transition-colors"
+                                  >
+                                    <Trash2 size={12} />
+                                    <span className="hidden sm:inline text-[11px]">Delete</span>
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                        ) : (
+                          <div className="p-8 text-center text-slate-400 text-xs">
+                            No matching vendors found. Click "+ Add New Vendor" to create one.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    /* VENDOR CREATE / EDIT FORM */
+                    <form onSubmit={handleSaveVendorCrud} className="space-y-3.5 text-xs">
+                      <div className="flex items-center justify-between pb-1">
+                        <span className="font-bold text-slate-800 dark:text-slate-200 text-xs">
+                          {vendorFormMode === 'create'
+                            ? 'Add New Vendor to Master Directory'
+                            : `Edit Vendor: ${editingVendorItem?.vendor_name}`}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setVendorManageTab('list')}
+                          className="text-slate-400 hover:text-slate-600 text-[11px] font-semibold"
+                        >
+                          ← Back to Vendor List
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="sm:col-span-2">
+                          <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                            Vendor / Supplier Name *
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="e.g. MedTech Systems Asia, Dell Solutions Cambodia"
+                            value={vendorFormName}
+                            onChange={(e) => {
+                              setVendorFormName(e.target.value);
+                              if (vendorFormMode === 'create' && !vendorFormCode) {
+                                const words = e.target.value.trim().split(/\s+/).filter(Boolean);
+                                if (words.length >= 2) {
+                                  setVendorFormCode(words.map(w => w[0]).join('').replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase());
+                                }
+                              }
+                            }}
+                            className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800 dark:text-slate-100 font-medium"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                            Short Code &amp; Status
+                          </label>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              placeholder="VND"
+                              value={vendorFormCode}
+                              onChange={(e) => setVendorFormCode(e.target.value.toUpperCase())}
+                              className="w-full px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none font-mono text-slate-800 dark:text-slate-100 font-medium"
+                            />
+                            <select
+                              value={vendorFormStatus}
+                              onChange={(e) => setVendorFormStatus(e.target.value as any)}
+                              className="w-full px-2 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none font-medium text-slate-800 dark:text-slate-100"
+                            >
+                              <option value="Active">Active</option>
+                              <option value="Inactive">Inactive</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-3.5 bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/80 dark:border-slate-700 rounded-2xl space-y-3">
+                        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                          <Phone size={12} className="text-emerald-600" />
+                          <span>Vendor Contact Information</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                              Contact Person
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Sokha Lim / Account Manager"
+                              value={vendorFormContactPerson}
+                              onChange={(e) => setVendorFormContactPerson(e.target.value)}
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800 dark:text-slate-100 font-medium"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                              Phone Number
+                            </label>
+                            <input
+                              type="tel"
+                              placeholder="e.g. +855 12 345 678"
+                              value={vendorFormPhone}
+                              onChange={(e) => setVendorFormPhone(e.target.value)}
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800 dark:text-slate-100 font-medium"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                              Mail (Email Address)
+                            </label>
+                            <input
+                              type="email"
+                              placeholder="e.g. billing@vendor.com"
+                              value={vendorFormEmail}
+                              onChange={(e) => setVendorFormEmail(e.target.value)}
+                              className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800 dark:text-slate-100 font-medium"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                            Address
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. #45 Monivong Blvd, Daun Penh, Phnom Penh"
+                            value={vendorFormAddress}
+                            onChange={(e) => setVendorFormAddress(e.target.value)}
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800 dark:text-slate-100 font-medium"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">
+                            Remark
+                          </label>
+                          <textarea
+                            rows={2}
+                            placeholder="e.g. Net-30 payment terms, primary SLA supplier for HIS / hardware..."
+                            value={vendorFormRemark}
+                            onChange={(e) => setVendorFormRemark(e.target.value)}
+                            className="w-full px-3 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 text-slate-800 dark:text-slate-100 font-medium"
+                          />
+                        </div>
+                      </div>
+
+                      {/* AUTO-SYNC LINKED EXPENSES TOGGLE (when editing) */}
+                      {vendorFormMode === 'edit' && editingVendorItem && (
+                        <div className="p-3.5 bg-emerald-50/90 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 rounded-2xl space-y-2">
+                          <label className="flex items-start gap-2.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={syncExpensesOnVendorRename}
+                              onChange={(e) => setSyncExpensesOnVendorRename(e.target.checked)}
+                              className="mt-0.5 w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                            />
+                            <div className="text-xs">
+                              <span className="font-bold text-emerald-900 dark:text-emerald-200 block">
+                                Synchronize linked expense records ({editingVendorItem.expense_count || 0} existing records)
+                              </span>
+                              <span className="text-emerald-700 dark:text-emerald-400 text-[11px] leading-relaxed block mt-0.5">
+                                When enabled, renaming this vendor will automatically update all matching expense transactions from <strong>"{editingVendorItem.vendor_name}"</strong> to <strong>"{vendorFormName || 'New Name'}"</strong>.
+                              </span>
+                            </div>
+                          </label>
+                        </div>
+                      )}
+
+                      <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setVendorManageTab('list')}
+                          disabled={isSavingVendorCrud}
+                          className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isSavingVendorCrud || !vendorFormName.trim()}
+                          className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm shadow-emerald-600/20 disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                          {isSavingVendorCrud ? (
+                            <>
+                              <RefreshCw size={13} className="animate-spin" />
+                              <span>Saving Vendor...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check size={13} />
+                              <span>
+                                {vendorFormMode === 'create'
+                                  ? 'Save New Vendor'
+                                  : syncExpensesOnVendorRename
+                                  ? 'Update Vendor & Sync Records'
+                                  : 'Update Vendor'}
+                              </span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              </>
+            )}
         </div>
-      )}
+      </SmartModal>
 
       {/* --- IN-APP CAMPUS DELETE & REASSIGNMENT MODAL --- */}
-      {campusDeletingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200 space-y-4">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-100 dark:border-rose-900">
-                <AlertTriangle size={24} />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Delete Campus "{campusDeletingItem.site_name}"?
-                </h3>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  This campus is currently linked to{' '}
-                  <strong className="text-slate-800 dark:text-slate-200 font-mono">
-                    {campusDeletingItem.expense_count || 0} IT expense records
-                  </strong>
-                  . To protect data integrity, please select where to reassign these records.
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-1.5 pt-2">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+      <SmartModal
+        open={Boolean(campusDeletingItem)}
+        onClose={() => !isDeletingCampusCrud && setCampusDeletingItem(null)}
+        title={campusDeletingItem ? `Delete Campus "${campusDeletingItem.site_name}"?` : 'Delete Campus'}
+        subtitle="Reassign linked records before deletion to preserve ledger integrity"
+        icon={<AlertTriangle size={18} className="text-rose-600" />}
+        size="sm"
+        footer={
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setCampusDeletingItem(null)}
+              disabled={isDeletingCampusCrud}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmDeleteCampus}
+              disabled={isDeletingCampusCrud}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              {isDeletingCampusCrud ? (
+                <>
+                  <RefreshCw size={13} className="animate-spin mr-1.5" />
+                  <span>Reassigning &amp; Deleting...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 size={13} className="mr-1.5" />
+                  <span>Delete &amp; Reassign</span>
+                </>
+              )}
+            </Button>
+          </div>
+        }
+      >
+        {campusDeletingItem && (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              This campus is currently linked to{' '}
+              <strong className="text-slate-800 dark:text-slate-100 font-mono">
+                {campusDeletingItem.expense_count || 0} IT expense records
+              </strong>
+              . To protect data integrity, please select where to reassign these records.
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
                 Reassign Linked Expense Records To:
               </label>
               <select
@@ -4186,63 +4979,60 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                   ))}
               </select>
             </div>
-
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setCampusDeletingItem(null)}
-                disabled={isDeletingCampusCrud}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDeleteCampus}
-                disabled={isDeletingCampusCrud}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm shadow-rose-600/20 disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {isDeletingCampusCrud ? (
-                  <>
-                    <RefreshCw size={13} className="animate-spin" />
-                    <span>Reassigning & Deleting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 size={13} />
-                    <span>Delete & Reassign</span>
-                  </>
-                )}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+      </SmartModal>
 
       {/* --- IN-APP CATEGORY DELETE & REASSIGNMENT MODAL --- */}
-      {categoryDeletingItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in zoom-in-95 duration-200 space-y-4">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 border border-rose-100 dark:border-rose-900">
-                <AlertTriangle size={24} />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  Delete Category "{categoryDeletingItem.category_name}"?
-                </h3>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  This category is currently linked to{' '}
-                  <strong className="text-slate-800 dark:text-slate-200 font-mono">
-                    {categoryDeletingItem.expense_count || 0} IT expense records
-                  </strong>
-                  . To protect financial ledger integrity, please select where to reassign these records.
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-1.5 pt-2">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+      <SmartModal
+        open={Boolean(categoryDeletingItem)}
+        onClose={() => !isDeletingCategoryCrud && setCategoryDeletingItem(null)}
+        title={categoryDeletingItem ? `Delete Category "${categoryDeletingItem.category_name}"?` : 'Delete Category'}
+        subtitle="Reassign linked expense records before deletion"
+        icon={<AlertTriangle size={18} className="text-rose-600" />}
+        size="sm"
+        footer={
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setCategoryDeletingItem(null)}
+              disabled={isDeletingCategoryCrud}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmDeleteCategory}
+              disabled={isDeletingCategoryCrud}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              {isDeletingCategoryCrud ? (
+                <>
+                  <RefreshCw size={13} className="animate-spin mr-1.5" />
+                  <span>Reassigning &amp; Deleting...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 size={13} className="mr-1.5" />
+                  <span>Delete &amp; Reassign</span>
+                </>
+              )}
+            </Button>
+          </div>
+        }
+      >
+        {categoryDeletingItem && (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              This category is currently linked to{' '}
+              <strong className="text-slate-800 dark:text-slate-100 font-mono">
+                {categoryDeletingItem.expense_count || 0} IT expense records
+              </strong>
+              . To protect financial ledger integrity, please select where to reassign these records.
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
                 Reassign Linked Expense Records To:
               </label>
               <select
@@ -4259,38 +5049,80 @@ export const ITExpensesModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) =>
                   ))}
               </select>
             </div>
+          </div>
+        )}
+      </SmartModal>
 
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setCategoryDeletingItem(null)}
-                disabled={isDeletingCategoryCrud}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors disabled:opacity-50"
+      {/* --- IN-APP VENDOR DELETE & REASSIGNMENT MODAL --- */}
+      <SmartModal
+        open={Boolean(vendorDeletingItem)}
+        onClose={() => !isDeletingVendorCrud && setVendorDeletingItem(null)}
+        title={vendorDeletingItem ? `Delete Vendor "${vendorDeletingItem.vendor_name}"?` : 'Delete Vendor'}
+        subtitle="Reassign linked expense records before deletion"
+        icon={<AlertTriangle size={18} className="text-rose-600" />}
+        size="sm"
+        footer={
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setVendorDeletingItem(null)}
+              disabled={isDeletingVendorCrud}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmDeleteVendor}
+              disabled={isDeletingVendorCrud}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              {isDeletingVendorCrud ? (
+                <>
+                  <RefreshCw size={13} className="animate-spin mr-1.5" />
+                  <span>Reassigning &amp; Deleting...</span>
+                </>
+              ) : (
+                <>
+                  <Trash2 size={13} className="mr-1.5" />
+                  <span>Delete &amp; Reassign</span>
+                </>
+              )}
+            </Button>
+          </div>
+        }
+      >
+        {vendorDeletingItem && (
+          <div className="space-y-4">
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              This vendor is currently linked to{' '}
+              <strong className="text-slate-800 dark:text-slate-100 font-mono">
+                {vendorDeletingItem.expense_count || 0} IT expense records
+              </strong>
+              . Select a replacement vendor for those records before removing this entry.
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
+                Reassign Linked Expense Records To:
+              </label>
+              <select
+                value={vendorReassignTarget}
+                onChange={(e) => setVendorReassignTarget(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:outline-none font-medium text-xs text-slate-800 dark:text-slate-100"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmDeleteCategory}
-                disabled={isDeletingCategoryCrud}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm shadow-rose-600/20 disabled:opacity-50 flex items-center gap-1.5"
-              >
-                {isDeletingCategoryCrud ? (
-                  <>
-                    <RefreshCw size={13} className="animate-spin" />
-                    <span>Reassigning & Deleting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Trash2 size={13} />
-                    <span>Delete & Reassign</span>
-                  </>
-                )}
-              </button>
+                {expenseVendorsData
+                  .filter(v => v.vendor_name !== vendorDeletingItem.vendor_name)
+                  .map(v => (
+                    <option key={v.id || v.vendor_name} value={v.vendor_name}>
+                      {v.vendor_name} {v.code ? `(${v.code})` : ''}
+                    </option>
+                  ))}
+                <option value="General Vendor">General Vendor</option>
+              </select>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </SmartModal>
     </div>
   );
 };
@@ -4303,9 +5135,11 @@ interface ExpenseModalProps {
   sites: string[];
   assetCategories?: string[];
   configuredCategories?: ITExpenseCategory[];
+  configuredVendors?: ITExpenseVendor[];
   initialMode?: 'budgeted' | 'unbudgeted';
   onConfigureCampuses?: () => void;
   onConfigureCategories?: () => void;
+  onConfigureVendors?: () => void;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -4317,9 +5151,11 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({
   sites,
   assetCategories = [],
   configuredCategories = [],
+  configuredVendors = [],
   initialMode = 'budgeted',
   onConfigureCampuses,
   onConfigureCategories,
+  onConfigureVendors,
   onClose,
   onSaved
 }) => {
@@ -4474,36 +5310,33 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xl max-w-xl w-full max-h-[90vh] overflow-y-auto space-y-4 animate-in fade-in duration-200">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <div className="flex items-center gap-2">
-            {isUnbudgeted ? (
-              <span className="p-1.5 rounded-lg bg-amber-100 text-amber-700">
-                <AlertTriangle size={16} />
-              </span>
-            ) : (
-              <span className="p-1.5 rounded-lg bg-emerald-100 text-emerald-700">
-                <Receipt size={16} />
-              </span>
-            )}
-            <div>
-              <h3 className="text-base font-bold text-slate-900">
-                {isUnbudgeted
-                  ? (transaction ? 'Edit Unplanned Expense' : 'Record Non-Linked Unplanned Expense')
-                  : (transaction ? 'Edit Expense Transaction' : 'Record New IT Expense')}
-              </h3>
-              <p className="text-[11px] text-slate-500">
-                Fiscal Year {fiscalYear} · {isUnbudgeted ? 'Non-Linked Variance Control' : 'Budget-Linked Disbursement'}
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={16} />
-          </button>
+    <SmartModal
+      open={true}
+      onClose={onClose}
+      title={
+        isUnbudgeted
+          ? (transaction ? 'Edit Unplanned Expense' : 'Record Non-Linked Unplanned Expense')
+          : (transaction ? 'Edit Expense Transaction' : 'Record New IT Expense')
+      }
+      subtitle={`Fiscal Year ${fiscalYear} · ${isUnbudgeted ? 'Non-Linked Variance Control' : 'Budget-Linked Disbursement'}`}
+      icon={
+        isUnbudgeted
+          ? <AlertTriangle size={18} className="text-amber-600" />
+          : <Receipt size={18} className="text-emerald-600" />
+      }
+      size="lg"
+      footer={
+        <div className="flex items-center justify-end gap-2.5 w-full">
+          <Button variant="outline" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="it-expense-modal-form" disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
+            {saving ? 'Saving & Settling...' : transaction ? 'Update Expense' : 'Record & Settle Expense'}
+          </Button>
         </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+      }
+    >
+      <form id="it-expense-modal-form" onSubmit={handleSubmit} className="space-y-4 text-xs">
           {/* Budget Link Picker OR Unplanned Expense Control */}
           {isUnbudgeted ? (
             <div className="p-4 bg-amber-50/80 border border-amber-200/90 rounded-2xl space-y-3">
@@ -4671,17 +5504,50 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="font-semibold text-slate-700">Vendor / Supplier *</label>
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-slate-700">Vendor / Supplier *</label>
+                {onConfigureVendors && (
+                  <button
+                    type="button"
+                    onClick={onConfigureVendors}
+                    className="text-[11px] text-emerald-600 hover:text-emerald-700 font-semibold flex items-center gap-1 hover:underline"
+                    title="Configure Vendors Master & Contacts"
+                  >
+                    <Settings2 size={11} />
+                    <span>Configure</span>
+                  </button>
+                )}
+              </div>
               <input
                 type="text"
                 required
-                placeholder="e.g. MedTech Asia"
+                list="it-expense-vendors-datalist"
+                placeholder="Select or type vendor name..."
                 value={vendorName}
                 onChange={(e) => setVendorName(e.target.value)}
-                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
+                className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
+              <datalist id="it-expense-vendors-datalist">
+                {configuredVendors
+                  .filter(v => v.status === 'Active')
+                  .map(v => (
+                    <option key={v.id || v.vendor_name} value={v.vendor_name} />
+                  ))}
+              </datalist>
+              {(() => {
+                const matched = configuredVendors.find(
+                  v => v.vendor_name.toLowerCase() === vendorName.trim().toLowerCase()
+                );
+                if (!matched || (!matched.phone && !matched.email)) return null;
+                return (
+                  <p className="text-[10px] text-emerald-700 mt-1 flex items-center gap-2 truncate">
+                    {matched.phone && <span>📞 {matched.phone}</span>}
+                    {matched.email && <span>✉ {matched.email}</span>}
+                  </p>
+                );
+              })()}
             </div>
 
             <div>
@@ -4707,7 +5573,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <div className="flex items-center justify-between">
                 <label className="font-semibold text-slate-700">Khema Campus</label>
@@ -4852,7 +5718,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="font-semibold text-slate-700">Payment Status</label>
               <select
@@ -4902,16 +5768,7 @@ const ExpenseModal: React.FC<ExpenseModalProps> = ({
             />
           </div>
 
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-            <Button variant="outline" type="button" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving} className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
-              {saving ? 'Saving & Settling...' : transaction ? 'Update Expense' : 'Record & Settle Expense'}
-            </Button>
-          </div>
         </form>
-      </div>
-    </div>
+    </SmartModal>
   );
 };

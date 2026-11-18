@@ -5,6 +5,7 @@ import { Input } from '../../components/ui/Input';
 import { Button } from '../../components/ui/Button';
 import { RoutePath } from '../../types';
 import { apiClient } from '../../src/apiClient';
+import { ThemeSwitcher } from '../../components/ui/ThemeSwitcher';
 
 export const ForgotPassword: React.FC = () => {
   const [loading, setLoading] = useState(false);
@@ -41,49 +42,50 @@ export const ForgotPassword: React.FC = () => {
   };
 
   return (
-    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#F4F6F9] font-sans selection:bg-indigo-500/20">
+    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden app-canvas font-sans selection:bg-indigo-500/20 py-10">
+      <div className="fixed top-4 right-4 z-30">
+        <ThemeSwitcher />
+      </div>
       
-      {/* Cinematic Background - VisionOS Style */}
+      {/* Cinematic Background */}
       <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
-         <div className="absolute top-[-20%] left-[-10%] w-[90vw] h-[90vw] rounded-full bg-blue-100/40 blur-[140px] mix-blend-multiply animate-pulse" style={{ animationDuration: '8s' }} />
-         <div className="absolute bottom-[-20%] right-[-10%] w-[90vw] h-[90vw] rounded-full bg-purple-100/40 blur-[140px] mix-blend-multiply animate-pulse" style={{ animationDuration: '10s', animationDelay: '1s' }} />
-         <div className="absolute top-[40%] left-[50%] -translate-x-1/2 w-[60vw] h-[60vw] rounded-full bg-indigo-100/30 blur-[120px] mix-blend-multiply" />
-         
-         <div className="absolute inset-0 opacity-[0.015] bg-[url('https://grainy-gradients.vercel.app/noise.svg')] brightness-100 contrast-150"></div>
+         <div className="absolute top-[-20%] left-[-10%] w-[90vw] h-[90vw] rounded-full bg-blue-100/40 dark:bg-indigo-500/10 blur-[140px] mix-blend-multiply dark:mix-blend-screen animate-pulse" style={{ animationDuration: '8s' }} />
+         <div className="absolute bottom-[-20%] right-[-10%] w-[90vw] h-[90vw] rounded-full bg-purple-100/40 dark:bg-sky-500/10 blur-[140px] mix-blend-multiply dark:mix-blend-screen animate-pulse" style={{ animationDuration: '10s', animationDelay: '1s' }} />
+         <div className="absolute top-[40%] left-[50%] -translate-x-1/2 w-[60vw] h-[60vw] rounded-full bg-indigo-100/30 dark:bg-indigo-500/10 blur-[120px] mix-blend-multiply dark:mix-blend-screen" />
       </div>
 
-      <div className="relative w-full max-w-[440px] px-6 transition-all duration-700 ease-out hover:-translate-y-2">
-        <div className="group relative overflow-hidden rounded-[36px] border border-white/60 bg-white/40 p-8 sm:p-10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.08),0_10px_20px_-5px_rgba(0,0,0,0.04)] backdrop-blur-[50px] transition-all duration-500 hover:shadow-[0_45px_80px_-12px_rgba(0,0,0,0.12),0_15px_30px_-5px_rgba(0,0,0,0.06)] hover:bg-white/50">
+      <div className="relative w-full max-w-[440px] px-6 transition-all duration-700 ease-out">
+        <div className="group relative overflow-hidden rounded-[36px] border border-white/60 dark:border-slate-800 bg-white/75 dark:bg-slate-900/90 p-8 sm:p-10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.08),0_10px_20px_-5px_rgba(0,0,0,0.04)] dark:shadow-2xl backdrop-blur-[50px] transition-all duration-500">
           
-          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-          <div className="absolute inset-0 bg-gradient-to-br from-white/40 via-transparent to-transparent opacity-100 pointer-events-none" />
+          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white dark:via-slate-700 to-transparent opacity-80" />
+          <div className="absolute inset-0 bg-gradient-to-br from-white/40 dark:from-white/5 via-transparent to-transparent opacity-100 pointer-events-none" />
           
           <div className="relative z-10 flex flex-col items-center">
             
-            <div className="mb-8 flex h-[72px] w-[72px] items-center justify-center rounded-[24px] bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-[0_12px_24px_-6px_rgba(99,102,241,0.4)] ring-4 ring-white/50 backdrop-blur-sm transition-transform duration-500 group-hover:scale-110 group-hover:rotate-3">
+            <div className="mb-8 flex h-[72px] w-[72px] items-center justify-center rounded-[24px] theme-accent-bg shadow-lg ring-4 ring-white/50 dark:ring-slate-800 backdrop-blur-sm transition-transform duration-500 group-hover:scale-110 group-hover:rotate-3">
                <Command size={36} strokeWidth={1.5} />
             </div>
 
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900 drop-shadow-sm text-center">
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100 drop-shadow-sm text-center">
               Reset Password
             </h1>
-            <p className="mt-2.5 text-[15px] font-medium text-slate-500 text-center max-w-[280px] leading-relaxed">
+            <p className="mt-2.5 text-[15px] font-medium text-slate-500 dark:text-slate-400 text-center max-w-[280px] leading-relaxed">
               Enter your email to receive a password reset link.
             </p>
 
             {success && (
-               <div className="mt-6 flex flex-col w-full gap-3 rounded-2xl border border-emerald-200/60 bg-emerald-50/90 p-5 text-sm text-emerald-800 backdrop-blur-md shadow-sm animate-in fade-in slide-in-from-top-2">
+               <div className="mt-6 flex flex-col w-full gap-3 rounded-2xl border border-emerald-200/60 dark:border-emerald-800/60 bg-emerald-50/90 dark:bg-emerald-950/60 p-5 text-sm text-emerald-800 dark:text-emerald-200 backdrop-blur-md shadow-sm animate-in fade-in slide-in-from-top-2">
                   <div className="flex items-start gap-3">
-                    <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                    <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
                     <div>
-                      <h4 className="font-semibold text-emerald-900">Reset Link Ready</h4>
-                      <p className="mt-0.5 text-xs text-emerald-700 leading-relaxed">Your password reset verification token has been generated.</p>
+                      <h4 className="font-semibold text-emerald-900 dark:text-emerald-100">Reset Link Ready</h4>
+                      <p className="mt-0.5 text-xs text-emerald-700 dark:text-emerald-300 leading-relaxed">Your password reset verification token has been generated.</p>
                     </div>
                   </div>
                   {resetToken && (
                     <Link
                       to={`/reset-password?token=${resetToken}`}
-                      className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm transition-all shadow-md shadow-indigo-600/20"
+                      className="mt-2 inline-flex items-center justify-center gap-2 w-full py-2.5 px-4 rounded-xl theme-accent-bg font-semibold text-sm transition-all shadow-md"
                     >
                       <span>Set New Password Now →</span>
                     </Link>
@@ -102,13 +104,12 @@ export const ForgotPassword: React.FC = () => {
                     required
                     placeholder="name@example.com" 
                     icon={Mail}
-                    className="bg-white/60 focus:bg-white"
                   />
                 </div>
                 
                 {error && (
                   <div className="mt-2 text-center">
-                    <p className="text-sm font-medium text-red-500 animate-in fade-in slide-in-from-top-1">
+                    <p className="text-sm font-medium text-red-500 dark:text-red-400 animate-in fade-in slide-in-from-top-1">
                       {error}
                     </p>
                   </div>
@@ -116,7 +117,7 @@ export const ForgotPassword: React.FC = () => {
 
                 <Button 
                   type="submit" 
-                  className="w-full h-[52px] text-[15px] shadow-[0_20px_40px_-10px_rgba(79,70,229,0.5)]" 
+                  className="w-full h-[52px] text-[15px] theme-accent-bg shadow-lg" 
                   isLoading={loading}
                 >
                   Send Reset Link
@@ -124,9 +125,9 @@ export const ForgotPassword: React.FC = () => {
               </form>
             )}
 
-             <p className="mt-8 text-[13px] text-slate-500 font-medium flex items-center justify-center gap-2">
-               <ArrowLeft size={14} className="text-indigo-600" />
-               <Link to={RoutePath.LOGIN} className="font-bold text-indigo-600 hover:text-indigo-500 transition-colors hover:underline decoration-2 underline-offset-2">Back to Sign In</Link>
+             <p className="mt-8 text-[13px] text-slate-500 dark:text-slate-400 font-medium flex items-center justify-center gap-2">
+               <ArrowLeft size={14} className="theme-accent-text" />
+               <Link to={RoutePath.LOGIN} className="font-bold theme-accent-text transition-colors hover:underline decoration-2 underline-offset-2">Back to Sign In</Link>
              </p>
 
           </div>

@@ -50,15 +50,19 @@ git push -u origin main
 
 Use this method if your GoDaddy plan has **cPanel Web Hosting** or **cPanel Business Hosting**.
 
-### Step 2.1: Clone the Repo in cPanel via Git™ Version Control
+### Step 2.1: Pick & Clone Your GitHub Repo in cPanel via Git™ Version Control
 1. Log into your **GoDaddy Account** -> Open **cPanel**.
 2. Under the **Files** section, click **Git™ Version Control**.
 3. Click the blue **Create** button:
    - **Clone a Repository:** Toggle ON.
    - **Clone URL:** Enter your GitHub repository HTTPS URL (e.g. `https://github.com/your-username/ai-notes.git`).
-   - **Repository Path:** Enter the folder on your server (e.g. `repositories/ai-notes` or `public_html/ai-notes`).
+   - **Repository Path:** Enter the folder on your server (e.g. `repositories/ai-notes`).
    - **Repository Name:** `ai-notes`.
 4. Click **Create**. cPanel will clone the repository from GitHub.
+5. This repository includes a **`.cpanel.yml`** file. Whenever you push updates to GitHub:
+   - Open **cPanel -> Git™ Version Control -> Manage -> Pull or Deploy**
+   - Click **Update from Remote** and then **Deploy HEAD Commit**.
+   - `.cpanel.yml` automatically runs `npm install`, `npm run build`, and touches `tmp/restart.txt` to reload Phusion Passenger.
 
 > **Tip:** If your GitHub repo is private, add your GoDaddy cPanel SSH public key (`cPanel > SSH Access > View Public Key`) to **GitHub > Settings > Deploy Keys**.
 
@@ -70,7 +74,7 @@ Use this method if your GoDaddy plan has **cPanel Web Hosting** or **cPanel Busi
 3. Fill in the application settings:
    - **Node.js Version:** Select **Node.js 20.x** or **Node.js 22.x** (recommended).
    - **Application Mode:** Select **Production**.
-   - **Application Root:** Enter the path where you cloned the repo (e.g., `repositories/ai-notes`).
+   - **Application Root:** Enter the exact path where you cloned the repo (e.g., `repositories/ai-notes`).
    - **Application URL:** Select your domain or subdomain (e.g., `notes.yourdomain.com`).
    - **Application Startup File:** Enter `app.js` (a dedicated production wrapper included in the project root).
    - **Passenger Log File (optional):** `logs/passenger.log`.
@@ -83,8 +87,7 @@ In the same **Setup Node.js App** page, scroll down to the **Environment variabl
 
 | Variable Name | Production Value | Description |
 | :--- | :--- | :--- |
-| `NODE_ENV` | `production` | Enables production optimizations |
-| `PORT` | `3000` | Application internal port |
+| `NODE_ENV` | `production` | Enables production optimizations & `dist/` static serving |
 | `PRIMARY_DB` | `godaddy` | Locks GoDaddy as permanent primary DB |
 | `PRIMARY_LOCKED` | `true` | Prevents fallback overwrite |
 | `MYSQL_HOST` | `localhost` (or `118.139.180.163`) | `localhost` when hosted on GoDaddy; `118.139.180.163` from external hosts |
@@ -93,34 +96,43 @@ In the same **Setup Node.js App** page, scroll down to the **Environment variabl
 | `MYSQL_PASSWORD` | `<your-password>` | GoDaddy MySQL password |
 | `MYSQL_DATABASE` | `khema_ainotes` | MySQL database name |
 | `MYSQL_SSL` | `false` | Standard direct TCP connection |
-| `JWT_SECRET` | `<random-64-char-string>` | Secret key for login authentication |
+| `JWT_SECRET` | `<random-64-char-string>` | Secret key for 30-day persistent login authentication |
+| `JWT_EXPIRES_IN` | `30d` | Keeps users signed in across browser close/reopen for 30 days (auto-refreshed) |
+| `CRON_KEEPALIVE_KEY` | `(optional)` | Optional custom secret for `/api/cron/keep-alive` (auto-generated if omitted) |
 | `GEMINI_API_KEY` | `<your-gemini-key>` | (Optional) For AI mail drafting |
 
 Click **Save** or save the `.env` file in File Manager.
 
 ---
 
-### Step 2.4: Install Dependencies & Build Frontend
-1. At the top of the **Setup Node.js App** screen, you will see a command like:
+### Step 2.4: Install Dependencies & Build Frontend (First-Time Setup)
+If you have not already run **Deploy HEAD Commit** in Git™ Version Control:
+1. At the top of the **Setup Node.js App** screen, copy the virtual environment activation command:
    ```bash
    source /home/username/nodevenv/repositories/ai-notes/20/bin/activate && cd /home/username/repositories/ai-notes
    ```
 2. Click **Terminal** in cPanel (or connect via SSH), paste that line and press Enter.
-3. Install production dependencies and build the Vite frontend:
+3. Run:
    ```bash
-   # Install all packages
    npm install
-
-   # Build Vite React frontend (creates the /dist directory)
    npm run build
    ```
 
 ---
 
-### Step 2.5: Start / Restart the Application
-1. Return to **cPanel > Setup Node.js App**.
-2. Click **Restart** on your application.
-3. Click the open URL link next to your domain. Your application is now live!
+### Step 2.5: Start & Enable 24-Hour Keep-Alive (Even When All Browsers Are Closed)
+On GoDaddy cPanel shared Node.js hosting, Phusion Passenger puts idle Node processes to sleep after a few minutes with no browser traffic. To guarantee **24/7 operation** for Personal Scheduler Telegram reminders, System Update pre-downtime alerts, MySQL heartbeat monitoring, and background IMAP mail sync:
+
+1. Return to **cPanel -> Setup Node.js App** and click **Restart**.
+2. Open your live app and log in once (your 30-day session stays active even after signing out of the browser tab / closing the browser).
+3. Go to **Settings -> 24H & Deploy** tab and copy the pre-filled **cPanel Cron Job Command**.
+4. In **GoDaddy cPanel -> Advanced -> Cron Jobs**, add a new Cron Job:
+   - **Common Settings:** `Once Per Minute (* * * * *)`
+   - **Command:**
+     ```bash
+     curl -fsS "https://your-domain.com/api/cron/keep-alive?key=YOUR_KEEPALIVE_KEY" >/dev/null 2>&1
+     ```
+5. Click **Add New Cron Job**. cPanel will now ping `/api/cron/keep-alive` every minute 24/7, keeping Phusion Passenger awake and sweeping all 4 background workers with automatic 24-hour missed-alert catch-up.
 
 ---
 

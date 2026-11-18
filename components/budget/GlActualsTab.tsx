@@ -550,9 +550,9 @@ export const GlActualsTab: React.FC<GlActualsTabProps> = ({
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+            <div className="overflow-x-auto max-h-[64vh]">
+              <table className="smart-grid-table w-full text-left text-xs">
+                <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                   <tr>
                     <th className="py-2.5 px-3">Posting Date</th>
                     <th className="py-2.5 px-3">External Doc No.</th>
@@ -657,9 +657,9 @@ export const GlActualsTab: React.FC<GlActualsTabProps> = ({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
+          <div className="overflow-x-auto max-h-[64vh]">
+            <table className="smart-grid-table w-full text-left text-xs">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-500 font-semibold border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-4">
                     {varianceGroupBy === 'bu' ? 'Business Unit (Normalized)' : varianceGroupBy === 'account' ? 'G/L Account' : 'Month'}

@@ -6,6 +6,7 @@ import { Button } from '../../components/ui/Button';
 import { RoutePath } from '../../types';
 import { apiClient } from '../../src/apiClient';
 import { useAuth } from '../../context/AuthContext';
+import { ThemeSwitcher } from '../../components/ui/ThemeSwitcher';
 
 export const SignIn: React.FC = () => {
   const navigate = useNavigate();
@@ -65,7 +66,7 @@ export const SignIn: React.FC = () => {
       );
 
       if (!authWindow) {
-        alert('Please allow popups for this site to connect your account.');
+        setError('Please allow popups for this site to connect your account.');
       }
     } catch (error: any) {
       console.error('OAuth error:', error);
@@ -90,41 +91,40 @@ export const SignIn: React.FC = () => {
   }, [navigate, setUser]);
 
   return (
-    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-[#F4F6F9] font-sans selection:bg-indigo-500/20">
+    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden app-canvas font-sans selection:bg-indigo-500/20 py-10">
+      <div className="fixed top-4 right-4 z-30">
+        <ThemeSwitcher />
+      </div>
       
-      {/* Cinematic Background - VisionOS Style */}
+      {/* Cinematic Background */}
       <div className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden">
-         {/* Animated Gradients */}
-         <div className="absolute top-[-20%] left-[-10%] w-[90vw] h-[90vw] rounded-full bg-blue-100/40 blur-[140px] mix-blend-multiply animate-pulse" style={{ animationDuration: '8s' }} />
-         <div className="absolute bottom-[-20%] right-[-10%] w-[90vw] h-[90vw] rounded-full bg-purple-100/40 blur-[140px] mix-blend-multiply animate-pulse" style={{ animationDuration: '10s', animationDelay: '1s' }} />
-         <div className="absolute top-[40%] left-[50%] -translate-x-1/2 w-[60vw] h-[60vw] rounded-full bg-indigo-100/30 blur-[120px] mix-blend-multiply" />
-         
-         {/* Noise Texture for Realism (Optional, implied by style) */}
-         <div className="absolute inset-0 opacity-[0.015] bg-[url('https://grainy-gradients.vercel.app/noise.svg')] brightness-100 contrast-150"></div>
+         <div className="absolute top-[-20%] left-[-10%] w-[90vw] h-[90vw] rounded-full bg-blue-100/40 dark:bg-indigo-500/10 blur-[140px] mix-blend-multiply dark:mix-blend-screen animate-pulse" style={{ animationDuration: '8s' }} />
+         <div className="absolute bottom-[-20%] right-[-10%] w-[90vw] h-[90vw] rounded-full bg-purple-100/40 dark:bg-sky-500/10 blur-[140px] mix-blend-multiply dark:mix-blend-screen animate-pulse" style={{ animationDuration: '10s', animationDelay: '1s' }} />
+         <div className="absolute top-[40%] left-[50%] -translate-x-1/2 w-[60vw] h-[60vw] rounded-full bg-indigo-100/30 dark:bg-indigo-500/10 blur-[120px] mix-blend-multiply dark:mix-blend-screen" />
       </div>
 
       {/* Main Container - Floating Effect */}
-      <div className="relative w-full max-w-[440px] px-6 transition-all duration-700 ease-out hover:-translate-y-2">
+      <div className="relative w-full max-w-[440px] px-6 transition-all duration-700 ease-out">
         
         {/* Liquid Glass Card */}
-        <div className="group relative overflow-hidden rounded-[36px] border border-white/60 bg-white/40 p-8 sm:p-10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.08),0_10px_20px_-5px_rgba(0,0,0,0.04)] backdrop-blur-[50px] transition-all duration-500 hover:shadow-[0_45px_80px_-12px_rgba(0,0,0,0.12),0_15px_30px_-5px_rgba(0,0,0,0.06)] hover:bg-white/50">
+        <div className="group relative overflow-hidden rounded-[36px] border border-white/60 dark:border-slate-800 bg-white/75 dark:bg-slate-900/90 p-8 sm:p-10 shadow-[0_30px_60px_-10px_rgba(0,0,0,0.08),0_10px_20px_-5px_rgba(0,0,0,0.04)] dark:shadow-2xl backdrop-blur-[50px] transition-all duration-500">
           
           {/* Specular Top Highlight */}
-          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white to-transparent opacity-80" />
-          <div className="absolute inset-0 bg-gradient-to-br from-white/40 via-transparent to-transparent opacity-100 pointer-events-none" />
+          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white dark:via-slate-700 to-transparent opacity-80" />
+          <div className="absolute inset-0 bg-gradient-to-br from-white/40 dark:from-white/5 via-transparent to-transparent opacity-100 pointer-events-none" />
           
           <div className="relative z-10 flex flex-col items-center">
             
             {/* Header Icon */}
-            <div className="mb-8 flex h-[72px] w-[72px] items-center justify-center rounded-[24px] bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-[0_12px_24px_-6px_rgba(99,102,241,0.4)] ring-4 ring-white/50 backdrop-blur-sm transition-transform duration-500 group-hover:scale-110 group-hover:rotate-3">
+            <div className="mb-8 flex h-[72px] w-[72px] items-center justify-center rounded-[24px] theme-accent-bg shadow-lg ring-4 ring-white/50 dark:ring-slate-800 backdrop-blur-sm transition-transform duration-500 group-hover:scale-110 group-hover:rotate-3">
                <Command size={36} strokeWidth={1.5} />
             </div>
 
             {/* Typography */}
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900 drop-shadow-sm text-center">
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100 drop-shadow-sm text-center">
               Welcome Back
             </h1>
-            <p className="mt-2.5 text-[15px] font-medium text-slate-500 text-center max-w-[280px] leading-relaxed">
+            <p className="mt-2.5 text-[15px] font-medium text-slate-500 dark:text-slate-400 text-center max-w-[280px] leading-relaxed">
               Enter your credentials to access your AI workspace.
             </p>
 
@@ -148,7 +148,6 @@ export const SignIn: React.FC = () => {
                   defaultValue={prefilledEmail}
                   placeholder="name@example.com" 
                   icon={Mail}
-                  className="bg-white/60 focus:bg-white"
                 />
                 <div className="relative">
                   <Input 
@@ -159,19 +158,18 @@ export const SignIn: React.FC = () => {
                     required
                     placeholder="Enter your password" 
                     icon={Lock}
-                    className="bg-white/60 focus:bg-white"
                   />
                 </div>
               </div>
               
               {error && (
-                <div className="mt-2 p-3.5 rounded-2xl bg-red-50/90 border border-red-200/80 text-left animate-in fade-in slide-in-from-top-1 shadow-sm">
-                  <p className="text-sm font-semibold text-red-700">
+                <div className="mt-2 p-3.5 rounded-2xl bg-red-50/90 dark:bg-red-950/60 border border-red-200/80 dark:border-red-800/60 text-left animate-in fade-in slide-in-from-top-1 shadow-sm">
+                  <p className="text-sm font-semibold text-red-700 dark:text-red-300">
                     {error}
                   </p>
-                  <div className="mt-2 pt-2 border-t border-red-100 flex items-center justify-between text-xs">
-                    <span className="text-slate-600">Trouble signing in?</span>
-                    <Link to="/forgot-password" className="font-semibold text-indigo-600 hover:text-indigo-800 underline">
+                  <div className="mt-2 pt-2 border-t border-red-100 dark:border-red-900/50 flex items-center justify-between text-xs">
+                    <span className="text-slate-600 dark:text-slate-400">Trouble signing in?</span>
+                    <Link to="/forgot-password" className="font-semibold theme-accent-text underline">
                       Reset Password →
                     </Link>
                   </div>
@@ -180,18 +178,18 @@ export const SignIn: React.FC = () => {
               
               <div className="flex items-center justify-between px-1">
                   <label className="flex items-center gap-2.5 cursor-pointer group/chk select-none">
-                      <div className="relative flex items-center justify-center w-5 h-5 rounded-[6px] border border-slate-300 bg-white/50 shadow-sm transition-all group-hover/chk:border-indigo-500 group-hover/chk:shadow-md">
+                      <div className="relative flex items-center justify-center w-5 h-5 rounded-[6px] border border-slate-300 dark:border-slate-600 bg-white/50 dark:bg-slate-800 shadow-sm transition-all group-hover/chk:border-indigo-500 group-hover/chk:shadow-md">
                         <input type="checkbox" className="peer absolute inset-0 opacity-0 cursor-pointer" />
-                        <Check size={12} className="text-indigo-600 opacity-0 transition-opacity peer-checked:opacity-100 font-bold" strokeWidth={4} />
+                        <Check size={12} className="text-indigo-600 dark:text-indigo-400 opacity-0 transition-opacity peer-checked:opacity-100 font-bold" strokeWidth={4} />
                       </div>
-                      <span className="text-xs font-medium text-slate-500 group-hover/chk:text-slate-800 transition-colors">Remember me</span>
+                      <span className="text-xs font-medium text-slate-500 dark:text-slate-400 group-hover/chk:text-slate-800 dark:group-hover/chk:text-slate-200 transition-colors">Remember me</span>
                   </label>
-                  <Link to="/forgot-password" className="text-xs font-semibold text-indigo-600 hover:text-indigo-500 transition-colors hover:underline decoration-2 underline-offset-2">Forgot password?</Link>
+                  <Link to="/forgot-password" className="text-xs font-semibold theme-accent-text transition-colors hover:underline decoration-2 underline-offset-2">Forgot password?</Link>
               </div>
 
               <Button 
                 type="submit" 
-                className="w-full h-[52px] text-[15px] shadow-[0_20px_40px_-10px_rgba(79,70,229,0.5)]" 
+                className="w-full h-[52px] text-[15px] theme-accent-bg shadow-lg" 
                 isLoading={loading}
               >
                 Sign In
@@ -202,9 +200,9 @@ export const SignIn: React.FC = () => {
 
             {/* Divider */}
              <div className="my-8 flex w-full items-center gap-4">
-                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest bg-white/30 px-2 py-1 rounded-md backdrop-blur-md border border-white/40">Or</span>
-                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-200 to-transparent" />
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700 to-transparent" />
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest bg-white/30 dark:bg-slate-800/70 px-2 py-1 rounded-md backdrop-blur-md border border-white/40 dark:border-slate-700">Or</span>
+                <div className="h-px flex-1 bg-gradient-to-r from-transparent via-slate-200 dark:via-slate-700 to-transparent" />
              </div>
 
              {/* Social Button */}
@@ -213,17 +211,17 @@ export const SignIn: React.FC = () => {
                 type="button"
                 onClick={handleGoogleLogin}
                 disabled={loading}
-                className="w-full h-[52px] gap-3 bg-white/80 border-white shadow-sm hover:bg-white"
+                className="w-full h-[52px] gap-3 bg-white/80 dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-sm hover:bg-white dark:hover:bg-slate-700"
              >
                 <svg className="h-5 w-5" aria-hidden="true" viewBox="0 0 24 24">
                     <path d="M12.0003 20.45c-4.6667 0-8.45-3.7833-8.45-8.45 0-4.6667 3.7833-8.45 8.45-8.45 2.1333 0 4.0833.7333 5.6333 1.95L15.4 8.0167c-1.0833-.8667-2.2833-1.3-3.4-1.3-3.05 0-5.5167 2.4667-5.5167 5.2833s2.4667 5.2833 5.5167 5.2833c2.6167 0 4.4333-1.5833 4.8833-4.0833h-4.8833v-2.8h7.95c.1.5167.15 1.05.15 1.6167 0 4.6333-3.1667 8.4333-8.1 8.4333z" fill="currentColor" />
                 </svg>
-                <span className="text-slate-700 font-semibold">Continue with Google</span>
+                <span className="text-slate-700 dark:text-slate-200 font-semibold">Continue with Google</span>
              </Button>
 
              {/* Footer */}
-             <p className="mt-8 text-[13px] text-slate-500 font-medium">
-               Don't have an account? <Link to={RoutePath.SIGNUP} className="font-bold text-indigo-600 hover:text-indigo-500 transition-colors hover:underline decoration-2 underline-offset-2">Sign up</Link>
+             <p className="mt-8 text-[13px] text-slate-500 dark:text-slate-400 font-medium">
+               Don't have an account? <Link to={RoutePath.SIGNUP} className="font-bold theme-accent-text transition-colors hover:underline decoration-2 underline-offset-2">Sign up</Link>
              </p>
 
           </div>

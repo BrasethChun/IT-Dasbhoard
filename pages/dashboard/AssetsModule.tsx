@@ -14,6 +14,8 @@ import {
 } from 'recharts';
 import * as XLSX from 'xlsx';
 import { Button } from '../../components/ui/Button';
+import { SmartModal } from '../../components/ui/SmartModal';
+import { DensityToggle } from '../../components/ui/SmartGrid';
 import { useDebounce } from '../../src/hooks/useDebounce';
 
 export interface AssetCategoryConfig {
@@ -2015,8 +2017,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
             </div>
           </div>
 
-          {/* Excel Import & Export Tools */}
-          <div className="flex items-center gap-2">
+          {/* Excel Import & Export Tools + Smart Grid Density */}
+          <div className="flex flex-wrap items-center gap-2">
+            <DensityToggle />
             <label className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-2xs ${isImporting ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}`}>
               <Upload size={13} className={`text-slate-500 ${isImporting ? 'animate-spin' : ''}`} />
               <span>{isImporting ? 'Validating...' : 'Import .xlsx'}</span>
@@ -2025,7 +2028,7 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
 
             <button
               onClick={handleExportExcel}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-2xs"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors shadow-2xs cursor-pointer"
               title="Export exact two-sheet workbook (FixAssets and Assets Control)"
             >
               <Download size={13} className="text-slate-500" />
@@ -2386,7 +2389,7 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs text-left">
+                  <table className="smart-grid-table w-full text-xs text-left">
                     <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200/70">
                       <tr>
                         <th className="py-2.5 px-3">Campus / Site</th>
@@ -2730,9 +2733,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
             </div>
 
             {/* Category Breakdown Summary Table (with Business Unit Distribution) */}
-            <div className="overflow-x-auto rounded-xl border border-slate-200/80">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200/70">
+            <div className="overflow-x-auto max-h-[55vh] rounded-xl border border-slate-200/80">
+              <table className="smart-grid-table w-full text-xs text-left">
+                <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 font-semibold border-b border-slate-200/70">
                   <tr>
                     <th className="py-2.5 px-3">Category</th>
                     <th className="py-2.5 px-3">Business Unit</th>
@@ -2913,9 +2916,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
               </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200/70">
+            <div className="overflow-x-auto max-h-[50vh]">
+              <table className="smart-grid-table w-full text-xs text-left">
+                <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 font-semibold border-b border-slate-200/70">
                   <tr>
                     <th className="py-2.5 px-3">Asset Code</th>
                     <th className="py-2.5 px-3">BU</th>
@@ -3077,9 +3080,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
           </div>
 
           {/* Categorized Table with Roman Numeral Divider Headers (Collapsible on click) */}
-          <div className="overflow-x-auto rounded-xl border border-slate-200/80">
-            <table className="w-full text-xs text-left whitespace-nowrap">
-              <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
+          <div className="overflow-x-auto max-h-[68vh] rounded-xl border border-slate-200/80 dark:border-slate-800">
+            <table className="smart-grid-table w-full text-xs text-left whitespace-nowrap">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-3">#</th>
                   <th className="py-2.5 px-3">Asset Code</th>
@@ -3352,9 +3355,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
           </div>
 
           {/* 13-Column Table with Roman Category Dividers (Collapsible on click) */}
-          <div className="overflow-x-auto rounded-xl border border-slate-200/80">
-            <table className="w-full text-xs text-left whitespace-nowrap">
-              <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
+          <div className="overflow-x-auto max-h-[68vh] rounded-xl border border-slate-200/80 dark:border-slate-800">
+            <table className="smart-grid-table w-full text-xs text-left whitespace-nowrap">
+              <thead className="sticky top-0 z-10 bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-3">#</th>
                   <th className="py-2.5 px-3">Assets Category</th>
@@ -3725,9 +3728,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
               </span>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+            <div className="overflow-x-auto max-h-[60vh]">
+              <table className="smart-grid-table w-full text-xs text-left">
+                <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
                   <tr>
                     <th className="py-2.5 px-3">Date</th>
                     <th className="py-2.5 px-3">Asset Code</th>
@@ -3971,9 +3974,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
               </div>
 
               {/* Data Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50/80 border-b border-slate-200/80 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+              <div className="overflow-x-auto max-h-[64vh]">
+                <table className="smart-grid-table w-full text-left text-xs">
+                  <thead className="sticky top-0 z-10 bg-slate-50/95 border-b border-slate-200/80 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
                     <tr>
                       <th className="py-3 px-4 w-12 text-center">#</th>
                       <th className="py-3 px-4">Category Name</th>
@@ -4106,9 +4109,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
               </div>
 
               {/* Data Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50/80 border-b border-slate-200/80 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+              <div className="overflow-x-auto max-h-[64vh]">
+                <table className="smart-grid-table w-full text-left text-xs">
+                  <thead className="sticky top-0 z-10 bg-slate-50/95 border-b border-slate-200/80 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
                     <tr>
                       <th className="py-3 px-4 w-12 text-center">#</th>
                       <th className="py-3 px-4">Business Unit Name</th>
@@ -4279,9 +4282,9 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
               </div>
 
               {/* Data Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50/80 border-b border-slate-200/80 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+              <div className="overflow-x-auto max-h-[64vh]">
+                <table className="smart-grid-table w-full text-left text-xs">
+                  <thead className="sticky top-0 z-10 bg-slate-50/95 border-b border-slate-200/80 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
                     <tr>
                       <th className="py-3 px-4 w-12 text-center">#</th>
                       <th className="py-3 px-4">Campus / BU</th>
@@ -4356,30 +4359,26 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 1: ADD / EDIT FIXED ASSET (FixAssets - 31 Columns)                  */}
-      {/* ========================================================================= */}
+      {/* MODAL 1: ADD / EDIT FIXED ASSET (FixAssets - 31 Columns) */}
       {showFixedModal && editingFixed && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                  <Monitor size={16} />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    {editingFixed.id ? `Edit Fixed Asset: ${editingFixed.asset_code}` : 'Register New Fixed Asset (FixAssets)'}
-                  </h3>
-                  <p className="text-[11px] text-slate-500">31-Column Hardware, Location, Network, Credentials & Financial Record</p>
-                </div>
-              </div>
-              <button onClick={() => setShowFixedModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveFixed} className="p-5 overflow-y-auto space-y-5 text-xs">
+        <SmartModal
+          onClose={() => setShowFixedModal(false)}
+          size="xl"
+          icon={<Monitor size={18} />}
+          title={editingFixed.id ? `Edit Fixed Asset: ${editingFixed.asset_code}` : 'Register New Fixed Asset (FixAssets)'}
+          subtitle="31-Column Hardware, Location, Network, Credentials & Financial Record"
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowFixedModal(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" form="fixed-asset-form">
+                Save Fixed Asset
+              </Button>
+            </>
+          }
+        >
+          <form id="fixed-asset-form" onSubmit={handleSaveFixed} className="space-y-5 text-xs">
               {/* Section 1: Business Unit & Identification */}
               <div className="space-y-2">
                 <span className="font-bold text-slate-900 uppercase tracking-wider text-[11px] text-indigo-600">
@@ -4695,43 +4694,30 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-                <Button type="button" variant="secondary" onClick={() => setShowFixedModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold">
-                  Save Fixed Asset
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </SmartModal>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 2: ADD / EDIT ASSETS CONTROL (Assets Control - 13 Columns)           */}
-      {/* ========================================================================= */}
+      {/* MODAL 2: ADD / EDIT ASSETS CONTROL (Assets Control - 13 Columns) */}
       {showControlModal && editingControl && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                  <Layers size={16} />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    {editingControl.id ? `Edit Control Asset: ${editingControl.ac_code_cms}` : 'Register New Control Asset (Assets Control)'}
-                  </h3>
-                  <p className="text-[11px] text-slate-500">13-Column Peripheral, Network, Fingerprint, CCTV & Equipment Register</p>
-                </div>
-              </div>
-              <button onClick={() => setShowControlModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveControl} className="p-5 overflow-y-auto space-y-4 text-xs">
+        <SmartModal
+          onClose={() => setShowControlModal(false)}
+          size="lg"
+          icon={<Layers size={18} />}
+          title={editingControl.id ? `Edit Control Asset: ${editingControl.ac_code_cms}` : 'Register New Control Asset (Assets Control)'}
+          subtitle="13-Column Peripheral, Network, Fingerprint, CCTV & Equipment Register"
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowControlModal(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" form="control-asset-form">
+                Save Control Asset
+              </Button>
+            </>
+          }
+        >
+          <form id="control-asset-form" onSubmit={handleSaveControl} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-600 font-semibold mb-1">Business Unit *</label>
@@ -4901,38 +4887,30 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
-                <Button type="button" variant="secondary" onClick={() => setShowControlModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
-                  Save Control Asset
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </SmartModal>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 3: TRANSFER / RELOCATION LOG MODAL                                  */}
-      {/* ========================================================================= */}
+      {/* MODAL 3: TRANSFER / RELOCATION LOG MODAL */}
       {showTransferModal && transferTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2">
-                <ArrowLeftRight size={16} className="text-indigo-600" />
-                <h3 className="text-sm font-bold text-slate-900">
-                  Relocate Asset: {transferTarget.asset.asset_code || transferTarget.asset.ac_code_cms}
-                </h3>
-              </div>
-              <button onClick={() => setShowTransferModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleExecuteTransfer} className="p-5 space-y-4 text-xs">
+        <SmartModal
+          onClose={() => setShowTransferModal(false)}
+          size="md"
+          icon={<ArrowLeftRight size={18} />}
+          title={`Relocate Asset: ${transferTarget.asset.asset_code || transferTarget.asset.ac_code_cms}`}
+          subtitle="Update business unit, floor, room, and assignee"
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowTransferModal(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" form="transfer-asset-form">
+                Execute Relocation
+              </Button>
+            </>
+          }
+        >
+          <form id="transfer-asset-form" onSubmit={handleExecuteTransfer} className="space-y-4 text-xs">
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1">
                 <div className="text-[11px] font-semibold text-slate-500 uppercase">Current Placement</div>
                 <div className="text-slate-800 font-bold">
@@ -5006,41 +4984,30 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
                 />
               </div>
 
-              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
-                <Button type="button" variant="secondary" onClick={() => setShowTransferModal(false)}>
-                  Cancel
-                </Button>
-                <Button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold">
-                  Execute Relocation
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </SmartModal>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 4: ASSET CATEGORY CRUD MODAL                                        */}
-      {/* ========================================================================= */}
+      {/* MODAL 4: ASSET CATEGORY CRUD MODAL */}
       {showCategoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2">
-                <Tag size={16} className="text-indigo-600" />
-                <h3 className="text-sm font-bold text-slate-900">
-                  {editingCategory ? `Edit Category: ${editingCategory.name}` : 'Add New Asset Category'}
-                </h3>
-              </div>
-              <button 
-                onClick={() => setShowCategoryModal(false)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveCategoryModal} className="p-5 space-y-4 text-xs">
+        <SmartModal
+          onClose={() => setShowCategoryModal(false)}
+          size="sm"
+          icon={<Tag size={18} />}
+          title={editingCategory ? `Edit Category: ${editingCategory.name}` : 'Add New Asset Category'}
+          subtitle="Configure register availability & classification"
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowCategoryModal(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" form="asset-category-form">
+                {editingCategory ? 'Update Category' : 'Create Category'}
+              </Button>
+            </>
+          }
+        >
+          <form id="asset-category-form" onSubmit={handleSaveCategoryModal} className="space-y-4 text-xs">
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">Category Name *</label>
                 <input
@@ -5077,48 +5044,30 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
                 />
               </div>
 
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
-                <Button 
-                  type="button" 
-                  variant="secondary" 
-                  onClick={() => setShowCategoryModal(false)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4"
-                >
-                  {editingCategory ? 'Update Category' : 'Create Category'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </SmartModal>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 5: BUSINESS UNIT CRUD MODAL                                         */}
-      {/* ========================================================================= */}
+      {/* MODAL 5: BUSINESS UNIT CRUD MODAL */}
       {showBuModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2">
-                <Building2 size={16} className="text-indigo-600" />
-                <h3 className="text-sm font-bold text-slate-900">
-                  {editingBu ? `Edit Business Unit: ${editingBu.bu_name}` : 'Add New Business Unit'}
-                </h3>
-              </div>
-              <button 
-                onClick={() => setShowBuModal(false)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveBuModal} className="p-5 space-y-4 text-xs">
+        <SmartModal
+          onClose={() => setShowBuModal(false)}
+          size="sm"
+          icon={<Building2 size={18} />}
+          title={editingBu ? `Edit Business Unit: ${editingBu.bu_name}` : 'Add New Business Unit'}
+          subtitle="Define site prefixes for Fixed & Control assets"
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowBuModal(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" form="asset-bu-form">
+                {editingBu ? 'Update BU' : 'Create BU'}
+              </Button>
+            </>
+          }
+        >
+          <form id="asset-bu-form" onSubmit={handleSaveBuModal} className="space-y-4 text-xs">
               <div>
                 <label className="block text-slate-700 font-semibold mb-1">Business Unit Name *</label>
                 <input
@@ -5169,48 +5118,30 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
                 />
               </div>
 
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
-                <Button 
-                  type="button" 
-                  variant="secondary" 
-                  onClick={() => setShowBuModal(false)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4"
-                >
-                  {editingBu ? 'Update BU' : 'Create BU'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </SmartModal>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 6: ASSET LOCATION & FLOOR TAG CRUD MODAL                             */}
-      {/* ========================================================================= */}
+      {/* MODAL 6: ASSET LOCATION & FLOOR TAG CRUD MODAL */}
       {showLocationModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-md overflow-hidden flex flex-col">
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <div className="flex items-center gap-2">
-                <MapPin size={16} className="text-indigo-600" />
-                <h3 className="text-sm font-bold text-slate-900">
-                  {editingLocation ? `Edit Location Tag: ${editingLocation.location_name}` : 'Add New Location Tag'}
-                </h3>
-              </div>
-              <button 
-                onClick={() => setShowLocationModal(false)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveLocationModal} className="p-5 space-y-4 text-xs">
+        <SmartModal
+          onClose={() => setShowLocationModal(false)}
+          size="sm"
+          icon={<MapPin size={18} />}
+          title={editingLocation ? `Edit Location Tag: ${editingLocation.location_name}` : 'Add New Location Tag'}
+          subtitle="Campus floor and room directory entry"
+          footer={
+            <>
+              <Button type="button" variant="secondary" onClick={() => setShowLocationModal(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" form="asset-location-form">
+                {editingLocation ? 'Update Location Tag' : 'Create Location Tag'}
+              </Button>
+            </>
+          }
+        >
+          <form id="asset-location-form" onSubmit={handleSaveLocationModal} className="space-y-4 text-xs">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-700 font-semibold mb-1">Campus / BU *</label>
@@ -5262,285 +5193,159 @@ export const AssetsModule: React.FC<{ sites?: any[] }> = ({ sites = [] }) => {
                 />
               </div>
 
-              <div className="pt-3 flex justify-end gap-2 border-t border-slate-100">
-                <Button 
-                  type="button" 
-                  variant="secondary" 
-                  onClick={() => setShowLocationModal(false)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-4"
-                >
-                  {editingLocation ? 'Update Location Tag' : 'Create Location Tag'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </SmartModal>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 7: IN-APP DELETE CONFIRMATION MODAL (Replaces blocked window.confirm)*/}
-      {/* ========================================================================= */}
+      {/* MODAL 7: IN-APP DELETE CONFIRMATION MODAL */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-150">
-            <div className="p-5 border-b border-slate-100 flex items-start gap-3 bg-rose-50/50">
-              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
-                <Trash2 size={20} />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-base font-bold text-slate-900">
-                  Confirm Deletion
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Are you sure you want to delete this record? This action will permanently remove it from the database.
-                </p>
-              </div>
-              <button
-                disabled={isDeleting}
-                onClick={() => setDeleteTarget(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-3">
-              <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-                  {deleteTarget.type === 'category' ? 'Asset Category' :
-                   deleteTarget.type === 'bu' ? 'Business Unit' :
-                   deleteTarget.type === 'location' ? 'Asset Location Tag' :
-                   deleteTarget.type === 'fixed' ? 'Fixed Asset' : 'Control Asset'}
-                </div>
-                <div className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-                  <span>{deleteTarget.name}</span>
-                </div>
-                {deleteTarget.subtitle && (
-                  <div className="text-xs text-slate-500 pt-0.5">
-                    {deleteTarget.subtitle}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50/80 border-t border-slate-100 flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={isDeleting}
-                onClick={() => setDeleteTarget(null)}
-                className="text-xs font-semibold px-4"
-              >
+        <SmartModal
+          onClose={() => setDeleteTarget(null)}
+          size="sm"
+          icon={<Trash2 size={18} className="text-rose-600" />}
+          title="Confirm Deletion"
+          subtitle="Permanent removal from asset register"
+          footer={
+            <>
+              <Button type="button" variant="secondary" disabled={isDeleting} onClick={() => setDeleteTarget(null)}>
                 Cancel
               </Button>
-              <button
-                type="button"
-                disabled={isDeleting}
-                onClick={handleExecuteDelete}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition-colors shadow-sm"
-              >
-                <Trash2 size={13} className={isDeleting ? 'animate-spin' : ''} />
+              <Button type="button" variant="danger" disabled={isDeleting} onClick={handleExecuteDelete}>
+                <Trash2 size={13} className={`mr-1.5 ${isDeleting ? 'animate-spin' : ''}`} />
                 <span>{isDeleting ? 'Deleting...' : 'Yes, Delete Record'}</span>
-              </button>
+              </Button>
+            </>
+          }
+        >
+          <p className="text-xs text-slate-600 dark:text-slate-300">
+            Are you sure you want to delete this record? This action will permanently remove it from the database.
+          </p>
+          <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 space-y-1">
+            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+              {deleteTarget.type === 'category' ? 'Asset Category' :
+               deleteTarget.type === 'bu' ? 'Business Unit' :
+               deleteTarget.type === 'location' ? 'Asset Location Tag' :
+               deleteTarget.type === 'fixed' ? 'Fixed Asset' : 'Control Asset'}
             </div>
+            <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              {deleteTarget.name}
+            </div>
+            {deleteTarget.subtitle && (
+              <div className="text-xs text-slate-500 pt-0.5">{deleteTarget.subtitle}</div>
+            )}
           </div>
-        </div>
+        </SmartModal>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 8: IMPORT VALIDATION & ASSET ROW COUNT ALERT MODAL                  */}
-      {/* ========================================================================= */}
+      {/* MODAL 8: IMPORT VALIDATION & ASSET ROW COUNT ALERT MODAL */}
       {importSummary && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            {/* Modal Header */}
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-emerald-50 via-teal-50 to-white">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-md shadow-emerald-500/20">
-                  <CheckCircle2 size={22} />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    Import Validated & Completed
-                  </h3>
-                  <p className="text-xs text-slate-500 font-medium">
-                    {importSummary.fileName} • {importSummary.targetBu}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setImportSummary(null)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                title="Close"
-              >
-                <X size={18} />
-              </button>
+        <SmartModal
+          onClose={() => setImportSummary(null)}
+          size="md"
+          icon={<CheckCircle2 size={18} className="text-emerald-600" />}
+          title="Import Validated & Completed"
+          subtitle={`${importSummary.fileName} · ${importSummary.targetBu}`}
+          footer={
+            <Button type="button" onClick={() => setImportSummary(null)}>
+              Done / View Imported Assets
+            </Button>
+          }
+        >
+          <div className="p-4 rounded-xl bg-indigo-50/70 dark:bg-slate-800 border border-indigo-100/80 dark:border-slate-700 text-center space-y-1">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+              Total Asset Rows Successfully Processed
             </div>
-
-            {/* Modal Body */}
-            <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
-              {/* Total Processed Row Count Hero Card */}
-              <div className="p-4 rounded-xl bg-gradient-to-br from-indigo-50/80 via-slate-50 to-emerald-50/80 border border-indigo-100/80 text-center space-y-1 shadow-2xs">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
-                  Total Asset Rows Successfully Processed
-                </div>
-                <div className="text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
-                  {importSummary.totalAssets.toLocaleString()}
-                </div>
-                <div className="text-xs text-slate-500 font-medium">
-                  {importSummary.fixedTotal} Fixed Assets + {importSummary.controlTotal} Control Assets
-                </div>
-              </div>
-
-              {/* Breakdown Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Fixed Assets Summary Card */}
-                <div className="p-3.5 rounded-xl border border-indigo-200/80 bg-indigo-50/40 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
-                      <Monitor size={14} className="text-indigo-600" /> Fixed Assets
-                    </span>
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-indigo-100 text-indigo-800">
-                      {importSummary.fixedTotal}
-                    </span>
-                  </div>
-                  <div className="space-y-1 text-[11px] text-slate-600 border-t border-indigo-100/80 pt-2 font-medium">
-                    <div className="flex justify-between">
-                      <span>• New Assets Inserted:</span>
-                      <strong className="text-emerald-700 font-mono">+{importSummary.fixedNew}</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>• Existing Updated:</span>
-                      <strong className="text-slate-800 font-mono">{importSummary.fixedUpdated}</strong>
-                    </div>
-                    <div className="flex justify-between text-slate-400">
-                      <span>• Total Rows Scanned:</span>
-                      <span className="font-mono">{importSummary.totalScannedFixed}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Control Assets Summary Card */}
-                <div className="p-3.5 rounded-xl border border-emerald-200/80 bg-emerald-50/40 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-900 flex items-center gap-1.5">
-                      <Tag size={14} className="text-emerald-600" /> Assets Control
-                    </span>
-                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800">
-                      {importSummary.controlTotal}
-                    </span>
-                  </div>
-                  <div className="space-y-1 text-[11px] text-slate-600 border-t border-emerald-100/80 pt-2 font-medium">
-                    <div className="flex justify-between">
-                      <span>• New Assets Inserted:</span>
-                      <strong className="text-emerald-700 font-mono">+{importSummary.controlNew}</strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span>• Existing Updated:</span>
-                      <strong className="text-slate-800 font-mono">{importSummary.controlUpdated}</strong>
-                    </div>
-                    <div className="flex justify-between text-slate-400">
-                      <span>• Total Rows Scanned:</span>
-                      <span className="font-mono">{importSummary.totalScannedControl}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Data Validation Badges */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-2">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-600">
-                  Data Quality & Validation Checks
-                </div>
-                <div className="space-y-1.5 text-xs text-slate-700">
-                  <div className="flex items-center gap-2 text-emerald-700 font-medium">
-                    <CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
-                    <span>Dates validated & stored in standard <strong>YYYY-MM-DD</strong> format ({importSummary.dateVerifiedCount} dates verified)</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-emerald-700 font-medium">
-                    <CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
-                    <span>Asset Codes verified and synced to <strong>{importSummary.targetBu}</strong></span>
-                  </div>
-                  {importSummary.skippedFixed + importSummary.skippedControl > 0 && (
-                    <div className="flex items-start gap-2 text-amber-700 font-medium pt-1">
-                      <AlertTriangle size={14} className="shrink-0 text-amber-600 mt-0.5" />
-                      <span>{importSummary.skippedFixed + importSummary.skippedControl} rows with empty codes or banner headers were skipped safely.</span>
-                    </div>
-                  )}
-                </div>
-              </div>
+            <div className="text-3xl font-extrabold text-slate-900 dark:text-slate-100 font-mono tabular-nums tracking-tight">
+              {importSummary.totalAssets.toLocaleString()}
             </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-end">
-              <Button
-                type="button"
-                onClick={() => setImportSummary(null)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2 shadow-sm"
-              >
-                Done / View Imported Assets
-              </Button>
+            <div className="text-xs text-slate-500 font-medium">
+              {importSummary.fixedTotal} Fixed Assets + {importSummary.controlTotal} Control Assets
             </div>
           </div>
-        </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="p-3.5 rounded-xl border border-indigo-200/80 dark:border-slate-700 bg-indigo-50/40 dark:bg-slate-800/70 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                  <Monitor size={14} className="text-indigo-600" /> Fixed Assets
+                </span>
+                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-800 dark:text-indigo-200">
+                  {importSummary.fixedTotal}
+                </span>
+              </div>
+              <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300 border-t border-indigo-100/80 dark:border-slate-700 pt-2 font-medium">
+                <div className="flex justify-between"><span>New Assets Inserted</span><strong className="text-emerald-700 font-mono">+{importSummary.fixedNew}</strong></div>
+                <div className="flex justify-between"><span>Existing Updated</span><strong className="font-mono">{importSummary.fixedUpdated}</strong></div>
+                <div className="flex justify-between text-slate-400"><span>Total Rows Scanned</span><span className="font-mono">{importSummary.totalScannedFixed}</span></div>
+              </div>
+            </div>
+
+            <div className="p-3.5 rounded-xl border border-emerald-200/80 dark:border-slate-700 bg-emerald-50/40 dark:bg-slate-800/70 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200 flex items-center gap-1.5">
+                  <Tag size={14} className="text-emerald-600" /> Assets Control
+                </span>
+                <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200">
+                  {importSummary.controlTotal}
+                </span>
+              </div>
+              <div className="space-y-1 text-[11px] text-slate-600 dark:text-slate-300 border-t border-emerald-100/80 dark:border-slate-700 pt-2 font-medium">
+                <div className="flex justify-between"><span>New Assets Inserted</span><strong className="text-emerald-700 font-mono">+{importSummary.controlNew}</strong></div>
+                <div className="flex justify-between"><span>Existing Updated</span><strong className="font-mono">{importSummary.controlUpdated}</strong></div>
+                <div className="flex justify-between text-slate-400"><span>Total Rows Scanned</span><span className="font-mono">{importSummary.totalScannedControl}</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 space-y-2">
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-600 dark:text-slate-400">
+              Data Quality & Validation Checks
+            </div>
+            <div className="space-y-1.5 text-xs text-slate-700 dark:text-slate-300">
+              <div className="flex items-center gap-2 text-emerald-700 font-medium">
+                <CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
+                <span>Dates validated & stored in <strong>YYYY-MM-DD</strong> format ({importSummary.dateVerifiedCount} dates verified)</span>
+              </div>
+              <div className="flex items-center gap-2 text-emerald-700 font-medium">
+                <CheckCircle2 size={14} className="shrink-0 text-emerald-600" />
+                <span>Asset Codes verified and synced to <strong>{importSummary.targetBu}</strong></span>
+              </div>
+              {importSummary.skippedFixed + importSummary.skippedControl > 0 && (
+                <div className="flex items-start gap-2 text-amber-700 font-medium pt-1">
+                  <AlertTriangle size={14} className="shrink-0 text-amber-600 mt-0.5" />
+                  <span>{importSummary.skippedFixed + importSummary.skippedControl} empty/header rows skipped safely.</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </SmartModal>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL 9: IMPORT VALIDATION ERROR ALERT MODAL                              */}
-      {/* ========================================================================= */}
+      {/* MODAL 9: IMPORT VALIDATION ERROR ALERT MODAL */}
       {importValidationError && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-rose-200 shadow-2xl w-full max-w-md overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="p-4 border-b border-rose-100 flex items-center justify-between bg-rose-50/80">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-rose-600 text-white flex items-center justify-center shadow-xs">
-                  <AlertCircle size={18} />
-                </div>
-                <h3 className="text-sm font-bold text-rose-900">
-                  Import Validation Alert
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setImportValidationError(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-rose-100/50"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-3">
-              <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                {importValidationError}
-              </p>
-
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5 text-[11px] text-slate-600">
-                <div className="font-bold text-slate-800">Please verify the following:</div>
-                <div>• The file is a valid <strong>.xlsx</strong> or <strong>.xls</strong> workbook.</div>
-                <div>• Header row contains <strong>ASSET CODE</strong> (FixAssets) or <strong>AC CODE</strong> (Assets Control).</div>
-                <div>• Date values follow <strong>YYYY-MM-DD</strong> or standard Excel date formats.</div>
-                <div>• Rows contain non-empty asset identification codes.</div>
-              </div>
-            </div>
-
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
-              <Button
-                type="button"
-                onClick={() => setImportValidationError(null)}
-                className="bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs px-4 py-2"
-              >
-                Understand & Dismiss
-              </Button>
-            </div>
+        <SmartModal
+          onClose={() => setImportValidationError(null)}
+          size="sm"
+          icon={<AlertCircle size={18} className="text-rose-600" />}
+          title="Import Validation Alert"
+          subtitle="Please review Excel sheet structure"
+          footer={
+            <Button type="button" onClick={() => setImportValidationError(null)}>
+              Understand & Dismiss
+            </Button>
+          }
+        >
+          <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
+            {importValidationError}
+          </p>
+          <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200/80 dark:border-slate-700 space-y-1.5 text-[11px] text-slate-600 dark:text-slate-300">
+            <div className="font-bold text-slate-800 dark:text-slate-100">Please verify the following:</div>
+            <div>• The file is a valid <strong>.xlsx</strong> or <strong>.xls</strong> workbook.</div>
+            <div>• Header row contains <strong>ASSET CODE</strong> (FixAssets) or <strong>AC CODE</strong> (Assets Control).</div>
+            <div>• Date values follow <strong>YYYY-MM-DD</strong> or standard Excel date formats.</div>
+            <div>• Rows contain non-empty asset identification codes.</div>
           </div>
-        </div>
+        </SmartModal>
       )}
     </div>
   );

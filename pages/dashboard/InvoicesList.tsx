@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { RoutePath } from '../../types';
 import { Button } from '../../components/ui/Button';
+import { SmartModal } from '../../components/ui/SmartModal';
+import { DensityToggle } from '../../components/ui/SmartGrid';
 import { Plus, ReceiptText, Trash2, Loader2, X } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -57,17 +59,20 @@ export const InvoicesList: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8 animate-in fade-in duration-500">
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex flex-wrap justify-between items-center gap-3 mb-8">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Invoices</h1>
           <p className="text-slate-500 mt-2">Manage and view your generated invoices.</p>
         </div>
-        <Link to={RoutePath.CREATE_INVOICE}>
-          <Button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
-            <Plus size={18} />
-            Create Invoice
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2.5">
+          <DensityToggle />
+          <Link to={RoutePath.CREATE_INVOICE}>
+            <Button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm">
+              <Plus size={18} />
+              Create Invoice
+            </Button>
+          </Link>
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -81,9 +86,9 @@ export const InvoicesList: React.FC = () => {
             </Link>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-slate-50 border-b border-slate-200">
+          <div className="overflow-x-auto max-h-[68vh]">
+            <table className="smart-grid-table w-full text-left">
+              <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Invoice No</th>
                   <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Date</th>
@@ -95,7 +100,7 @@ export const InvoicesList: React.FC = () => {
               <tbody className="divide-y divide-slate-100">
                 {invoices.map((invoice, index) => (
                   <tr key={index} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-900">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-slate-900 font-mono">
                       #{invoice.invoice_no}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
@@ -104,7 +109,7 @@ export const InvoicesList: React.FC = () => {
                     <td className="px-6 py-4 text-sm text-slate-600">
                       <div className="line-clamp-2 max-w-xs">{invoice.billed_to}</div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-900 text-right">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-900 text-right font-mono tabular-nums">
                       ${invoice.total}
                     </td>
                     <td className="px-6 py-4 text-right">
@@ -135,67 +140,56 @@ export const InvoicesList: React.FC = () => {
       </div>
 
       {/* Delete Invoice Confirmation Modal */}
-      {invoiceToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="relative w-full max-w-md space-y-4 rounded-3xl border border-white/80 bg-white/95 backdrop-blur-2xl p-6 md:p-7 shadow-2xl overflow-hidden">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-red-50 text-red-600 border border-red-100">
-                  <Trash2 size={20} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">Delete invoice?</h3>
-                  <p className="text-xs text-slate-500">This action cannot be undone.</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => { setInvoiceToDelete(null); setDeleteError(null); }}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            
+      <SmartModal
+        open={Boolean(invoiceToDelete)}
+        onClose={() => { if (!isDeleting) { setInvoiceToDelete(null); setDeleteError(null); } }}
+        title="Delete invoice?"
+        subtitle="This action cannot be undone"
+        icon={<Trash2 size={18} className="text-red-600" />}
+        size="sm"
+        footer={
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isDeleting}
+              onClick={() => { setInvoiceToDelete(null); setDeleteError(null); }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={isDeleting}
+              onClick={handleDeleteInvoice}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 size={14} className="animate-spin mr-1.5" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete invoice'
+              )}
+            </Button>
+          </div>
+        }
+      >
+        {invoiceToDelete && (
+          <div className="space-y-3">
             <div className="text-sm text-slate-600 bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-1">
-              <div>Invoice No: <strong className="text-slate-900 font-semibold">#{invoiceToDelete.invoice_no}</strong></div>
+              <div>Invoice No: <strong className="text-slate-900 font-semibold font-mono">#{invoiceToDelete.invoice_no}</strong></div>
               <div>Billed to: <span className="text-slate-700">{invoiceToDelete.billed_to?.split('\n')[0] || 'Client'}</span></div>
-              <div>Total: <strong className="text-slate-900 font-semibold">${invoiceToDelete.total}</strong></div>
+              <div>Total: <strong className="text-slate-900 font-semibold font-mono tabular-nums">${invoiceToDelete.total}</strong></div>
             </div>
-
             {deleteError && (
               <div className="text-xs text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-100">
                 {deleteError}
               </div>
             )}
-            
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button 
-                type="button"
-                disabled={isDeleting}
-                onClick={() => { setInvoiceToDelete(null); setDeleteError(null); }}
-                className="rounded-full border border-slate-200 bg-white px-5 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 transition-all outline-none"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={isDeleting}
-                onClick={handleDeleteInvoice}
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-red-600 px-5 py-2 text-sm font-semibold text-white shadow-md shadow-red-500/20 hover:bg-red-700 active:scale-95 transition-all outline-none disabled:opacity-50"
-              >
-                {isDeleting ? (
-                  <>
-                    <Loader2 size={15} className="animate-spin" />
-                    Deleting...
-                  </>
-                ) : (
-                  'Delete invoice'
-                )}
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+      </SmartModal>
     </div>
   );
 };

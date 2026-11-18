@@ -1,10 +1,20 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import http from 'http';
 import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '.env'), override: true });
-dotenv.config({ override: true });
+
+process.on('unhandledRejection', (reason: any) => {
+  console.warn('[Server UnhandledRejection]:', reason?.code || reason?.message || reason);
+});
+process.on('uncaughtException', (err: any) => {
+  console.error('[Server UncaughtException]:', err?.code || err?.message || err);
+  if (err?.code === 'EADDRINUSE') {
+    process.exit(1);
+  }
+});
 
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
@@ -28,10 +38,14 @@ import { setupItExpenseRoutes, syncExpensesToBudget } from './itExpenseServer';
 import { setupAssetRoutes } from './assetServer';
 import { setupItAssetRoutes } from './itAssetServer';
 import { setupItMeetingRoutes } from './itMeetingServer';
+import { setupPersonalSchedulerRoutes } from './personalSchedulerServer';
+import { setupSystemUpdateRoutes } from './systemUpdateServer';
+import { setupKeepAliveRoutes } from './keepAliveService';
 import { GoogleGenAI } from '@google/genai';
 import { GEMINI_CONFIG } from './src/config/geminiConfig';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'super-secret-key-change-in-prod';
+const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || '30d') as jwt.SignOptions['expiresIn'];
 
 // Primary GoDaddy MySQL Database Configuration
 const GODADDY_CONFIG = {
@@ -92,7 +106,7 @@ function createDirectPool(config?: {
   const database = config?.database || process.env.MYSQL_DATABASE || process.env.DB_NAME || GODADDY_CONFIG.database;
   const isSsl = config?.ssl !== undefined ? config.ssl : (process.env.MYSQL_SSL === 'true' || GODADDY_CONFIG.ssl);
 
-  return mysql.createPool({
+  const pool = mysql.createPool({
     host,
     port,
     user,
@@ -106,6 +120,10 @@ function createDirectPool(config?: {
     keepAliveInitialDelay: 5000,
     ssl: isSsl ? { rejectUnauthorized: false } : undefined
   });
+  (pool as any).on('error', (err: any) => {
+    console.warn('[MySQL Primary Pool Notice]:', err?.code || err?.message || err);
+  });
+  return pool;
 }
 
 export async function probeAndSetBestDatabaseHost() {
@@ -164,6 +182,9 @@ function getFallbackPool(): mysql.Pool {
       connectTimeout: 4000,
       enableKeepAlive: true,
       keepAliveInitialDelay: 5000
+    });
+    (fallbackPool as any).on('error', (err: any) => {
+      console.warn('[MySQL Fallback Pool Notice]:', err?.code || err?.message || err);
     });
   }
   return fallbackPool;
@@ -388,7 +409,10 @@ function mapDbToNote(row: any) {
     meetingDate: row.meeting_date,
     meetingVenue: row.meeting_venue,
     agenda: row.agenda,
-    meetingPriority: row.meeting_priority
+    meetingPriority: row.meeting_priority,
+    linkedSourceType: row.linked_source_type || null,
+    linkedSourceId: row.linked_source_id || null,
+    linkedSourceTitle: row.linked_source_title || null
   };
 }
 
@@ -764,7 +788,7 @@ async function startServer() {
         can_access_it: false,
         can_access_pro: false
       };
-      const token = jwt.sign({ id, email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign({ id, email, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({ user, token });
     } catch (e: any) {
       console.error(e);
@@ -792,7 +816,7 @@ async function startServer() {
       }
       
       const user = mapUserToClient(rows[0])!;
-      const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
       res.json({ user, token });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -932,7 +956,7 @@ async function startServer() {
         user = mapUserToClient(rows[0])!;
       }
 
-      const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+      const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
       res.send(`
         <html>
@@ -968,6 +992,25 @@ async function startServer() {
      } catch (e: any) {
        res.status(500).json({ error: e.message });
      }
+  });
+
+  app.post('/api/auth/refresh', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      await ensureUserProfileColumns(db);
+      const [rows]: any = await db.query('SELECT * FROM users WHERE id = ?', [req.user.id]);
+      if (!rows || rows.length === 0) {
+        return res.status(401).json({ error: 'User session expired or not found' });
+      }
+      if (rows[0].status === 'Inactive') {
+        return res.status(403).json({ error: 'This user account is currently inactive.' });
+      }
+      const user = mapUserToClient(rows[0])!;
+      const token = jwt.sign({ id: user.id, email: user.email, name: user.name }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+      res.json({ user, token });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   const handleUpdateCurrentUserProfile = async (req: any, res: any) => {
@@ -1193,6 +1236,9 @@ async function startServer() {
       await db.query('ALTER TABLE notes ADD COLUMN agenda TEXT').catch(() => {});
       await db.query('ALTER TABLE notes ADD COLUMN meeting_priority VARCHAR(50)').catch(() => {});
       await db.query('ALTER TABLE notes ADD COLUMN telegram_alert_sent BOOLEAN DEFAULT FALSE').catch(() => {});
+      await db.query('ALTER TABLE notes ADD COLUMN linked_source_type VARCHAR(40)').catch(() => {});
+      await db.query('ALTER TABLE notes ADD COLUMN linked_source_id VARCHAR(36)').catch(() => {});
+      await db.query('ALTER TABLE notes ADD COLUMN linked_source_title VARCHAR(255)').catch(() => {});
       isNotesSchemaReady = true;
     } catch {}
   }
@@ -1275,6 +1321,7 @@ async function startServer() {
   // --- OPTIMIZED NOTES ROUTES (EXPLICIT PROJECTIONS & ZERO REPETITIVE DDL) ---
   const NOTE_PROJECTION_COLS = `id, user_id, title, content, thumbnail_url, tags, attachments, 
                                meeting_date, meeting_venue, agenda, meeting_priority, 
+                               linked_source_type, linked_source_id, linked_source_title,
                                telegram_alert_sent, created_at, updated_at`;
 
   app.get('/api/notes', authenticateToken, async (req: any, res) => {
@@ -1360,12 +1407,33 @@ async function startServer() {
     try {
       const db = getDb();
       await ensureNotesSchema(db);
-      const { title, content, thumbnailUrl, tags, attachments, meetingDate, meetingVenue, agenda, meetingPriority, templateId } = req.body;
+      const { title, content, thumbnailUrl, tags, attachments, meetingDate, meetingVenue, agenda, meetingPriority, templateId, linkedSourceType, linkedSourceId, linkedSourceTitle } = req.body;
       const id = crypto.randomUUID();
       await db.query(
-        'INSERT INTO notes (id, user_id, title, content, thumbnail_url, tags, attachments, meeting_date, meeting_venue, agenda, meeting_priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [id, req.user.id, title || '', content || '', thumbnailUrl || null, JSON.stringify(tags || []), JSON.stringify(attachments || []), meetingDate || null, meetingVenue || null, agenda || null, meetingPriority || null]
+        'INSERT INTO notes (id, user_id, title, content, thumbnail_url, tags, attachments, meeting_date, meeting_venue, agenda, meeting_priority, linked_source_type, linked_source_id, linked_source_title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          id,
+          req.user.id,
+          title || '',
+          content || '',
+          thumbnailUrl || null,
+          JSON.stringify(tags || []),
+          JSON.stringify(attachments || []),
+          meetingDate || null,
+          meetingVenue || null,
+          agenda || null,
+          meetingPriority || null,
+          linkedSourceType || null,
+          linkedSourceId || null,
+          linkedSourceTitle || null
+        ]
       );
+
+      if (linkedSourceType === 'personal_event' && linkedSourceId) {
+        await db.query('UPDATE it_personal_events SET linked_note_id = ? WHERE id = ? AND user_id = ?', [id, linkedSourceId, req.user.id]).catch(() => {});
+      } else if (linkedSourceType === 'it_meeting' && linkedSourceId) {
+        await db.query('UPDATE it_meetings SET linked_note_id = ? WHERE id = ?', [id, linkedSourceId]).catch(() => {});
+      }
       
       if (templateId) {
         // Send alert if user has telegram configs properly set up and template is selected
@@ -1426,24 +1494,74 @@ async function startServer() {
     try {
       const db = getDb();
       await ensureNotesSchema(db);
-      const { title, content, thumbnailUrl, tags, attachments, meetingDate, meetingVenue, agenda, meetingPriority } = req.body;
+      const { title, content, thumbnailUrl, tags, attachments, meetingDate, meetingVenue, agenda, meetingPriority, linkedSourceType, linkedSourceId, linkedSourceTitle } = req.body;
       
       const [userProfile]: any = await db.query('SELECT role, can_access_it FROM users WHERE id = ?', [req.user.id]);
       const role = userProfile?.[0]?.role || req.user.role;
       const isPrivileged = role === 'owner' || role === 'admin' || userProfile?.[0]?.can_access_it;
 
       const [existing]: any = isPrivileged
-        ? await db.query('SELECT id FROM notes WHERE id = ?', [req.params.id])
-        : await db.query('SELECT id FROM notes WHERE id = ? AND (user_id = ? OR user_id IS NULL)', [req.params.id, req.user.id]);
+        ? await db.query(`SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE id = ?`, [req.params.id])
+        : await db.query(`SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE id = ? AND (user_id = ? OR user_id IS NULL)`, [req.params.id, req.user.id]);
 
       if (existing.length === 0) return res.status(404).json({ error: 'Note not found' });
+      const prev = existing[0];
+
+      const nextTitle = title !== undefined ? title : prev.title;
+      const nextContent = content !== undefined ? content : prev.content;
+      const nextThumb = thumbnailUrl !== undefined ? thumbnailUrl : prev.thumbnail_url;
+      const nextTags = tags !== undefined ? JSON.stringify(tags || []) : prev.tags;
+      const nextAttachments = attachments !== undefined ? JSON.stringify(attachments || []) : prev.attachments;
+      const nextMeetingDate = meetingDate !== undefined ? (meetingDate || null) : prev.meeting_date;
+      const nextMeetingVenue = meetingVenue !== undefined ? (meetingVenue || null) : prev.meeting_venue;
+      const nextAgenda = agenda !== undefined ? (agenda || null) : prev.agenda;
+      const nextPriority = meetingPriority !== undefined ? (meetingPriority || null) : prev.meeting_priority;
+      const nextSourceType = linkedSourceType !== undefined ? (linkedSourceType || null) : prev.linked_source_type;
+      const nextSourceId = linkedSourceId !== undefined ? (linkedSourceId || null) : prev.linked_source_id;
+      const nextSourceTitle = linkedSourceTitle !== undefined ? (linkedSourceTitle || null) : prev.linked_source_title;
 
       await db.query(
-        'UPDATE notes SET title=?, content=?, thumbnail_url=?, tags=?, attachments=?, meeting_date=?, meeting_venue=?, agenda=?, meeting_priority=?, updated_at=NOW() WHERE id=?',
-        [title, content, thumbnailUrl, JSON.stringify(tags||[]), JSON.stringify(attachments||[]), meetingDate || null, meetingVenue || null, agenda || null, meetingPriority || null, req.params.id]
+        `UPDATE notes SET title=?, content=?, thumbnail_url=?, tags=?, attachments=?, meeting_date=?, meeting_venue=?, agenda=?, meeting_priority=?, linked_source_type=?, linked_source_id=?, linked_source_title=?, updated_at=NOW() WHERE id=?`,
+        [nextTitle, nextContent, nextThumb, nextTags, nextAttachments, nextMeetingDate, nextMeetingVenue, nextAgenda, nextPriority, nextSourceType, nextSourceId, nextSourceTitle, req.params.id]
       );
+
+      if (linkedSourceType === 'personal_event' && linkedSourceId) {
+        await db.query('UPDATE it_personal_events SET linked_note_id = ? WHERE id = ? AND user_id = ?', [req.params.id, linkedSourceId, req.user.id]).catch(() => {});
+      } else if (linkedSourceType === 'it_meeting' && linkedSourceId) {
+        await db.query('UPDATE it_meetings SET linked_note_id = ? WHERE id = ?', [req.params.id, linkedSourceId]).catch(() => {});
+      }
       
       const [rows]: any = await db.query(`SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE id = ?`, [req.params.id]);
+      res.json(mapDbToNote(rows[0]));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/notes/:id/link-schedule', authenticateToken, async (req: any, res) => {
+    try {
+      const db = getDb();
+      await ensureNotesSchema(db);
+      const { sourceType, sourceId, sourceTitle } = req.body || {};
+      const noteId = req.params.id;
+
+      // Clear previous reverse links pointing to this note
+      await db.query('UPDATE it_personal_events SET linked_note_id = NULL WHERE linked_note_id = ? AND user_id = ?', [noteId, req.user.id]).catch(() => {});
+      await db.query('UPDATE it_meetings SET linked_note_id = NULL WHERE linked_note_id = ?', [noteId]).catch(() => {});
+
+      await db.query(
+        'UPDATE notes SET linked_source_type = ?, linked_source_id = ?, linked_source_title = ? WHERE id = ?',
+        [sourceType || null, sourceId || null, sourceTitle || null, noteId]
+      );
+
+      if (sourceType === 'personal_event' && sourceId) {
+        await db.query('UPDATE it_personal_events SET linked_note_id = ? WHERE id = ? AND user_id = ?', [noteId, sourceId, req.user.id]).catch(() => {});
+      } else if (sourceType === 'it_meeting' && sourceId) {
+        await db.query('UPDATE it_meetings SET linked_note_id = ? WHERE id = ?', [noteId, sourceId]).catch(() => {});
+      }
+
+      const [rows]: any = await db.query(`SELECT ${NOTE_PROJECTION_COLS} FROM notes WHERE id = ?`, [noteId]);
+      if (rows.length === 0) return res.status(404).json({ error: 'Note not found' });
       res.json(mapDbToNote(rows[0]));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -3323,8 +3441,8 @@ async function startServer() {
     }
   });
 
-  // Initialize Mail Assistant tables and routes
-  await initMailTables(getDb()).catch(e => console.warn('Mail tables init warning:', e.message));
+  // Initialize Mail Assistant tables and routes (non-blocking so port 3000 binds immediately)
+  initMailTables(getDb()).catch(e => console.warn('Mail tables init warning:', e.message));
   setupMailRoutes(app, getDb, authenticateToken);
 
   // Initialize 12-Hour Automated Database Backups & 1-Click Disaster Recovery
@@ -3339,9 +3457,15 @@ async function startServer() {
   // Initialize IT Meeting Scheduling & Telegram Group Alerts
   setupItMeetingRoutes(app, authenticateToken, getDb);
 
+  // Initialize Personal Meeting & Event Scheduler with Per-User Telegram Bot Alerts
+  setupPersonalSchedulerRoutes(app, authenticateToken, getDb);
+
+  // Initialize System Update Inform & Telegram Group Auto-Reminder Alerts
+  setupSystemUpdateRoutes(app, authenticateToken, getDb);
+
   // Initialize Telegram GoDaddy MySQL Disconnection Alert routes & Heartbeat Monitor
   setupTelegramAlertRoutes(app, authenticateToken);
-  startRemoteDatabaseHeartbeat(getDb, async (isReachable, latencyMs) => {
+  const handleDbStatusChange = async (isReachable: boolean, latencyMs?: number) => {
     if (isReachable && isFailoverActive) {
       console.log(`[Auto-Reconnect] GoDaddy MySQL is reachable again (${latencyMs}ms)! Restoring primary live pool...`);
       try {
@@ -3358,13 +3482,99 @@ async function startServer() {
         console.warn('[Auto-Reconnect] Probe succeeded but primary pool re-test failed:', e.message);
       }
     }
-  });
+  };
+  startRemoteDatabaseHeartbeat(getDb, handleDbStatusChange);
+
+  // Initialize 24H cPanel Cron Keep-Alive, Startup Catch-Up & Worker Monitoring routes
+  setupKeepAliveRoutes(app, authenticateToken, getDb, handleDbStatusChange);
 
   if (process.env.NODE_ENV !== "production") {
+    // Serve a WebSocket-free /@vite/client shim because HMR is disabled behind the Cloud Run proxy
+    // (Vite 6's default /@vite/client still opens a WebSocket to port 24678 in middlewareMode, throwing
+    // an unhandled rejection at client.mjs:454:31 when WebSockets are blocked).
+    app.get("/@vite/client", (_req, res) => {
+      res.status(200).type("application/javascript").send(`
+const sheetsMap = new Map();
+if ("document" in globalThis) {
+  document.querySelectorAll("style[data-vite-dev-id]").forEach((el) => {
+    sheetsMap.set(el.getAttribute("data-vite-dev-id"), el);
+  });
+}
+const cspNonce = "document" in globalThis ? document.querySelector("meta[property=csp-nonce]")?.nonce : void 0;
+let lastInsertedStyle;
+
+export function updateStyle(id, content) {
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement("style");
+    style.setAttribute("type", "text/css");
+    style.setAttribute("data-vite-dev-id", id);
+    style.textContent = content;
+    if (cspNonce) {
+      style.setAttribute("nonce", cspNonce);
+    }
+    if (!lastInsertedStyle) {
+      document.head.appendChild(style);
+      setTimeout(() => {
+        lastInsertedStyle = void 0;
+      }, 0);
+    } else {
+      lastInsertedStyle.insertAdjacentElement("afterend", style);
+    }
+    lastInsertedStyle = style;
+  } else {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+
+export function removeStyle(id) {
+  const style = sheetsMap.get(id);
+  if (style) {
+    style.remove();
+    sheetsMap.delete(id);
+  }
+}
+
+export function injectQuery(url, queryToInject) {
+  if (url[0] !== "." && url[0] !== "/") {
+    return url;
+  }
+  const pathname = url.replace(/[?#].*$/, "");
+  const { search, hash } = new URL(url, "http://vite.dev");
+  return \`\${pathname}?\${queryToInject}\${search ? "&" + search.slice(1) : ""}\${hash || ""}\`;
+}
+
+export function createHotContext() {
+  const hot = {
+    data: {},
+    accept() {},
+    acceptExports() {},
+    dispose() {},
+    prune() {},
+    decline() {},
+    invalidate() {},
+    on() {},
+    off() {},
+    send() {}
+  };
+  return hot;
+}
+
+export class ErrorOverlay extends HTMLElement {
+  constructor() {
+    super();
+  }
+  close() {}
+}
+`);
+    });
+
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
-        hmr: false
+        hmr: false,
+        ws: false
       },
       appType: "spa",
     });
@@ -3377,23 +3587,24 @@ async function startServer() {
     });
   }
 
-  // Port 3000 is required for AI Studio iframe & proxy
-  const server = app.listen(3000, "0.0.0.0", () => {
-    console.log(`Server running on port 3000`);
-  });
+  // Bind cleanly: GoDaddy cPanel / Phusion Passenger provides process.env.PORT in production;
+  // development (AI Studio preview iframe) always requires port 3000.
+  const isProd = process.env.NODE_ENV === 'production';
+  const rawEnvPort = process.env.PORT;
+  const parsedPort = rawEnvPort && !isNaN(Number(rawEnvPort)) ? Number(rawEnvPort) : null;
+  const listenTarget: number | string = isProd
+    ? (parsedPort || (rawEnvPort ? rawEnvPort : 3000))
+    : 3000;
 
-  const secondaryPort = process.env.PORT ? Number(process.env.PORT) : null;
-  if (secondaryPort && secondaryPort !== 3000 && !isNaN(secondaryPort)) {
-    try {
-      app.listen(secondaryPort, "0.0.0.0", () => {
-        console.log(`Also listening on port ${secondaryPort}`);
-      });
-    } catch (e: any) {
-      console.warn(`Could not bind to alternate port ${secondaryPort}:`, e?.message || e);
+  const server = http.createServer(app);
+  server.on('error', (err: any) => {
+    console.error(`[Server Port ${listenTarget} Error]:`, err?.message || err);
+    if (err?.code === 'EADDRINUSE') {
+      process.exit(1);
     }
-  }
-
+  });
   server.on('listening', () => {
+    console.log(`Server running on ${typeof listenTarget === 'number' ? `port ${listenTarget}` : listenTarget}`);
     // Non-blocking background verification of local MariaDB replica daemon (if local standalone mode)
     const isRemoteDb = process.env.PRIMARY_DB === 'godaddy' || (process.env.MYSQL_HOST && process.env.MYSQL_HOST !== '127.0.0.1' && process.env.MYSQL_HOST !== 'localhost');
     if (!isRemoteDb && fs.existsSync('./start-db.sh')) {
@@ -3407,6 +3618,15 @@ async function startServer() {
       }).catch(() => {});
     }
   });
+
+  if (typeof listenTarget === 'number') {
+    server.listen(listenTarget, "0.0.0.0");
+  } else {
+    server.listen(listenTarget);
+  }
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('[Server Startup Error]:', err);
+  process.exit(1);
+});

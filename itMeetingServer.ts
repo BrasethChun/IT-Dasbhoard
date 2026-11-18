@@ -2,6 +2,7 @@ import { Express, Request, Response } from 'express';
 import mysql from 'mysql2/promise';
 import axios from 'axios';
 import crypto from 'crypto';
+import { sendDedicatedPersonalAlertAfterItMeeting } from './personalSchedulerServer';
 
 export interface ITMeetingTelegramGroup {
   id: string;
@@ -27,6 +28,10 @@ export interface ITMeetingRecord {
   status: 'Scheduled' | 'Completed' | 'Cancelled';
   target_groups?: string[];
   alert_delivery_report?: any;
+  linked_note_id?: string | null;
+  linked_note_title?: string | null;
+  linked_note_excerpt?: string | null;
+  linked_note_updated_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -195,6 +200,7 @@ export async function initItMeetingTables(db: mysql.Pool): Promise<void> {
   await db.query(`ALTER TABLE it_meeting_telegram_config ADD COLUMN groups_json TEXT`).catch(() => {});
   await db.query(`ALTER TABLE it_meetings ADD COLUMN target_groups_json TEXT`).catch(() => {});
   await db.query(`ALTER TABLE it_meetings ADD COLUMN alert_delivery_report TEXT`).catch(() => {});
+  await db.query(`ALTER TABLE it_meetings ADD COLUMN linked_note_id VARCHAR(36) NULL`).catch(() => {});
 
   // Seed default meeting config row if empty
   const [configRows]: any = await db.query('SELECT COUNT(*) as cnt FROM it_meeting_telegram_config').catch(() => [[{ cnt: 0 }]]);
@@ -274,6 +280,30 @@ export function setupItMeetingRoutes(app: Express, authenticateToken: any, getDb
       const [rows]: any = await db.query(
         'SELECT * FROM it_meetings ORDER BY meeting_date ASC, start_time ASC'
       );
+
+      // Lookup any linked meeting notes (graceful if notes columns haven't migrated yet)
+      let noteRows: any[] = [];
+      try {
+        const [nRows]: any = await db.query(
+          'SELECT id, title, content, updated_at, linked_source_id FROM notes WHERE linked_source_type = ? OR id IN (SELECT linked_note_id FROM it_meetings WHERE linked_note_id IS NOT NULL)',
+          ['it_meeting']
+        );
+        noteRows = Array.isArray(nRows) ? nRows : [];
+      } catch {
+        const [fallbackNotes]: any = await db.query(
+          'SELECT id, title, content, updated_at FROM notes WHERE id IN (SELECT linked_note_id FROM it_meetings WHERE linked_note_id IS NOT NULL)'
+        ).catch(() => [[]]);
+        noteRows = Array.isArray(fallbackNotes) ? fallbackNotes : [];
+      }
+
+      const noteById = new Map<string, any>();
+      const noteByMeetingId = new Map<string, any>();
+      for (const n of noteRows) {
+        noteById.set(n.id, n);
+        if (n.linked_source_id) {
+          noteByMeetingId.set(n.linked_source_id, n);
+        }
+      }
       
       const mapped = rows.map((r: any) => {
         let targetGroups: string[] = [];
@@ -285,12 +315,21 @@ export function setupItMeetingRoutes(app: Express, authenticateToken: any, getDb
           try { deliveryReport = JSON.parse(r.alert_delivery_report); } catch {}
         }
 
+        const matchedNote = (r.linked_note_id ? noteById.get(r.linked_note_id) : null) || noteByMeetingId.get(r.id) || null;
+        const plainExcerpt = matchedNote?.content
+          ? String(matchedNote.content).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140)
+          : '';
+
         return {
           ...r,
           meeting_date: r.meeting_date ? String(r.meeting_date).slice(0, 10) : '',
           telegram_alert_sent: Boolean(r.telegram_alert_sent),
           target_groups: targetGroups,
-          alert_delivery_report: deliveryReport
+          alert_delivery_report: deliveryReport,
+          linked_note_id: matchedNote?.id || r.linked_note_id || null,
+          linked_note_title: matchedNote?.title || null,
+          linked_note_excerpt: plainExcerpt || null,
+          linked_note_updated_at: matchedNote?.updated_at || null
         };
       });
 
@@ -586,6 +625,7 @@ export function setupItMeetingRoutes(app: Express, authenticateToken: any, getDb
       let alertSent = false;
       let alertError: string | null = null;
       let alertDetails: any = null;
+      let personalAlertResult: { sent: boolean; skipped?: boolean; chatId?: string; error?: string } | null = null;
 
       if (send_alert_now) {
         try {
@@ -608,6 +648,19 @@ export function setupItMeetingRoutes(app: Express, authenticateToken: any, getDb
               JSON.stringify(alertResult),
               id
             ]);
+            personalAlertResult = await sendDedicatedPersonalAlertAfterItMeeting(
+              db,
+              req.user?.id,
+              {
+                title,
+                meeting_date: cleanDate,
+                start_time: startTime,
+                end_time: endTime,
+                venue: venueStr,
+                room_booking_note: roomNote
+              },
+              alertResult
+            );
           } else {
             alertError = alertResult.error || 'Failed to dispatch alert';
           }
@@ -626,7 +679,9 @@ export function setupItMeetingRoutes(app: Express, authenticateToken: any, getDb
         target_groups: Array.isArray(target_groups) ? target_groups : [],
         alert_sent: alertSent,
         alert_error: alertError,
-        alert_details: alertDetails
+        alert_details: alertDetails,
+        personal_alert_sent: Boolean(personalAlertResult?.sent),
+        personal_alert_error: personalAlertResult?.error || null
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -649,6 +704,7 @@ export function setupItMeetingRoutes(app: Express, authenticateToken: any, getDb
         agenda,
         organizer_name,
         target_groups,
+        linked_note_id,
         status
       } = req.body;
 
@@ -667,11 +723,14 @@ export function setupItMeetingRoutes(app: Express, authenticateToken: any, getDb
           agenda = COALESCE(?, agenda),
           organizer_name = COALESCE(?, organizer_name),
           target_groups_json = COALESCE(?, target_groups_json),
+          linked_note_id = CASE WHEN ? = 1 THEN ? ELSE linked_note_id END,
           status = COALESCE(?, status)
         WHERE id = ?
       `, [
         title, cleanDate, day_of_week_label, start_time, end_time,
-        venue, room_booking_note ?? null, agenda, organizer_name, targetGroupsJson, status, id
+        venue, room_booking_note ?? null, agenda, organizer_name, targetGroupsJson,
+        linked_note_id !== undefined ? 1 : 0, linked_note_id || null,
+        status, id
       ]);
 
       const [rows]: any = await db.query('SELECT * FROM it_meetings WHERE id = ?', [id]);
@@ -747,14 +806,32 @@ export function setupItMeetingRoutes(app: Express, authenticateToken: any, getDb
         id
       ]);
 
+      const personalAlertResult = await sendDedicatedPersonalAlertAfterItMeeting(
+        db,
+        req.user?.id,
+        {
+          title: meeting.title,
+          meeting_date: cleanDate,
+          start_time: meeting.start_time,
+          end_time: meeting.end_time,
+          venue: meeting.venue,
+          room_booking_note: meeting.room_booking_note
+        },
+        alertResult
+      );
+
       const deliveredNames = alertResult.results.filter(r => r.success).map(r => r.name).join(', ');
 
       res.json({
         success: true,
-        message: `Telegram alert broadcast sent to ${alertResult.totalSent} group(s): ${deliveredNames}`,
+        message: personalAlertResult.sent
+          ? `Telegram alert broadcast sent to ${alertResult.totalSent} group(s) (${deliveredNames}) + Personal ID notified!`
+          : `Telegram alert broadcast sent to ${alertResult.totalSent} group(s): ${deliveredNames}`,
         deliveredGroups: alertResult.results.filter(r => r.success),
         failedGroups: alertResult.results.filter(r => !r.success),
         totalSent: alertResult.totalSent,
+        personal_alert_sent: personalAlertResult.sent,
+        personal_alert_error: personalAlertResult.error || null,
         sentAt: new Date().toISOString()
       });
     } catch (e: any) {
@@ -764,12 +841,12 @@ export function setupItMeetingRoutes(app: Express, authenticateToken: any, getDb
 }
 
 /**
- * Helper to dispatch Telegram message to multiple target groups
+ * Shared helper to dispatch any plain-text message to multiple IT Meeting Telegram groups
  */
-async function dispatchTelegramAlert(
-  db: mysql.Pool, 
-  userId: string | null, 
-  meetingData: any,
+export async function dispatchRawMessageToItTelegramGroups(
+  db: mysql.Pool,
+  userId: string | null,
+  message: string,
   requestedGroupIds?: string[]
 ): Promise<{
   success: boolean;
@@ -807,12 +884,12 @@ async function dispatchTelegramAlert(
     }
 
     if (!token) {
-      return { 
-        success: false, 
-        totalSent: 0, 
-        totalFailed: 0, 
-        results: [], 
-        error: 'Telegram Bot Token is not configured. Please set it in IT Meeting Telegram Settings.' 
+      return {
+        success: false,
+        totalSent: 0,
+        totalFailed: 0,
+        results: [],
+        error: 'Telegram Bot Token is not configured. Please set it in Telegram Settings (IT Meeting Alert).'
       };
     }
 
@@ -820,11 +897,9 @@ async function dispatchTelegramAlert(
     let targetGroups: ITMeetingTelegramGroup[] = [];
 
     if (requestedGroupIds && requestedGroupIds.length > 0) {
-      // Find matching by ID or Chat ID
-      targetGroups = configuredGroups.filter(g => 
+      targetGroups = configuredGroups.filter(g =>
         requestedGroupIds.includes(g.id) || requestedGroupIds.includes(g.chat_id) || requestedGroupIds.includes(g.name)
       );
-      // If some requested IDs are raw chat IDs not in configured list (ad-hoc chat IDs)
       const matchedIds = new Set(targetGroups.map(g => g.id).concat(targetGroups.map(g => g.chat_id)));
       for (const reqId of requestedGroupIds) {
         if (!matchedIds.has(reqId) && (reqId.startsWith('-') || /^\d+$/.test(reqId) || reqId.startsWith('@'))) {
@@ -840,28 +915,25 @@ async function dispatchTelegramAlert(
     }
 
     if (targetGroups.length === 0) {
-      return { 
-        success: false, 
-        totalSent: 0, 
-        totalFailed: 0, 
-        results: [], 
-        error: 'No target Telegram group chat IDs configured. Please add group chat IDs in Settings > IT Meeting Alert.' 
+      return {
+        success: false,
+        totalSent: 0,
+        totalFailed: 0,
+        results: [],
+        error: 'No target Telegram group chat IDs configured. Please add group chat IDs in Telegram Settings.'
       };
     }
 
-    const message = buildMeetingTelegramMessage(meetingData);
     const tgUrl = `https://api.telegram.org/bot${token}/sendMessage`;
-
     const dispatchResults: Array<{ id: string; name: string; chat_id: string; success: boolean; error?: string }> = [];
 
-    // Send to each group
     for (const group of targetGroups) {
       if (!group.chat_id?.trim()) continue;
       try {
         await axios.post(tgUrl, {
           chat_id: group.chat_id.trim(),
           text: message
-        });
+        }, { timeout: 10000 });
         dispatchResults.push({ id: group.id, name: group.name, chat_id: group.chat_id.trim(), success: true });
       } catch (err: any) {
         const desc = err.response?.data?.description || err.message;
@@ -893,4 +965,17 @@ async function dispatchTelegramAlert(
     const desc = err.response?.data?.description || err.message;
     return { success: false, totalSent: 0, totalFailed: 1, results: [], error: desc };
   }
+}
+
+/**
+ * Helper to dispatch Telegram message to multiple target groups
+ */
+async function dispatchTelegramAlert(
+  db: mysql.Pool,
+  userId: string | null,
+  meetingData: any,
+  requestedGroupIds?: string[]
+) {
+  const message = buildMeetingTelegramMessage(meetingData);
+  return dispatchRawMessageToItTelegramGroups(db, userId, message, requestedGroupIds);
 }

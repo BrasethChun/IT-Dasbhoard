@@ -12,6 +12,8 @@ import {
   ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
 import { Button } from '../../components/ui/Button';
+import { SmartModal } from '../../components/ui/SmartModal';
+import { DensityToggle } from '../../components/ui/SmartGrid';
 import {
   ALL_BU_FILTER_OPTIONS,
   ASSET_TYPES_MASTER,
@@ -208,6 +210,20 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
   const [rolloverAdjustmentPercent, setRolloverAdjustmentPercent] = useState<number>(0);
   const [rolloverOverwrite, setRolloverOverwrite] = useState<boolean>(false);
   const [isRollingOver, setIsRollingOver] = useState<boolean>(false);
+  const [showResetZeroModal, setShowResetZeroModal] = useState<boolean>(false);
+  const [resetZeroYear, setResetZeroYear] = useState<number>(selectedFiscalYear);
+  const [resetZeroMode, setResetZeroMode] = useState<'zero_amounts' | 'clear_items'>('zero_amounts');
+  const [resetZeroConfirmed, setResetZeroConfirmed] = useState<boolean>(false);
+  const [isResettingZero, setIsResettingZero] = useState<boolean>(false);
+  const [resetSnapshot, setResetSnapshot] = useState<{
+    available: boolean;
+    fiscal_year?: number;
+    campus_filter?: string;
+    capex_count?: number;
+    opex_count?: number;
+    created_at?: string;
+  } | null>(null);
+  const [isUndoingReset, setIsUndoingReset] = useState<boolean>(false);
 
   useEffect(() => {
     localStorage.setItem('khema_capex_subtab', activeSubTab);
@@ -711,6 +727,89 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
     }
   };
 
+  const loadResetSnapshot = async () => {
+    try {
+      const res = await fetch('/api/it-budget/reset-snapshot', { headers: getAuthHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setResetSnapshot(data?.available ? data : null);
+      }
+    } catch {
+      // ignore snapshot check errors
+    }
+  };
+
+  const handleUndoLastReset = async () => {
+    setIsUndoingReset(true);
+    try {
+      const res = await fetch('/api/it-budget/undo-reset', {
+        method: 'POST',
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || 'Recovered fiscal year from last pre-reset snapshot', 'success');
+        setShowResetZeroModal(false);
+        if (data.fiscal_year && data.fiscal_year !== selectedFiscalYear) {
+          setAvailableYears(prev => Array.from(new Set([...prev, data.fiscal_year])).sort((a, b) => a - b));
+          setSelectedFiscalYear(data.fiscal_year);
+        } else {
+          await loadAll();
+        }
+      } else {
+        showToast(data.error || 'Failed to recover from snapshot', 'error');
+      }
+    } catch (e: any) {
+      showToast('Error recovering snapshot: ' + e.message, 'error');
+    } finally {
+      setIsUndoingReset(false);
+    }
+  };
+
+  const handleExecuteResetZero = async () => {
+    if (!rolloverCopyCapex && !rolloverCopyOpex) {
+      showToast('Select at least CapEx or OPEX to reset', 'error');
+      return;
+    }
+    if (!resetZeroConfirmed) {
+      showToast(`Please confirm resetting FY ${resetZeroYear} first`, 'error');
+      return;
+    }
+    setIsResettingZero(true);
+    try {
+      const res = await fetch('/api/it-budget/reset-zero', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          fiscal_year: resetZeroYear,
+          reset_capex: rolloverCopyCapex,
+          reset_opex: rolloverCopyOpex,
+          campus_filter: rolloverCampus,
+          reset_mode: resetZeroMode
+        })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || `FY ${resetZeroYear} reset to 0`, 'success');
+        setShowResetZeroModal(false);
+        setResetZeroConfirmed(false);
+        await loadResetSnapshot();
+        if (resetZeroYear !== selectedFiscalYear) {
+          setAvailableYears(prev => Array.from(new Set([...prev, resetZeroYear])).sort((a, b) => a - b));
+          setSelectedFiscalYear(resetZeroYear);
+        } else {
+          await loadAll();
+        }
+      } else {
+        showToast(data.error || `Failed to reset FY ${resetZeroYear} to 0`, 'error');
+      }
+    } catch (e: any) {
+      showToast('Error resetting FY to 0: ' + e.message, 'error');
+    } finally {
+      setIsResettingZero(false);
+    }
+  };
+
   const handleRestoreDefaults = () => {
     setDeleteConfirmItem({
       id: 'restore-all',
@@ -1062,6 +1161,8 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
                 ))}
               </select>
             </div>
+
+            <DensityToggle />
           </div>
 
           {/* Sub-Tab Switcher */}
@@ -1158,8 +1259,8 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
           )}
 
           {/* 4 KPI Ribbon Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
+          <div className="smart-kpi-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="smart-kpi-card bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">FY {selectedFiscalYear} IT Portfolio</span>
@@ -1391,9 +1492,9 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
               </div>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+            <div className="overflow-x-auto max-h-[55vh]">
+              <table className="smart-grid-table w-full text-left text-xs">
+                <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
                   <tr>
                     <th className="py-2.5 px-3">Business Unit</th>
                     <th className="py-2.5 px-3 text-right">CapEx Plan ($)</th>
@@ -1600,9 +1701,9 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+            <div className="overflow-x-auto max-h-[68vh]">
+              <table className="smart-grid-table w-full text-left text-xs">
+                <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
                   <tr>
                     <th className="py-3 px-2.5 w-8">No.</th>
                     <th className="py-3 px-2.5">BU</th>
@@ -1774,7 +1875,7 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
                                   </div>
 
                                   <div className="overflow-x-auto bg-white rounded-xl border border-slate-200 p-3">
-                                    <table className="w-full text-center text-xs">
+                                    <table className="smart-grid-table w-full text-center text-xs">
                                       <thead>
                                         <tr className="text-slate-500 font-semibold border-b border-slate-100">
                                           <th className="py-1 px-2 text-left w-24">Row</th>
@@ -1892,7 +1993,7 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
                       <tr className="bg-indigo-50/60 border-t border-indigo-200">
                         <td colSpan={12} className="p-4">
                           <div className="overflow-x-auto bg-white rounded-xl border border-indigo-100 p-3">
-                            <table className="w-full text-center text-xs">
+                            <table className="smart-grid-table w-full text-center text-xs">
                               <thead>
                                 <tr className="text-slate-500 font-semibold border-b border-slate-100">
                                   <th className="py-1 px-2 text-left">Aggregated Portfolio</th>
@@ -2036,9 +2137,9 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
           </div>
 
           <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
+            <div className="overflow-x-auto max-h-[68vh]">
+              <table className="smart-grid-table w-full text-left text-xs">
+                <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 text-slate-500 uppercase font-semibold">
                   <tr>
                     <th className="py-3 px-2.5 w-8">No</th>
                     <th className="py-3 px-2.5">BU</th>
@@ -2352,7 +2453,7 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
                 </select>
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">Escalation Factor</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">Escalation / Reset Mode</label>
                 <select
                   value={rolloverAdjustmentPercent}
                   onChange={(e) => setRolloverAdjustmentPercent(parseFloat(e.target.value) || 0)}
@@ -2362,22 +2463,52 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
                   <option value="3">+3% Annual Escalation</option>
                   <option value="5">+5% CPI / Inflation</option>
                   <option value="10">+10% Growth Buffer</option>
+                  <option value="-100">Reset to $0.00 (Zero-Based FY)</option>
                 </select>
               </div>
             </div>
 
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-4 border-t border-slate-100">
-              <label className="flex items-center gap-2 text-xs font-semibold text-rose-700 cursor-pointer">
-                <input type="checkbox" checked={rolloverOverwrite} onChange={(e) => setRolloverOverwrite(e.target.checked)} className="rounded text-rose-600" />
-                <span>Overwrite if FY {rolloverTargetYear} already has lines</span>
-              </label>
-              <Button
-                onClick={handleExecuteRollover}
-                disabled={isRollingOver || rolloverPreview.totalItems === 0 || rolloverSourceYear === rolloverTargetYear}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold py-2.5 px-5"
-              >
-                {isRollingOver ? 'Rolling Over...' : `Clone & Roll Over to FY ${rolloverTargetYear}`}
-              </Button>
+              <div className="space-y-1">
+                <label className="flex items-center gap-2 text-xs font-semibold text-rose-700 cursor-pointer">
+                  <input type="checkbox" checked={rolloverOverwrite} onChange={(e) => setRolloverOverwrite(e.target.checked)} className="rounded text-rose-600" />
+                  <span>Overwrite if FY {rolloverTargetYear} already has lines</span>
+                </label>
+                <p className="text-[11px] text-slate-500">
+                  {rolloverAdjustmentPercent === -100
+                    ? `Zero-Based Preview: ${rolloverPreview.totalItems} lines cloned to FY ${rolloverTargetYear} with $0.00 planned & actuals.`
+                    : `Preview: ${rolloverPreview.totalItems} lines totaling $${fmtUsd(rolloverPreview.totalTargetBudget)} planned for FY ${rolloverTargetYear}.`}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setResetZeroYear(selectedFiscalYear);
+                    setResetZeroMode('zero_amounts');
+                    setResetZeroConfirmed(false);
+                    loadResetSnapshot();
+                    setShowResetZeroModal(true);
+                  }}
+                  disabled={isRollingOver || isResettingZero || (!rolloverCopyCapex && !rolloverCopyOpex)}
+                  className="border-rose-300 text-rose-700 hover:bg-rose-50 rounded-xl text-xs font-bold py-2.5 px-4 gap-1.5"
+                >
+                  <RotateCcw size={14} />
+                  <span>Reset 0 FY</span>
+                </Button>
+                <Button
+                  onClick={handleExecuteRollover}
+                  disabled={isRollingOver || isResettingZero || rolloverPreview.totalItems === 0 || rolloverSourceYear === rolloverTargetYear}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold py-2.5 px-5"
+                >
+                  {isRollingOver
+                    ? 'Rolling Over...'
+                    : rolloverAdjustmentPercent === -100
+                      ? `Clone as $0.00 to FY ${rolloverTargetYear}`
+                      : `Clone & Roll Over to FY ${rolloverTargetYear}`}
+                </Button>
+              </div>
             </div>
           </div>
 
@@ -2489,39 +2620,41 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
 
       {/* --- MODALS --- */}
       {showCloneYearModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xl max-w-md w-full space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-slate-900">Plan / Roll Over Fiscal Year</h3>
-              <button type="button" onClick={() => setShowCloneYearModal(false)} className="text-slate-400 hover:text-slate-600 cursor-pointer"><X size={16} /></button>
-            </div>
-            <div className="space-y-3 text-xs">
-              <div>
-                <label className="font-semibold text-slate-700">Source Year</label>
-                <input type="text" disabled value={`FY ${selectedFiscalYear}`} className="w-full mt-1 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl font-semibold" />
-              </div>
-              <div>
-                <label className="font-semibold text-slate-700">Target Fiscal Year</label>
-                <input
-                  type="number"
-                  min="2020"
-                  max="2040"
-                  value={cloneTargetYear}
-                  onChange={(e) => setCloneTargetYear(parseInt(e.target.value, 10) || 2028)}
-                  className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
-                />
-              </div>
-              <label className="flex items-center gap-2 text-slate-600 cursor-pointer">
-                <input type="checkbox" checked={cloneOverwrite} onChange={(e) => setCloneOverwrite(e.target.checked)} className="rounded text-indigo-600" />
-                <span>Overwrite if FY {cloneTargetYear} already exists</span>
-              </label>
-            </div>
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+        <SmartModal
+          onClose={() => setShowCloneYearModal(false)}
+          size="sm"
+          icon={<Calendar size={18} />}
+          title="Plan / Roll Over Fiscal Year"
+          subtitle="Duplicate budget baseline structure to a target year"
+          footer={
+            <>
               <Button variant="outline" onClick={() => setShowCloneYearModal(false)}>Cancel</Button>
-              <Button onClick={handleCloneYear} className="bg-indigo-600 hover:bg-indigo-700 text-white">Clone to FY {cloneTargetYear}</Button>
+              <Button onClick={handleCloneYear}>Clone to FY {cloneTargetYear}</Button>
+            </>
+          }
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div>
+              <label className="font-semibold text-slate-700 dark:text-slate-300">Source Year</label>
+              <input type="text" disabled value={`FY ${selectedFiscalYear}`} className="w-full mt-1 px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-semibold" />
+            </div>
+            <div>
+              <label className="font-semibold text-slate-700 dark:text-slate-300">Target Fiscal Year</label>
+              <input
+                type="number"
+                min="2020"
+                max="2040"
+                value={cloneTargetYear}
+                onChange={(e) => setCloneTargetYear(parseInt(e.target.value, 10) || 2028)}
+                className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono font-bold"
+              />
             </div>
           </div>
-        </div>
+          <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+            <input type="checkbox" checked={cloneOverwrite} onChange={(e) => setCloneOverwrite(e.target.checked)} className="rounded text-indigo-600" />
+            <span>Overwrite if FY {cloneTargetYear} already exists</span>
+          </label>
+        </SmartModal>
       )}
 
       {showCapexModal && (
@@ -2571,31 +2704,171 @@ export const CapExOpExModule: React.FC<{ sites?: any[] }> = () => {
       )}
 
       {deleteConfirmItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100">
-                <AlertTriangle size={20} />
-              </div>
-              <div className="text-xs">
-                <h3 className="text-sm font-bold text-slate-900">
-                  {deleteConfirmItem.type === 'restore-defaults' ? 'Reset to Baseline Template?' : `Delete ${deleteConfirmItem.type.toUpperCase()} Item?`}
-                </h3>
-                <p className="text-slate-600 mt-1">
-                  {deleteConfirmItem.type === 'restore-defaults'
-                    ? `Reset all CapEx and OPEX items for FY ${selectedFiscalYear} to the baseline template?`
-                    : `Confirm deletion of "${deleteConfirmItem.name}"?`}
-                </p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+        <SmartModal
+          onClose={() => setDeleteConfirmItem(null)}
+          size="sm"
+          icon={<AlertTriangle size={18} className="text-rose-600" />}
+          title={deleteConfirmItem.type === 'restore-defaults' ? 'Reset to Baseline Template?' : `Delete ${deleteConfirmItem.type.toUpperCase()} Item?`}
+          subtitle="This action cannot be undone"
+          footer={
+            <>
               <Button variant="outline" onClick={() => setDeleteConfirmItem(null)} disabled={isDeleting}>Cancel</Button>
-              <Button onClick={handleConfirmDelete} disabled={isDeleting} className="bg-rose-600 hover:bg-rose-700 text-white">
+              <Button variant="danger" onClick={handleConfirmDelete} disabled={isDeleting}>
                 {isDeleting ? 'Processing...' : deleteConfirmItem.type === 'restore-defaults' ? 'Reset Template' : 'Confirm Delete'}
               </Button>
+            </>
+          }
+        >
+          <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            {deleteConfirmItem.type === 'restore-defaults'
+              ? `Reset all CapEx and OPEX items for FY ${selectedFiscalYear} to the baseline template?`
+              : `Confirm deletion of "${deleteConfirmItem.name}"?`}
+          </p>
+        </SmartModal>
+      )}
+
+      {showResetZeroModal && (
+        <SmartModal
+          onClose={() => !isResettingZero && !isUndoingReset && setShowResetZeroModal(false)}
+          size="md"
+          icon={<RotateCcw size={18} className="text-rose-600" />}
+          title="Reset Fiscal Year to 0"
+          subtitle="Zero out planned & actual values or clear all items for a Fiscal Year"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setShowResetZeroModal(false)} disabled={isResettingZero || isUndoingReset}>
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={handleExecuteResetZero}
+                disabled={isResettingZero || isUndoingReset || !resetZeroConfirmed || (!rolloverCopyCapex && !rolloverCopyOpex)}
+              >
+                {isResettingZero
+                  ? 'Resetting...'
+                  : resetZeroMode === 'clear_items'
+                    ? `Clear FY ${resetZeroYear} to 0 Items`
+                    : `Reset FY ${resetZeroYear} to $0.00`}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-4 text-xs">
+            {resetSnapshot?.available && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-xl border border-emerald-300 bg-emerald-50/70 dark:bg-emerald-950/30 dark:border-emerald-800">
+                <div>
+                  <div className="font-bold text-emerald-800 dark:text-emerald-300">
+                    Recoverable Snapshot Available (FY {resetSnapshot.fiscal_year})
+                  </div>
+                  <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                    {resetSnapshot.capex_count || 0} CapEx &amp; {resetSnapshot.opex_count || 0} OPEX items ({resetSnapshot.campus_filter || 'All Sites'}) saved before last reset.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleUndoLastReset}
+                  disabled={isUndoingReset || isResettingZero}
+                  className="border-emerald-400 text-emerald-800 hover:bg-emerald-100 text-[11px] font-bold py-1.5 px-3 shrink-0"
+                >
+                  {isUndoingReset ? 'Recovering...' : `Recover FY ${resetSnapshot.fiscal_year}`}
+                </Button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">Fiscal Year to Reset</label>
+                <select
+                  value={resetZeroYear}
+                  onChange={(e) => {
+                    setResetZeroYear(parseInt(e.target.value, 10));
+                    setResetZeroConfirmed(false);
+                  }}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-mono font-bold text-slate-900 dark:text-slate-100"
+                >
+                  {Array.from(new Set([...availableYears, rolloverSourceYear, rolloverTargetYear]))
+                    .sort((a, b) => a - b)
+                    .map(yr => (
+                      <option key={yr} value={yr}>FY {yr}</option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 dark:text-slate-300 block mb-1">Selected Scope</label>
+                <div className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl font-semibold text-slate-700 dark:text-slate-300 truncate">
+                  {[
+                    rolloverCopyCapex ? 'CapEx' : null,
+                    rolloverCopyOpex ? 'OPEX' : null
+                  ].filter(Boolean).join(' + ')} · {rolloverCampus}
+                </div>
+              </div>
             </div>
+
+            <div className="space-y-2">
+              <label className="font-semibold text-slate-700 dark:text-slate-300 block">Reset Action Mode</label>
+              <label
+                className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors ${
+                  resetZeroMode === 'zero_amounts'
+                    ? 'border-indigo-400 bg-indigo-50/70 dark:bg-indigo-950/30'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="resetZeroMode"
+                  checked={resetZeroMode === 'zero_amounts'}
+                  onChange={() => setResetZeroMode('zero_amounts')}
+                  className="mt-0.5 text-indigo-600"
+                />
+                <div>
+                  <div className="font-bold text-slate-900 dark:text-slate-100">
+                    Reset All Amounts to $0.00 (Keep Line Items)
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Sets Unit Price, Requested/Annual Total, and all 12-month Planned &amp; Actual columns to $0.00 while preserving descriptions, BUs, and COA accounts.
+                  </p>
+                </div>
+              </label>
+
+              <label
+                className={`flex items-start gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors ${
+                  resetZeroMode === 'clear_items'
+                    ? 'border-rose-400 bg-rose-50/70 dark:bg-rose-950/30'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="resetZeroMode"
+                  checked={resetZeroMode === 'clear_items'}
+                  onChange={() => setResetZeroMode('clear_items')}
+                  className="mt-0.5 text-rose-600"
+                />
+                <div>
+                  <div className="font-bold text-rose-700 dark:text-rose-400">
+                    Clear All Line Items (0 Items)
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Removes all matching CapEx/OPEX line items for FY {resetZeroYear} ({rolloverCampus}) so the year starts blank (a backup snapshot is saved automatically).
+                  </p>
+                </div>
+              </label>
+            </div>
+
+            <label className="flex items-start gap-2.5 p-3 rounded-xl border border-amber-300 bg-amber-50/70 dark:bg-amber-950/30 dark:border-amber-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={resetZeroConfirmed}
+                onChange={(e) => setResetZeroConfirmed(e.target.checked)}
+                className="mt-0.5 rounded text-rose-600"
+              />
+              <span className="text-[11px] font-semibold text-amber-900 dark:text-amber-200">
+                I confirm I want to {resetZeroMode === 'clear_items' ? 'remove all line items' : 'reset all amounts to $0.00'} for <strong>FY {resetZeroYear}</strong> ({rolloverCampus}).
+              </span>
+            </label>
           </div>
-        </div>
+        </SmartModal>
       )}
 
       {loading && (

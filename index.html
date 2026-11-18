@@ -3,33 +3,56 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="https://vitejs.dev/logo.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AI Notes Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Master IT Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet">
     
     <!-- Quill.js for Rich Text Editing -->
     <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
     <script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
 
+    <!-- Synchronous Theme Hydration (Prevents Flash of Wrong Theme) -->
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('app_theme_prefs_v1');
+          var prefs = raw ? JSON.parse(raw) : {};
+          var mode = prefs.mode === 'dark' ? 'dark' : 'light';
+          var preset = ['indigo', 'clinical', 'oceanic', 'emerald'].indexOf(prefs.preset) >= 0 ? prefs.preset : 'indigo';
+          var density = prefs.density === 'compact' ? 'compact' : 'comfortable';
+          var root = document.documentElement;
+          if (mode === 'dark') root.classList.add('dark');
+          root.setAttribute('data-theme-mode', mode);
+          root.setAttribute('data-theme-preset', preset);
+          root.setAttribute('data-density', density);
+        } catch (e) {}
+      })();
+    </script>
+
     <script>
       tailwind.config = {
+        darkMode: 'class',
         theme: {
           extend: {
             fontFamily: {
-              sans: ['Inter', 'sans-serif'],
+              sans: ['"DM Sans"', 'system-ui', 'sans-serif'],
+              display: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+              mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
             },
             colors: {
               primary: {
-                50: '#f0f9ff',
-                100: '#e0f2fe',
-                500: '#0ea5e9', 
-                600: '#0284c7',
-                700: '#0369a1',
+                50: 'var(--accent-50)',
+                100: 'var(--accent-100)',
+                500: 'var(--accent)',
+                600: 'var(--accent-hover)',
+                700: 'var(--accent-deep)',
               }
             },
             boxShadow: {
-              'glass': '0 8px 32px 0 rgba(31, 38, 135, 0.07)',
+              'glass': '0 8px 32px 0 rgba(15, 23, 42, 0.07)',
               'subtle': '0 2px 10px rgba(0, 0, 0, 0.03)',
             }
           }
@@ -37,13 +60,372 @@
       }
     </script>
     <style>
+      :root,
+      html[data-theme-preset="indigo"] {
+        --app-bg: #f8fafc;
+        --app-bg-grad: linear-gradient(135deg, #f0f9ff 0%, #f8fafc 48%, #eef2ff 100%);
+        --app-blob-1: rgba(56, 189, 248, 0.18);
+        --app-blob-2: rgba(99, 102, 241, 0.16);
+        --surface-card: #ffffff;
+        --surface-elevated: rgba(255, 255, 255, 0.88);
+        --surface-muted: #f1f5f9;
+        --surface-input: #f8fafc;
+        --border-hairline: #e2e8f0;
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --text-muted: #64748b;
+        --accent-50: #eef2ff;
+        --accent-100: #e0e7ff;
+        --accent: #4f46e5;
+        --accent-hover: #4338ca;
+        --accent-deep: #3730a3;
+        --accent-soft: rgba(79, 70, 229, 0.1);
+        --accent-fg: #ffffff;
+      }
+
+      html[data-theme-preset="clinical"] {
+        --app-bg: #f8fafc;
+        --app-bg-grad: linear-gradient(135deg, #f0fdfa 0%, #f8fafc 52%, #e2e8f0 100%);
+        --app-blob-1: rgba(20, 184, 166, 0.16);
+        --app-blob-2: rgba(15, 118, 110, 0.12);
+        --accent-50: #f0fdfa;
+        --accent-100: #ccfbf1;
+        --accent: #0f766e;
+        --accent-hover: #0d9488;
+        --accent-deep: #115e59;
+        --accent-soft: rgba(15, 118, 110, 0.11);
+      }
+
+      html[data-theme-preset="oceanic"] {
+        --app-bg: #f8fafc;
+        --app-bg-grad: linear-gradient(135deg, #e0f2fe 0%, #f8fafc 52%, #eff6ff 100%);
+        --app-blob-1: rgba(14, 165, 233, 0.18);
+        --app-blob-2: rgba(37, 99, 235, 0.13);
+        --accent-50: #f0f9ff;
+        --accent-100: #e0f2fe;
+        --accent: #0284c7;
+        --accent-hover: #0369a1;
+        --accent-deep: #075985;
+        --accent-soft: rgba(2, 132, 199, 0.11);
+      }
+
+      html[data-theme-preset="emerald"] {
+        --app-bg: #f8fafc;
+        --app-bg-grad: linear-gradient(135deg, #ecfdf5 0%, #f8fafc 52%, #f0fdfa 100%);
+        --app-blob-1: rgba(16, 185, 129, 0.16);
+        --app-blob-2: rgba(5, 150, 105, 0.12);
+        --accent-50: #ecfdf5;
+        --accent-100: #d1fae5;
+        --accent: #059669;
+        --accent-hover: #047857;
+        --accent-deep: #065f46;
+        --accent-soft: rgba(5, 150, 105, 0.11);
+      }
+
+      html.dark {
+        color-scheme: dark;
+        --app-bg: #090e1a;
+        --app-bg-grad: linear-gradient(135deg, #090e1a 0%, #0f172a 55%, #111827 100%);
+        --app-blob-1: rgba(99, 102, 241, 0.14);
+        --app-blob-2: rgba(14, 165, 233, 0.10);
+        --surface-card: #111827;
+        --surface-elevated: rgba(17, 24, 39, 0.88);
+        --surface-muted: #1e293b;
+        --surface-input: #0f172a;
+        --border-hairline: #1f2937;
+        --text-primary: #f1f5f9;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8;
+      }
+
+      html.dark[data-theme-preset="clinical"] {
+        --app-blob-1: rgba(20, 184, 166, 0.13);
+        --app-blob-2: rgba(45, 212, 191, 0.08);
+        --accent-50: rgba(20, 184, 166, 0.14);
+        --accent-100: rgba(20, 184, 166, 0.22);
+        --accent: #14b8a6;
+        --accent-hover: #0d9488;
+        --accent-deep: #2dd4bf;
+        --accent-soft: rgba(20, 184, 166, 0.16);
+      }
+
+      html.dark[data-theme-preset="oceanic"] {
+        --app-blob-1: rgba(56, 189, 248, 0.14);
+        --app-blob-2: rgba(59, 130, 246, 0.10);
+        --accent-50: rgba(56, 189, 248, 0.14);
+        --accent-100: rgba(56, 189, 248, 0.22);
+        --accent: #0ea5e9;
+        --accent-hover: #0284c7;
+        --accent-deep: #38bdf8;
+        --accent-soft: rgba(14, 165, 233, 0.16);
+      }
+
+      html.dark[data-theme-preset="emerald"] {
+        --app-blob-1: rgba(16, 185, 129, 0.13);
+        --app-blob-2: rgba(52, 211, 153, 0.08);
+        --accent-50: rgba(16, 185, 129, 0.14);
+        --accent-100: rgba(16, 185, 129, 0.22);
+        --accent: #10b981;
+        --accent-hover: #059669;
+        --accent-deep: #34d399;
+        --accent-soft: rgba(16, 185, 129, 0.16);
+      }
+
+      html, body {
+        max-width: 100%;
+        overflow-x: clip;
+        -webkit-tap-highlight-color: transparent;
+      }
+
       body {
-        font-family: 'Inter', sans-serif;
-        background-color: #f8fafc; /* Slate 50 */
+        font-family: 'DM Sans', system-ui, sans-serif;
+        background-color: var(--app-bg);
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
-        color: #0f172a; /* Slate 900 */
+        color: var(--text-primary);
+        transition: background-color 180ms ease, color 180ms ease;
       }
+
+      /* Prevent iOS Safari auto-zoom on form controls while keeping desktop sizing crisp */
+      @media (max-width: 767px) {
+        input:not([type="checkbox"]):not([type="radio"]),
+        select,
+        textarea {
+          font-size: 16px !important;
+        }
+      }
+
+      /* Smooth native momentum scrolling on iOS Safari & Chrome touch devices */
+      .overflow-x-auto,
+      .overflow-y-auto {
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .pb-safe {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+
+      .hide-scrollbar {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+      .hide-scrollbar::-webkit-scrollbar {
+        display: none;
+      }
+
+      h1, h2, h3, .font-display {
+        font-family: 'Plus Jakarta Sans', 'DM Sans', system-ui, sans-serif;
+      }
+
+      .tabular-nums {
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Theme-adaptive app canvas */
+      .app-canvas {
+        background: var(--app-bg-grad);
+        color: var(--text-primary);
+      }
+
+      /* Theme-preset accent helpers for key controls */
+      .theme-accent-bg {
+        background-color: var(--accent) !important;
+        color: var(--accent-fg) !important;
+      }
+      .theme-accent-bg:hover {
+        background-color: var(--accent-hover) !important;
+      }
+      .theme-accent-text {
+        color: var(--accent) !important;
+      }
+      .theme-accent-soft {
+        background-color: var(--accent-soft) !important;
+        color: var(--accent) !important;
+      }
+
+      /* Whole-app Dark Mode surface pairing for existing Tailwind neutral classes (preserves explicit dark:* and colored buttons) */
+      html.dark .bg-white:not([class*="dark:bg-"]) {
+        background-color: #111827;
+      }
+      html.dark .bg-white\/95:not([class*="dark:bg-"]),
+      html.dark .bg-white\/90:not([class*="dark:bg-"]),
+      html.dark .bg-white\/85:not([class*="dark:bg-"]),
+      html.dark .bg-white\/80:not([class*="dark:bg-"]) {
+        background-color: rgba(17, 24, 39, 0.9);
+      }
+      html.dark .bg-white\/70:not([class*="dark:bg-"]),
+      html.dark .bg-white\/60:not([class*="dark:bg-"]),
+      html.dark .bg-white\/50:not([class*="dark:bg-"]),
+      html.dark .bg-white\/45:not([class*="dark:bg-"]),
+      html.dark .bg-white\/40:not([class*="dark:bg-"]) {
+        background-color: rgba(17, 24, 39, 0.72);
+      }
+      html.dark .bg-slate-50:not([class*="dark:bg-"]),
+      html.dark .bg-slate-50\/80:not([class*="dark:bg-"]),
+      html.dark .bg-slate-50\/60:not([class*="dark:bg-"]),
+      html.dark .bg-slate-50\/50:not([class*="dark:bg-"]) {
+        background-color: #0f172a;
+      }
+      html.dark .bg-slate-100:not([class*="dark:bg-"]),
+      html.dark .bg-slate-100\/80:not([class*="dark:bg-"]) {
+        background-color: #1e293b;
+      }
+      html.dark .hover\:bg-slate-50:hover:not([class*="dark:hover:bg-"]),
+      html.dark .hover\:bg-slate-50\/80:hover:not([class*="dark:hover:bg-"]),
+      html.dark .hover\:bg-slate-100:hover:not([class*="dark:hover:bg-"]) {
+        background-color: #1e293b;
+      }
+      html.dark .text-slate-900:not([class*="dark:text-"]),
+      html.dark .text-slate-800:not([class*="dark:text-"]) {
+        color: #f1f5f9;
+      }
+      html.dark .text-slate-700:not([class*="dark:text-"]) {
+        color: #cbd5e1;
+      }
+      html.dark .text-slate-600:not([class*="dark:text-"]) {
+        color: #94a3b8;
+      }
+      html.dark .border-slate-200:not([class*="dark:border-"]),
+      html.dark .border-slate-200\/80:not([class*="dark:border-"]),
+      html.dark .border-slate-200\/70:not([class*="dark:border-"]),
+      html.dark .border-slate-200\/60:not([class*="dark:border-"]),
+      html.dark .border-slate-100:not([class*="dark:border-"]),
+      html.dark .border-white\/80:not([class*="dark:border-"]),
+      html.dark .border-white\/60:not([class*="dark:border-"]) {
+        border-color: #1f2937;
+      }
+      html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+      html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+        border-color: #1f2937;
+      }
+      html.dark input:not([type="checkbox"]):not([type="radio"]):not([class*="bg-"]),
+      html.dark select:not([class*="bg-"]),
+      html.dark textarea:not([class*="bg-"]) {
+        background-color: #0f172a;
+        color: #f1f5f9;
+        border-color: #334155;
+      }
+      html.dark .bg-indigo-50:not([class*="dark:bg-"]),
+      html.dark .bg-indigo-50\/60:not([class*="dark:bg-"]),
+      html.dark .bg-indigo-50\/50:not([class*="dark:bg-"]) {
+        background-color: rgba(79, 70, 229, 0.16);
+      }
+      html.dark .bg-emerald-50:not([class*="dark:bg-"]),
+      html.dark .bg-sky-50:not([class*="dark:bg-"]),
+      html.dark .bg-amber-50:not([class*="dark:bg-"]),
+      html.dark .bg-rose-50:not([class*="dark:bg-"]) {
+        background-color: rgba(30, 41, 59, 0.78);
+      }
+      html.dark .text-indigo-700:not([class*="dark:text-"]),
+      html.dark .text-indigo-800:not([class*="dark:text-"]),
+      html.dark .text-indigo-900:not([class*="dark:text-"]) {
+        color: #a5b4fc;
+      }
+      html.dark .text-emerald-700:not([class*="dark:text-"]),
+      html.dark .text-emerald-800:not([class*="dark:text-"]) {
+        color: #6ee7b7;
+      }
+      html.dark .text-sky-700:not([class*="dark:text-"]),
+      html.dark .text-sky-800:not([class*="dark:text-"]) {
+        color: #7dd3fc;
+      }
+      html.dark .text-amber-700:not([class*="dark:text-"]),
+      html.dark .text-amber-800:not([class*="dark:text-"]) {
+        color: #fcd34d;
+      }
+      html.dark .text-rose-700:not([class*="dark:text-"]),
+      html.dark .text-rose-800:not([class*="dark:text-"]) {
+        color: #fda4af;
+      }
+      html.dark input:not([type="checkbox"]):not([type="radio"]),
+      html.dark select,
+      html.dark textarea {
+        border-color: #334155;
+      }
+
+      /* Smart Preset Tint Overrides on Primary Accent Controls */
+      html:not([data-theme-preset="indigo"]) .bg-indigo-600 {
+        background-color: var(--accent);
+      }
+      html:not([data-theme-preset="indigo"]) .hover\:bg-indigo-700:hover {
+        background-color: var(--accent-hover);
+      }
+      html:not([data-theme-preset="indigo"]) .text-indigo-600,
+      html:not([data-theme-preset="indigo"]) .text-indigo-700 {
+        color: var(--accent);
+      }
+      html:not([data-theme-preset="indigo"]) .border-indigo-200,
+      html:not([data-theme-preset="indigo"]) .border-indigo-300 {
+        border-color: var(--accent-100);
+      }
+
+      /* Whole-app Recharts Dark Mode Contrast */
+      html.dark .recharts-cartesian-axis-tick-value,
+      html.dark .recharts-text {
+        fill: #94a3b8;
+      }
+      html.dark .recharts-cartesian-grid line,
+      html.dark .recharts-polar-grid-concentric-polygon,
+      html.dark .recharts-polar-grid-angle line {
+        stroke: #1e293b;
+      }
+      html.dark .recharts-legend-item-text {
+        color: #cbd5e1 !important;
+      }
+      html.dark .recharts-default-tooltip {
+        background-color: #0f172a !important;
+        border-color: #334155 !important;
+        color: #f1f5f9 !important;
+        border-radius: 0.75rem !important;
+        box-shadow: 0 12px 30px rgba(2, 6, 23, 0.55) !important;
+      }
+      html.dark .recharts-tooltip-label {
+        color: #f8fafc !important;
+        font-weight: 600;
+      }
+      html.dark .recharts-tooltip-cursor {
+        fill: rgba(148, 163, 184, 0.08);
+      }
+
+      /* Smart Grid Responsive Table & Density Discipline */
+      .smart-grid-table th,
+      .smart-grid-table td {
+        vertical-align: middle;
+        transition: padding 150ms ease, background-color 150ms ease;
+      }
+      html[data-density="compact"] .smart-grid-table thead th {
+        padding-top: 0.45rem !important;
+        padding-bottom: 0.45rem !important;
+        font-size: 10.5px !important;
+      }
+      html[data-density="compact"] .smart-grid-table tbody td,
+      html[data-density="compact"] .smart-grid-table tfoot td {
+        padding-top: 0.4rem !important;
+        padding-bottom: 0.4rem !important;
+        font-size: 11.5px !important;
+      }
+      html[data-density="compact"] .smart-kpi-grid {
+        gap: 0.65rem !important;
+      }
+      html[data-density="compact"] .smart-kpi-card {
+        padding: 0.85rem 1rem !important;
+      }
+
+      /* Universal Viewport-Fit Modal Safety & Smooth Entry */
+      .smart-modal-enter {
+        animation: smartModalIn 160ms cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      @keyframes smartModalIn {
+        from {
+          opacity: 0;
+          transform: translateY(6px) scale(0.985);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
       /* Custom scrollbar */
       ::-webkit-scrollbar {
         width: 6px;
@@ -53,48 +435,53 @@
         background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: #cbd5e1; /* Slate 300 */
+        background: #cbd5e1;
         border-radius: 3px;
       }
       ::-webkit-scrollbar-thumb:hover {
-        background: #94a3b8; /* Slate 400 */
+        background: #94a3b8;
+      }
+      html.dark ::-webkit-scrollbar-thumb {
+        background: #334155;
+      }
+      html.dark ::-webkit-scrollbar-thumb:hover {
+        background: #475569;
       }
 
-      /* Quill Editor Overrides for Light Mode */
+      /* Quill Editor Overrides (Light + Dark) */
       .ql-toolbar.ql-snow {
         border: none !important;
-        border-bottom: 1px solid #e2e8f0 !important; /* Slate 200 */
+        border-bottom: 1px solid var(--border-hairline) !important;
         padding: 12px 0 !important;
         margin-bottom: 16px;
         background: transparent;
       }
       .ql-toolbar.ql-snow .ql-stroke {
-        stroke: #64748b !important; /* Slate 500 */
+        stroke: var(--text-muted) !important;
       }
       .ql-toolbar.ql-snow .ql-fill {
-        fill: #64748b !important;
+        fill: var(--text-muted) !important;
       }
       .ql-toolbar.ql-snow .ql-picker {
-        color: #64748b !important;
+        color: var(--text-muted) !important;
       }
       .ql-container.ql-snow {
         border: none !important;
-        font-family: 'Inter', sans-serif !important;
-        font-size: 1.125rem !important;
+        font-family: 'DM Sans', system-ui, sans-serif !important;
+        font-size: 1.0625rem !important;
       }
       .ql-editor {
         padding: 0 !important;
         min-height: 300px;
-        color: #334155; /* Slate 700 */
+        color: var(--text-secondary);
         line-height: 1.75;
       }
       .ql-editor.ql-blank::before {
         font-style: normal !important;
-        color: #94a3b8 !important; /* Slate 400 */
+        color: var(--text-muted) !important;
         left: 0 !important;
       }
     </style>
-<link rel="stylesheet" href="/index.css">
 </head>
   <body>
     <div id="root"></div>

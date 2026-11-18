@@ -1,5 +1,7 @@
 import { Express, Request, Response } from 'express';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import {
   BU_MASTER_LIST,
   DEPT_DEFINITIONS,
@@ -1647,8 +1649,9 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
       const copyCapex = req.body.copy_capex !== false;
       const copyOpex = req.body.copy_opex !== false;
       const campusFilter = req.body.campus_filter && req.body.campus_filter !== 'All Sites' ? req.body.campus_filter : null;
-      const adjustmentPercent = parseFloat(req.body.adjustment_percent) || 0;
-      const multiplier = 1 + (adjustmentPercent / 100);
+      const rawAdj = req.body.adjustment_percent !== undefined ? parseFloat(req.body.adjustment_percent) : 0;
+      const adjustmentPercent = isNaN(rawAdj) ? 0 : rawAdj;
+      const multiplier = Math.max(0, 1 + (adjustmentPercent / 100));
 
       if (!toYear || toYear < 2020 || toYear > 2050) {
         return res.status(400).json({ error: 'Valid destination fiscal year is required' });
@@ -1659,20 +1662,21 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
       }
 
       // Check existing items in target year
-      let existingQuery = 'SELECT ';
       const queryParts: string[] = [];
       const queryParams: any[] = [];
       if (copyCapex) {
-        queryParts.push('(SELECT COUNT(*) FROM it_capex_plan WHERE fiscal_year = ?' + (campusFilter ? ' AND site = ?' : '') + ')');
-        queryParams.push(toYear);
-        if (campusFilter) queryParams.push(campusFilter);
+        const capexCheckParams: any[] = [toYear];
+        const capexCheckFilter = buildBuFilterSql('site', campusFilter || undefined, capexCheckParams);
+        queryParts.push(`(SELECT COUNT(*) FROM it_capex_plan WHERE fiscal_year = ?${capexCheckFilter})`);
+        queryParams.push(...capexCheckParams);
       }
       if (copyOpex) {
-        queryParts.push('(SELECT COUNT(*) FROM it_opex_plan WHERE fiscal_year = ?' + (campusFilter ? ' AND site = ?' : '') + ')');
-        queryParams.push(toYear);
-        if (campusFilter) queryParams.push(campusFilter);
+        const opexCheckParams: any[] = [toYear];
+        const opexCheckFilter = buildBuFilterSql('site', campusFilter || undefined, opexCheckParams);
+        queryParts.push(`(SELECT COUNT(*) FROM it_opex_plan WHERE fiscal_year = ?${opexCheckFilter})`);
+        queryParams.push(...opexCheckParams);
       }
-      existingQuery += queryParts.join(' + ') + ' AS c';
+      const existingQuery = 'SELECT ' + queryParts.join(' + ') + ' AS c';
 
       const [existing]: any = await db.query(existingQuery, queryParams);
       const existingCount = existing && existing[0] ? existing[0].c : 0;
@@ -1685,18 +1689,14 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
       // If overwrite, delete target records based on selected components
       if (req.body.overwrite) {
         if (copyCapex) {
-          if (campusFilter) {
-            await db.query('DELETE FROM it_capex_plan WHERE fiscal_year = ? AND site = ?', [toYear, campusFilter]);
-          } else {
-            await db.query('DELETE FROM it_capex_plan WHERE fiscal_year = ?', [toYear]);
-          }
+          const delCapexParams: any[] = [toYear];
+          const delCapexFilter = buildBuFilterSql('site', campusFilter || undefined, delCapexParams);
+          await db.query(`DELETE FROM it_capex_plan WHERE fiscal_year = ?${delCapexFilter}`, delCapexParams);
         }
         if (copyOpex) {
-          if (campusFilter) {
-            await db.query('DELETE FROM it_opex_plan WHERE fiscal_year = ? AND site = ?', [toYear, campusFilter]);
-          } else {
-            await db.query('DELETE FROM it_opex_plan WHERE fiscal_year = ?', [toYear]);
-          }
+          const delOpexParams: any[] = [toYear];
+          const delOpexFilter = buildBuFilterSql('site', campusFilter || undefined, delOpexParams);
+          await db.query(`DELETE FROM it_opex_plan WHERE fiscal_year = ?${delOpexFilter}`, delOpexParams);
         }
       }
 
@@ -1705,8 +1705,9 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
 
       // 1. Clone CapEx items
       if (copyCapex) {
-        const capexSql = 'SELECT * FROM it_capex_plan WHERE fiscal_year = ?' + (campusFilter ? ' AND site = ?' : '');
-        const capexParams = campusFilter ? [fromYear, campusFilter] : [fromYear];
+        const capexParams: any[] = [fromYear];
+        const capexFilterSql = buildBuFilterSql('site', campusFilter || undefined, capexParams);
+        const capexSql = `SELECT * FROM it_capex_plan WHERE fiscal_year = ?${capexFilterSql}`;
         const [capexRows]: any = await db.query(capexSql, capexParams);
 
         for (const c of capexRows) {
@@ -1714,7 +1715,7 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
           try { if (typeof monthly === 'string') monthly = JSON.parse(monthly); } catch {}
           if (!monthly) monthly = createEmptyMonthlySpending();
 
-          // Reset actuals to 0 and scale planned spending if adjustment specified
+          // Reset actuals to 0 and scale planned spending if adjustment specified (multiplier=0 zeroes planned too)
           MONTH_KEYS.forEach(m => {
             if (monthly[m]) {
               const basePlanned = parseFloat(monthly[m].planned) || 0;
@@ -1748,8 +1749,9 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
 
       // 2. Clone OpEx & S-Operation items
       if (copyOpex) {
-        const opexSql = 'SELECT * FROM it_opex_plan WHERE fiscal_year = ?' + (campusFilter ? ' AND site = ?' : '');
-        const opexParams = campusFilter ? [fromYear, campusFilter] : [fromYear];
+        const opexParams: any[] = [fromYear];
+        const opexFilterSql = buildBuFilterSql('site', campusFilter || undefined, opexParams);
+        const opexSql = `SELECT * FROM it_opex_plan WHERE fiscal_year = ?${opexFilterSql}`;
         const [opexRows]: any = await db.query(opexSql, opexParams);
 
         for (const o of opexRows) {
@@ -1784,6 +1786,10 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
         }
       }
 
+      const modeNote = multiplier === 0
+        ? 'planned & actuals initialized to $0.00'
+        : 'actuals reset to $0.00';
+
       res.json({
         success: true,
         from_year: fromYear,
@@ -1791,7 +1797,233 @@ export function setupItBudgetRoutes(app: Express, authenticateToken: any, getDb:
         capex_cloned: capexCount,
         opex_cloned: opexCount,
         adjustment_percent: adjustmentPercent,
-        message: `Successfully rolled over FY ${fromYear} plan into FY ${toYear} with ${capexCount} CapEx and ${opexCount} OpEx/S-Operation line items (actuals reset to $0.00)!`
+        message: `Successfully rolled over FY ${fromYear} plan into FY ${toYear} with ${capexCount} CapEx and ${opexCount} OpEx/S-Operation line items (${modeNote})!`
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- 5B. RESET FISCAL YEAR TO 0 (ZERO AMOUNTS OR CLEAR ITEMS) ---
+  app.post('/api/it-budget/reset-zero', authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const fiscalYear = parseInt(req.body.fiscal_year, 10);
+      const resetCapex = req.body.reset_capex !== false;
+      const resetOpex = req.body.reset_opex !== false;
+      const campusFilter = req.body.campus_filter && req.body.campus_filter !== 'All Sites' ? req.body.campus_filter : null;
+      const resetMode = req.body.reset_mode === 'clear_items' ? 'clear_items' : 'zero_amounts';
+
+      if (!fiscalYear || fiscalYear < 2020 || fiscalYear > 2050) {
+        return res.status(400).json({ error: 'Valid fiscal year is required' });
+      }
+      if (!resetCapex && !resetOpex) {
+        return res.status(400).json({ error: 'Select at least CapEx or OPEX to reset' });
+      }
+
+      // Automatic pre-reset safety snapshot in backups/ so accidental resets can be undone
+      let snapshotFile = '';
+      try {
+        const capexSnapParams: any[] = [fiscalYear];
+        const capexSnapFilter = buildBuFilterSql('site', campusFilter || undefined, capexSnapParams);
+        const [capexSnap]: any = resetCapex
+          ? await db.query(`SELECT * FROM it_capex_plan WHERE fiscal_year = ?${capexSnapFilter}`, capexSnapParams)
+          : [[]];
+
+        const opexSnapParams: any[] = [fiscalYear];
+        const opexSnapFilter = buildBuFilterSql('site', campusFilter || undefined, opexSnapParams);
+        const [opexSnap]: any = resetOpex
+          ? await db.query(`SELECT * FROM it_opex_plan WHERE fiscal_year = ?${opexSnapFilter}`, opexSnapParams)
+          : [[]];
+
+        if ((capexSnap?.length || 0) > 0 || (opexSnap?.length || 0) > 0) {
+          const backupsDir = path.join(process.cwd(), 'backups');
+          if (!fs.existsSync(backupsDir)) fs.mkdirSync(backupsDir, { recursive: true });
+          const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+          snapshotFile = `pre_reset_fy${fiscalYear}_${stamp}.json`;
+          const snapshotPayload = {
+            created_at: new Date().toISOString(),
+            fiscal_year: fiscalYear,
+            campus_filter: campusFilter || 'All Sites',
+            reset_mode: resetMode,
+            reset_capex: resetCapex,
+            reset_opex: resetOpex,
+            capex_rows: capexSnap || [],
+            opex_rows: opexSnap || []
+          };
+          fs.writeFileSync(path.join(backupsDir, snapshotFile), JSON.stringify(snapshotPayload, null, 2), 'utf8');
+          await db.query(
+            `INSERT INTO it_system_metadata (meta_key, meta_value) VALUES ('last_reset_fy_snapshot', ?)
+             ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value)`,
+            [snapshotFile]
+          ).catch(() => {});
+        }
+      } catch (snapErr: any) {
+        console.warn('[IT Budget] Pre-reset snapshot warning:', snapErr.message);
+      }
+
+      let capexAffected = 0;
+      let opexAffected = 0;
+
+      if (resetMode === 'clear_items') {
+        if (resetCapex) {
+          const params: any[] = [fiscalYear];
+          const filterSql = buildBuFilterSql('site', campusFilter || undefined, params);
+          const [result]: any = await db.query(`DELETE FROM it_capex_plan WHERE fiscal_year = ?${filterSql}`, params);
+          capexAffected = result?.affectedRows || 0;
+        }
+        if (resetOpex) {
+          const params: any[] = [fiscalYear];
+          const filterSql = buildBuFilterSql('site', campusFilter || undefined, params);
+          const [result]: any = await db.query(`DELETE FROM it_opex_plan WHERE fiscal_year = ?${filterSql}`, params);
+          opexAffected = result?.affectedRows || 0;
+        }
+      } else {
+        const emptyMonthly = createEmptyMonthlySpending();
+        const emptyQuarterly = computeQuarterlyFromMonthly(emptyMonthly);
+        const monthlyJson = JSON.stringify(emptyMonthly);
+        const quarterlyJson = JSON.stringify(emptyQuarterly);
+
+        if (resetCapex) {
+          const params: any[] = [monthlyJson, quarterlyJson, fiscalYear];
+          const filterSql = buildBuFilterSql('site', campusFilter || undefined, params);
+          const [result]: any = await db.query(
+            `UPDATE it_capex_plan SET unit_price = 0, requested_amount = 0, status = 'In Progress', stage_tag = 'Planning', monthly_spending = ?, quarterly_spending = ? WHERE fiscal_year = ?${filterSql}`,
+            params
+          );
+          capexAffected = result?.affectedRows || 0;
+        }
+        if (resetOpex) {
+          const params: any[] = [monthlyJson, fiscalYear];
+          const filterSql = buildBuFilterSql('site', campusFilter || undefined, params);
+          const [result]: any = await db.query(
+            `UPDATE it_opex_plan SET unit_price = 0, annual_cost = 0, monthly_spending = ? WHERE fiscal_year = ?${filterSql}`,
+            params
+          );
+          opexAffected = result?.affectedRows || 0;
+        }
+      }
+
+      const scopeLabel = campusFilter ? ` (${campusFilter})` : '';
+      const message =
+        resetMode === 'clear_items'
+          ? `Cleared FY ${fiscalYear}${scopeLabel} to 0 items (removed ${capexAffected} CapEx and ${opexAffected} OPEX lines).`
+          : `Reset FY ${fiscalYear}${scopeLabel} amounts to $0.00 across ${capexAffected} CapEx and ${opexAffected} OPEX lines.`;
+
+      res.json({
+        success: true,
+        fiscal_year: fiscalYear,
+        reset_mode: resetMode,
+        capex_affected: capexAffected,
+        opex_affected: opexAffected,
+        snapshot_file: snapshotFile || null,
+        message
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // --- 5C. INSPECT / UNDO LAST RESET SNAPSHOT ---
+  app.get('/api/it-budget/reset-snapshot', authenticateToken, async (_req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const [rows]: any = await db.query(
+        "SELECT meta_value FROM it_system_metadata WHERE meta_key = 'last_reset_fy_snapshot'"
+      ).catch(() => [[]]);
+      const filename = rows?.[0]?.meta_value;
+      if (!filename) return res.json({ available: false });
+      const filePath = path.join(process.cwd(), 'backups', filename);
+      if (!fs.existsSync(filePath)) return res.json({ available: false });
+      const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      res.json({
+        available: true,
+        filename,
+        created_at: data.created_at,
+        fiscal_year: data.fiscal_year,
+        campus_filter: data.campus_filter || 'All Sites',
+        reset_mode: data.reset_mode,
+        capex_count: Array.isArray(data.capex_rows) ? data.capex_rows.length : 0,
+        opex_count: Array.isArray(data.opex_rows) ? data.opex_rows.length : 0
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/it-budget/undo-reset', authenticateToken, async (_req: Request, res: Response) => {
+    try {
+      const db = getDb();
+      const [rows]: any = await db.query(
+        "SELECT meta_value FROM it_system_metadata WHERE meta_key = 'last_reset_fy_snapshot'"
+      );
+      const filename = rows?.[0]?.meta_value;
+      if (!filename) return res.status(404).json({ error: 'No pre-reset snapshot found' });
+      const filePath = path.join(process.cwd(), 'backups', filename);
+      if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Snapshot file not found on disk' });
+
+      const snap = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      const fy = parseInt(snap.fiscal_year, 10);
+      const campusFilter = snap.campus_filter && snap.campus_filter !== 'All Sites' ? snap.campus_filter : null;
+
+      let capexRestored = 0;
+      let opexRestored = 0;
+
+      if (snap.reset_capex && Array.isArray(snap.capex_rows)) {
+        const delParams: any[] = [fy];
+        const delFilter = buildBuFilterSql('site', campusFilter || undefined, delParams);
+        await db.query(`DELETE FROM it_capex_plan WHERE fiscal_year = ?${delFilter}`, delParams);
+
+        for (const c of snap.capex_rows) {
+          const ms = typeof c.monthly_spending === 'string' ? c.monthly_spending : JSON.stringify(c.monthly_spending || createEmptyMonthlySpending());
+          const qs = typeof c.quarterly_spending === 'string' ? c.quarterly_spending : JSON.stringify(c.quarterly_spending || computeQuarterlyFromMonthly(createEmptyMonthlySpending()));
+          await db.query(
+            `INSERT INTO it_capex_plan
+              (id, fiscal_year, item_no, description, specifications, asset_type, asset_owner, asset_supervisor, site, pic, cost_center, project_owner, department, qty, capex_code, unit_price, requested_amount, start_date, complete_date, expected_start_month, expected_complete_month, status, stage_tag, justification, monthly_spending, quarterly_spending)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              c.id, fy, c.item_no, c.description, c.specifications || '', c.asset_type,
+              c.asset_owner || 'IT', c.asset_supervisor || 'ITO', c.site, c.pic,
+              c.cost_center, c.project_owner, c.department, c.qty, c.capex_code,
+              c.unit_price, c.requested_amount, c.start_date ? String(c.start_date).slice(0, 10) : null,
+              c.complete_date ? String(c.complete_date).slice(0, 10) : null,
+              c.expected_start_month || 'Jan', c.expected_complete_month || 'Dec',
+              c.status || 'Planned', c.stage_tag || 'Planning', c.justification || '', ms, qs
+            ]
+          );
+          capexRestored++;
+        }
+      }
+
+      if (snap.reset_opex && Array.isArray(snap.opex_rows)) {
+        const delParams: any[] = [fy];
+        const delFilter = buildBuFilterSql('site', campusFilter || undefined, delParams);
+        await db.query(`DELETE FROM it_opex_plan WHERE fiscal_year = ?${delFilter}`, delParams);
+
+        for (const o of snap.opex_rows) {
+          const ms = typeof o.monthly_spending === 'string' ? o.monthly_spending : JSON.stringify(o.monthly_spending || createEmptyMonthlySpending());
+          await db.query(
+            `INSERT INTO it_opex_plan
+              (id, fiscal_year, item_no, account_code, account_name, description, remark, justification, site, cost_center, pic, billing_cycle, renewal_date, qty, unit_price, annual_cost, monthly_spending, budget_classification, unplanned_reason, approval_ref)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              o.id, fy, o.item_no, o.account_code, o.account_name, o.description,
+              o.remark || '', o.justification || '', o.site, o.cost_center, o.pic,
+              o.billing_cycle, o.renewal_date ? String(o.renewal_date).slice(0, 10) : null,
+              o.qty, o.unit_price, o.annual_cost, ms,
+              o.budget_classification || 'Planned', o.unplanned_reason || '', o.approval_ref || ''
+            ]
+          );
+          opexRestored++;
+        }
+      }
+
+      res.json({
+        success: true,
+        fiscal_year: fy,
+        capex_restored: capexRestored,
+        opex_restored: opexRestored,
+        message: `Recovered FY ${fy} from pre-reset snapshot (${capexRestored} CapEx and ${opexRestored} OPEX items restored).`
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

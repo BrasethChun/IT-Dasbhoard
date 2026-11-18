@@ -7,6 +7,8 @@ import {
   BellRing, Radio, WifiOff, Send
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { SmartModal, SMART_INPUT_CLASS } from '../../components/ui/SmartModal';
+import { DensityToggle } from '../../components/ui/SmartGrid';
 
 export interface TelegramStatus {
   configured: boolean;
@@ -841,12 +843,13 @@ export const DatabaseMigrationModule: React.FC = () => {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <DensityToggle />
                 <Button
                   onClick={handleCreateBackup}
                   disabled={creatingBackup}
                   size="sm"
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex items-center gap-1.5"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex items-center gap-1.5 whitespace-nowrap"
                 >
                   <Shield size={14} className={creatingBackup ? 'animate-spin' : ''} />
                   {creatingBackup ? 'Backing up...' : 'Create Backup Now'}
@@ -855,7 +858,7 @@ export const DatabaseMigrationModule: React.FC = () => {
                   onClick={() => setConfigModalOpen(true)}
                   variant="secondary"
                   size="sm"
-                  className="text-slate-700 border-slate-200 hover:bg-slate-100 flex items-center gap-1.5"
+                  className="text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5 whitespace-nowrap"
                 >
                   <Settings2 size={14} /> Schedule
                 </Button>
@@ -869,10 +872,10 @@ export const DatabaseMigrationModule: React.FC = () => {
               </div>
             ) : backups.length === 0 ? (
               <div className="p-12 text-center text-slate-500 space-y-3">
-                <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
+                <div className="w-12 h-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto text-slate-400">
                   <Database size={24} />
                 </div>
-                <p className="text-sm font-semibold text-slate-700">No previous backups found yet</p>
+                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">No previous backups found yet</p>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
                   Click "Create Backup Now" to generate an immediate full SQL snapshot of your database.
                 </p>
@@ -886,19 +889,19 @@ export const DatabaseMigrationModule: React.FC = () => {
                 </Button>
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-100">
+              <div className="overflow-x-auto overflow-y-auto max-h-[65vh]">
+                <table className="smart-grid-table w-full text-left text-xs">
+                  <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-800/95 backdrop-blur-sm text-slate-500 dark:text-slate-400 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-100 dark:border-slate-700">
                     <tr>
                       <th className="py-3 px-4">Snapshot & Time</th>
                       <th className="py-3 px-4">Trigger</th>
                       <th className="py-3 px-4">Target Database</th>
                       <th className="py-3 px-4">Records Contained</th>
-                      <th className="py-3 px-4">Size</th>
+                      <th className="py-3 px-4 text-right">Size</th>
                       <th className="py-3 px-4 text-right">Admin Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {backups.map((b) => (
                       <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
                         <td className="py-3.5 px-4">
@@ -949,7 +952,7 @@ export const DatabaseMigrationModule: React.FC = () => {
                           </div>
                         </td>
 
-                        <td className="py-3.5 px-4 whitespace-nowrap font-mono text-slate-600">
+                        <td className="py-3.5 px-4 whitespace-nowrap font-mono tabular-nums text-right text-slate-600 dark:text-slate-300">
                           {b.formattedSize || '280 KB'}
                         </td>
 
@@ -1445,172 +1448,151 @@ export const DatabaseMigrationModule: React.FC = () => {
       )}
 
       {/* 1-CLICK RESTORE CONFIRMATION MODAL */}
-      {restoreModalBackup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
-                  <RotateCcw size={20} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Restore Database Snapshot</h3>
-                  <p className="text-xs text-slate-500">1-Click Disaster Recovery</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setRestoreModalBackup(null)}
-                className="text-slate-400 hover:text-slate-600 p-1"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-2">
+      <SmartModal
+        open={Boolean(restoreModalBackup)}
+        onClose={() => { if (!restoring) setRestoreModalBackup(null); }}
+        title="Restore Database Snapshot"
+        subtitle="1-Click Disaster Recovery"
+        icon={<RotateCcw size={18} className="text-amber-600 dark:text-amber-400" />}
+        size="md"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="md"
+              onClick={() => setRestoreModalBackup(null)}
+              disabled={restoring}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="md"
+              onClick={handleExecuteRestore}
+              disabled={restoring}
+              className="bg-amber-600 hover:bg-amber-700 text-white font-semibold flex items-center gap-2 whitespace-nowrap"
+            >
+              <RotateCcw size={15} className={restoring ? 'animate-spin' : ''} />
+              {restoring ? 'Restoring Database...' : 'Confirm & Restore Database Now'}
+            </Button>
+          </>
+        }
+      >
+        {restoreModalBackup && (
+          <div className="space-y-4">
+            <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 text-xs space-y-2">
               <div className="flex items-center gap-2 font-bold">
-                <ShieldCheck size={16} className="text-amber-700 shrink-0" />
+                <ShieldCheck size={16} className="text-amber-700 dark:text-amber-400 shrink-0" />
                 <span>Automatic Dual-Snapshot Protection</span>
               </div>
-              <p className="text-amber-800 leading-relaxed">
+              <p className="text-amber-800 dark:text-amber-300/90 leading-relaxed">
                 Before this restore starts, a safety snapshot of your active database will be created automatically. If you ever need to undo, you can revert back to that safety snapshot anytime.
               </p>
             </div>
 
-            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Target Snapshot:</span>
-                <span className="font-mono font-bold text-slate-800">{restoreModalBackup.filename}</span>
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500 dark:text-slate-400">Target Snapshot:</span>
+                <span className="font-mono font-bold text-slate-800 dark:text-slate-100 truncate">{restoreModalBackup.filename}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Created:</span>
-                <span className="font-semibold text-slate-700">{formatDateTime(restoreModalBackup.createdAt)}</span>
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500 dark:text-slate-400">Created:</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-200">{formatDateTime(restoreModalBackup.createdAt)}</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Active Destination:</span>
-                <span className="font-semibold text-indigo-600">{dbStatus?.database || 'ainotes_db'} ({dbStatus?.host || 'Local MariaDB'})</span>
+              <div className="flex justify-between gap-3">
+                <span className="text-slate-500 dark:text-slate-400">Active Destination:</span>
+                <span className="font-semibold text-indigo-600 dark:text-indigo-400">{dbStatus?.database || 'ainotes_db'} ({dbStatus?.host || 'Local MariaDB'})</span>
               </div>
-              <div className="flex justify-between pt-2 border-t border-slate-200">
-                <span className="text-slate-500">Records to restore:</span>
-                <span className="font-bold text-slate-900">
+              <div className="flex justify-between gap-3 pt-2 border-t border-slate-200 dark:border-slate-700">
+                <span className="text-slate-500 dark:text-slate-400">Records to restore:</span>
+                <span className="font-bold text-slate-900 dark:text-slate-100 tabular-nums">
                   {restoreModalBackup.recordCounts?.notes ?? 0} Notes &bull; {restoreModalBackup.recordCounts?.subscriptions ?? 0} Subs &bull; {restoreModalBackup.recordCounts?.assets ?? 0} Assets
                 </span>
               </div>
             </div>
-
-            <div className="flex items-center justify-end gap-3 pt-3">
-              <Button
-                variant="secondary"
-                size="md"
-                onClick={() => setRestoreModalBackup(null)}
-                disabled={restoring}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="md"
-                onClick={handleExecuteRestore}
-                disabled={restoring}
-                className="bg-amber-600 hover:bg-amber-700 text-white font-semibold flex items-center gap-2"
-              >
-                <RotateCcw size={15} className={restoring ? 'animate-spin' : ''} />
-                {restoring ? 'Restoring Database...' : 'Confirm & Restore Database Now'}
-              </Button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+      </SmartModal>
 
       {/* AUTO-BACKUP SCHEDULE SETTINGS MODAL */}
-      {configModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-5">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                  <Clock size={20} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Auto-Backup Engine Schedule</h3>
-                  <p className="text-xs text-slate-500">Automated Daily Database Snapshots</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setConfigModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveConfig} className="space-y-4">
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={tempEnabled}
-                    onChange={(e) => setTempEnabled(e.target.checked)}
-                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
-                  />
-                  <span className="text-xs font-bold text-slate-800">Enable Automated Background Backups</span>
-                </label>
-                <p className="text-[11px] text-slate-500 mt-1 ml-6">
-                  Automatically dumps and archives full database snapshots in the background.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  Backup Interval (Hours)
-                </label>
-                <select
-                  value={tempInterval}
-                  onChange={(e) => setTempInterval(Number(e.target.value))}
-                  className="w-full px-3.5 py-2.5 text-xs rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white"
-                >
-                  <option value={6}>Every 6 Hours (High Frequency)</option>
-                  <option value={12}>Every 12 Hours (Recommended Default - Twice Daily)</option>
-                  <option value={24}>Every 24 Hours (Once Daily at Midnight)</option>
-                </select>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Default: 12 Hours ensures morning and evening enterprise backups every single day.
-                </p>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-600 space-y-1">
-                <div className="flex justify-between">
-                  <span>Snapshot Retention:</span>
-                  <span className="font-semibold text-slate-800">Keep last 30 snapshots</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Snapshot Format:</span>
-                  <span className="font-semibold text-slate-800">UTF-8 phpMyAdmin SQL</span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="md"
-                  onClick={() => setConfigModalOpen(false)}
-                  disabled={savingConfig}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  size="md"
-                  disabled={savingConfig}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold flex items-center gap-2"
-                >
-                  <Check size={15} />
-                  {savingConfig ? 'Saving...' : 'Save Settings'}
-                </Button>
-              </div>
-            </form>
+      <SmartModal
+        open={configModalOpen}
+        onClose={() => { if (!savingConfig) setConfigModalOpen(false); }}
+        title="Auto-Backup Engine Schedule"
+        subtitle="Automated Daily Database Snapshots"
+        icon={<Clock size={18} />}
+        size="sm"
+        footer={
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="md"
+              onClick={() => setConfigModalOpen(false)}
+              disabled={savingConfig}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="db-backup-config-form"
+              size="md"
+              disabled={savingConfig}
+              className="theme-accent-bg font-semibold flex items-center gap-2 whitespace-nowrap"
+            >
+              <Check size={15} />
+              {savingConfig ? 'Saving...' : 'Save Settings'}
+            </Button>
+          </>
+        }
+      >
+        <form id="db-backup-config-form" onSubmit={handleSaveConfig} className="space-y-4">
+          <div>
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={tempEnabled}
+                onChange={(e) => setTempEnabled(e.target.checked)}
+                className="rounded border-slate-300 dark:border-slate-600 text-indigo-600 focus:ring-indigo-500 h-4 w-4"
+              />
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-100">Enable Automated Background Backups</span>
+            </label>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 ml-6">
+              Automatically dumps and archives full database snapshots in the background.
+            </p>
           </div>
-        </div>
-      )}
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+              Backup Interval (Hours)
+            </label>
+            <select
+              value={tempInterval}
+              onChange={(e) => setTempInterval(Number(e.target.value))}
+              className={SMART_INPUT_CLASS}
+            >
+              <option value={6}>Every 6 Hours (High Frequency)</option>
+              <option value={12}>Every 12 Hours (Recommended Default - Twice Daily)</option>
+              <option value={24}>Every 24 Hours (Once Daily at Midnight)</option>
+            </select>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+              Default: 12 Hours ensures morning and evening enterprise backups every single day.
+            </p>
+          </div>
+
+          <div className="p-3 bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 rounded-xl text-xs text-slate-600 dark:text-slate-300 space-y-1">
+            <div className="flex justify-between">
+              <span>Snapshot Retention:</span>
+              <span className="font-semibold text-slate-800 dark:text-slate-100">Keep last 30 snapshots</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Snapshot Format:</span>
+              <span className="font-semibold text-slate-800 dark:text-slate-100">UTF-8 phpMyAdmin SQL</span>
+            </div>
+          </div>
+        </form>
+      </SmartModal>
     </div>
   );
 };

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Layers, X, AlertTriangle, CheckCircle2, Sparkles, Tag, Search } from 'lucide-react';
+import { Layers, AlertTriangle, CheckCircle2, Sparkles, Tag, Search } from 'lucide-react';
 import { Button } from '../ui/Button';
+import { SmartModal, SMART_INPUT_CLASS } from '../ui/SmartModal';
 import {
   ASSET_TYPES_MASTER,
   CAPEX_BU_OPTIONS,
@@ -204,28 +205,33 @@ export const CapexEditModal: React.FC<CapexModalProps> = ({
   const nonItAssets = ASSET_TYPES_MASTER.filter(a => !a.is_it);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xl max-w-3xl w-full max-h-[92vh] overflow-y-auto space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <Layers size={18} className="text-indigo-600" />
-            <span>{item ? 'Edit CapEx Plan Line' : 'New 2027 CapEx Plan Line'} (FY {fiscalYear})</span>
-          </h3>
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-            <X size={18} />
-          </button>
+    <SmartModal
+      onClose={onClose}
+      size="xl"
+      icon={<Layers size={18} />}
+      title={item ? 'Edit CapEx Plan Line' : 'New 2027 CapEx Plan Line'}
+      subtitle={`FY ${fiscalYear} Capital Expenditure Entry`}
+      footer={
+        <>
+          <Button variant="outline" type="button" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="capex-plan-form" disabled={saving}>
+            {saving ? 'Saving...' : item ? 'Update CapEx Line' : 'Create CapEx Line'}
+          </Button>
+        </>
+      }
+    >
+      {errorMsg && (
+        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-200 font-medium flex items-center gap-2">
+          <AlertTriangle size={14} className="text-rose-600 shrink-0" />
+          <span>{errorMsg}</span>
         </div>
+      )}
 
-        {errorMsg && (
-          <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 font-medium flex items-center gap-2">
-            <AlertTriangle size={14} className="text-rose-600 shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          {/* Row 1: BU, Capex#, Department, Cost Center */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <form id="capex-plan-form" onSubmit={handleSubmit} className="space-y-4 text-xs">
+        {/* Row 1: BU, Capex#, Department, Cost Center */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
             <div>
               <label className="font-semibold text-slate-700">BU / Site Code *</label>
               <select
@@ -536,27 +542,17 @@ export const CapexEditModal: React.FC<CapexModalProps> = ({
             </div>
           </div>
 
-          <div>
-            <label className="font-semibold text-slate-700">Justification</label>
+          <div className="pt-1">
+            <label className="font-semibold text-slate-700 dark:text-slate-300">Justification</label>
             <textarea
               rows={2}
               placeholder="Operational or clinical rationale..."
               value={justification}
               onChange={(e) => setJustification(e.target.value)}
-              className="w-full mt-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+              className="w-full mt-1 px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-slate-900 dark:text-slate-100"
             />
           </div>
-
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
-            <Button variant="outline" type="button" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">
-              {saving ? 'Saving...' : item ? 'Update CapEx Line' : 'Create CapEx Line'}
-            </Button>
-          </div>
         </form>
-      </div>
-    </div>
+    </SmartModal>
   );
 };

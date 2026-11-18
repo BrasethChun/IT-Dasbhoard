@@ -24,6 +24,8 @@ import {
   Legend
 } from 'recharts';
 import { Button } from '../../components/ui/Button';
+import { SmartModal } from '../../components/ui/SmartModal';
+import { DensityToggle } from '../../components/ui/SmartGrid';
 import * as xlsx from 'xlsx';
 
 export interface CloudProviderSetting {
@@ -444,25 +446,25 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
 
   // Dynamic Options for Selects & Filters
   const availableProviders = useMemo(() => {
-    const list = providers.map(p => p.name).filter(Boolean);
+    const list: string[] = providers.map(p => p.name).filter(Boolean);
     if (list.length === 0) return PROVIDER_OPTIONS;
     subscriptions.forEach(s => {
       if (s.provider && !list.includes(s.provider)) {
         list.push(s.provider);
       }
     });
-    return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b));
+    return Array.from(new Set<string>(list)).sort((a, b) => a.localeCompare(b));
   }, [providers, subscriptions]);
 
   const availableCategories = useMemo(() => {
-    const list = categories.map(c => c.name).filter(Boolean);
+    const list: string[] = categories.map(c => c.name).filter(Boolean);
     if (list.length === 0) return CATEGORY_OPTIONS;
     subscriptions.forEach(s => {
       if (s.category && !list.includes(s.category)) {
         list.push(s.category);
       }
     });
-    return Array.from(new Set(list)).sort((a, b) => a.localeCompare(b));
+    return Array.from(new Set<string>(list)).sort((a, b) => a.localeCompare(b));
   }, [categories, subscriptions]);
 
   const handleProviderChange = (val: string) => {
@@ -2802,26 +2804,29 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
             </button>
           </div>
 
-          {/* Active selection banner */}
-          {selectedIds.length > 0 && (
-            <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 text-indigo-800 px-3 py-1.5 rounded-xl text-xs font-medium animate-in fade-in">
-              <span>{selectedIds.length} item{selectedIds.length > 1 ? 's' : ''} selected</span>
-              <button
-                type="button"
-                onClick={handleDeleteBulk}
-                className="text-rose-600 hover:text-rose-800 font-semibold ml-2 flex items-center gap-1 hover:underline"
-              >
-                <Trash2 size={13} /> Delete Selected
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectedIds([])}
-                className="text-slate-400 hover:text-slate-600 ml-1"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2 ml-auto">
+            {/* Active selection banner */}
+            {selectedIds.length > 0 && (
+              <div className="flex items-center gap-2 bg-indigo-50 border border-indigo-100 text-indigo-800 px-3 py-1.5 rounded-xl text-xs font-medium animate-in fade-in">
+                <span>{selectedIds.length} item{selectedIds.length > 1 ? 's' : ''} selected</span>
+                <button
+                  type="button"
+                  onClick={handleDeleteBulk}
+                  className="text-rose-600 hover:text-rose-800 font-semibold ml-2 flex items-center gap-1 hover:underline"
+                >
+                  <Trash2 size={13} /> Delete Selected
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedIds([])}
+                  className="text-slate-400 hover:text-slate-600 ml-1"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+            <DensityToggle />
+          </div>
         </div>
 
         {/* Filter Controls Row */}
@@ -2949,10 +2954,10 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
 
       {/* Subscriptions Data Table */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-semibold">
+        <div className="overflow-x-auto max-h-[68vh]">
+          <table className="smart-grid-table w-full text-left border-collapse text-xs">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
                 <th className="py-3 px-3 w-10 text-center">
                   <input
                     type="checkbox"
@@ -3503,10 +3508,10 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
             </div>
 
             {/* Renewals Data Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50/75 text-slate-600 font-semibold select-none">
+            <div className="overflow-x-auto max-h-[68vh]">
+              <table className="smart-grid-table w-full text-left border-collapse text-xs">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b border-slate-200 bg-slate-50 text-slate-600 font-semibold select-none">
                     <th className="py-3 px-4">Renewal Date & Period</th>
                     <th className="py-3 px-3">Subscription & Provider</th>
                     <th className="py-3 px-3">Campus / Site</th>
@@ -3678,54 +3683,59 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
       )}
 
       {/* CREATE / EDIT MODAL */}
-      {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
-              <div className="flex items-center gap-2.5">
-                <div className="h-9 w-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
-                  <Cloud size={18} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-800">
-                    {editingId ? 'Edit Cloud Subscription' : 'Add New Cloud Subscription'}
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {editingId ? 'Update subscription attributes, cost, or renewal details' : 'Register a new cloud provider, SaaS tool, or infrastructure service'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                {editingId && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const item = subscriptions.find(s => s.id === editingId);
-                      if (item) {
-                        setShowModal(false);
-                        handleOpenRenewModal(item);
-                      }
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-xs"
-                    title="Renew this contract immediately"
-                  >
-                    <RotateCw size={13} className="text-emerald-600" />
-                    Renew Contract
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-            </div>
-
-            {/* Modal Form */}
-            <form onSubmit={handleSave} className="p-6 space-y-4 text-xs">
+      <SmartModal
+        open={showModal}
+        onClose={() => setShowModal(false)}
+        title={editingId ? 'Edit Cloud Subscription' : 'Add New Cloud Subscription'}
+        subtitle={editingId ? 'Update subscription attributes, cost, or renewal details' : 'Register a new cloud provider, SaaS tool, or infrastructure service'}
+        icon={<Cloud size={18} className="text-indigo-600" />}
+        size="xl"
+        headerExtra={
+          editingId ? (
+            <button
+              type="button"
+              onClick={() => {
+                const item = subscriptions.find(s => s.id === editingId);
+                if (item) {
+                  setShowModal(false);
+                  handleOpenRenewModal(item);
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 transition-colors shadow-xs whitespace-nowrap shrink-0"
+              title="Renew this contract immediately"
+            >
+              <RotateCw size={13} className="text-emerald-600" />
+              Renew Contract
+            </button>
+          ) : undefined
+        }
+        footer={
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowModal(false)}
+              disabled={formSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="cloud-subscription-form"
+              size="sm"
+              disabled={formSubmitting}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
+            >
+              {formSubmitting ? (
+                <RefreshCw size={14} className="animate-spin mr-1" />
+              ) : null}
+              {editingId ? 'Save Changes' : 'Create Subscription'}
+            </Button>
+          </div>
+        }
+      >
+        <form id="cloud-subscription-form" onSubmit={handleSave} className="space-y-4 text-xs">
               {formError && (
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center gap-2">
                   <AlertCircle size={16} className="shrink-0" />
@@ -4017,111 +4027,134 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
                 </div>
               </div>
 
-              {/* Form Buttons */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
+        </form>
+      </SmartModal>
+
+      {/* DELETE CONFIRMATION MODAL */}
+      <SmartModal
+        open={Boolean(deleteConfirmData)}
+        onClose={() => setDeleteConfirmData(null)}
+        title={
+          deleteConfirmData?.type === 'single'
+            ? 'Delete Subscription?'
+            : deleteConfirmData?.type === 'all'
+              ? `Delete All ${deleteConfirmData?.count} Subscriptions?`
+              : `Delete ${deleteConfirmData?.count || 0} Subscriptions?`
+        }
+        subtitle="Permanent removal from cloud subscriptions inventory"
+        icon={<Trash2 size={18} className="text-rose-600" />}
+        size="sm"
+        footer={
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={() => setDeleteConfirmData(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              onClick={handleConfirmDelete}
+              className="bg-rose-600 hover:bg-rose-700 text-white"
+            >
+              Yes, Delete
+            </Button>
+          </div>
+        }
+      >
+        {deleteConfirmData && (
+          <p className="text-xs text-slate-600 leading-relaxed">
+            {deleteConfirmData.type === 'single'
+              ? `Are you sure you want to delete "${deleteConfirmData.item.name}"? This action permanently removes it from the IT database.`
+              : deleteConfirmData.type === 'all'
+                ? `Are you sure you want to permanently delete ALL ${deleteConfirmData.count} cloud subscriptions from the database? This action will completely empty the table and will NOT revert.`
+                : `Are you sure you want to permanently delete the selected ${deleteConfirmData.count} subscriptions from the IT database?`}
+          </p>
+        )}
+      </SmartModal>
+
+      {/* FIELD SETTINGS MODAL (PROVIDERS & CATEGORIES) */}
+      <SmartModal
+        open={showSettingsModal}
+        onClose={() => {
+          setShowSettingsModal(false);
+          handleCancelEditProvider();
+          handleCancelEditCategory();
+          setSettingsError('');
+          setSettingsSuccess('');
+          setConfirmDeleteProviderId(null);
+          setConfirmDeleteCategoryId(null);
+          setConfirmResetSettings(false);
+        }}
+        title="Field Settings: Providers & Categories"
+        subtitle="Configure and customize dropdown options for Cloud Provider / Vendor and Category * fields"
+        icon={<Sliders size={18} className="text-indigo-600" />}
+        size="xl"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            {confirmResetSettings ? (
+              <div className="flex items-center gap-2 animate-in fade-in duration-150">
+                <span className="text-xs text-rose-600 font-medium">Reset all to defaults?</span>
                 <Button
+                  size="sm"
                   type="button"
+                  onClick={handleResetSettings}
+                  disabled={settingsSubmitting}
+                  className="bg-rose-600 hover:bg-rose-700 text-white text-xs py-1 px-2.5 h-auto font-medium"
+                >
+                  {settingsSubmitting ? <RefreshCw size={11} className="animate-spin mr-1" /> : null}
+                  Yes, Reset
+                </Button>
+                <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => setShowModal(false)}
-                  disabled={formSubmitting}
+                  type="button"
+                  onClick={() => setConfirmResetSettings(false)}
+                  disabled={settingsSubmitting}
+                  className="text-xs py-1 px-2.5 h-auto text-slate-600"
                 >
                   Cancel
                 </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={formSubmitting}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
-                >
-                  {formSubmitting ? (
-                    <RefreshCw size={14} className="animate-spin mr-1" />
-                  ) : null}
-                  {editingId ? 'Save Changes' : 'Create Subscription'}
-                </Button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* DELETE CONFIRMATION MODAL */}
-      {deleteConfirmData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-100 max-w-md w-full p-6 text-center">
-            <div className="h-12 w-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto mb-4">
-              <Trash2 size={24} />
-            </div>
-            <h3 className="text-lg font-bold text-slate-800 mb-2">
-              {deleteConfirmData.type === 'single'
-                ? 'Delete Subscription?'
-                : deleteConfirmData.type === 'all'
-                  ? `Delete All ${deleteConfirmData.count} Subscriptions?`
-                  : `Delete ${deleteConfirmData.count} Subscriptions?`}
-            </h3>
-            <p className="text-xs text-slate-500 mb-6">
-              {deleteConfirmData.type === 'single'
-                ? `Are you sure you want to delete "${deleteConfirmData.item.name}"? This action permanently removes it from the IT database.`
-                : deleteConfirmData.type === 'all'
-                  ? `Are you sure you want to permanently delete ALL ${deleteConfirmData.count} cloud subscriptions from the database? This action will completely empty the table and will NOT revert.`
-                  : `Are you sure you want to permanently delete the selected ${deleteConfirmData.count} subscriptions from the IT database?`}
-            </p>
-            <div className="flex items-center justify-center gap-3">
+            ) : (
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => setDeleteConfirmData(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleConfirmDelete}
-                className="bg-rose-600 hover:bg-rose-700 text-white"
-              >
-                Yes, Delete
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* FIELD SETTINGS MODAL (PROVIDERS & CATEGORIES) */}
-      {showSettingsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-150">
-            {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-                  <Sliders size={20} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-800">
-                    Field Settings: Providers & Categories
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Configure and customize dropdown options for Cloud Provider / Vendor and Category * fields
-                  </p>
-                </div>
-              </div>
-              <button
                 type="button"
-                onClick={() => {
-                  setShowSettingsModal(false);
-                  handleCancelEditProvider();
-                  handleCancelEditCategory();
-                  setSettingsError('');
-                  setSettingsSuccess('');
-                  setConfirmDeleteProviderId(null);
-                  setConfirmDeleteCategoryId(null);
-                  setConfirmResetSettings(false);
-                }}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+                onClick={() => setConfirmResetSettings(true)}
+                disabled={settingsSubmitting}
+                className="gap-1.5 text-xs text-slate-600 hover:text-rose-600 hover:bg-rose-50 border-slate-200 font-medium"
+                title="Restore initial default providers and categories"
               >
-                <X size={18} />
-              </button>
-            </div>
+                <RotateCcw size={13} />
+                Restore Standard Defaults
+              </Button>
+            )}
+
+            <Button
+              size="sm"
+              type="button"
+              onClick={() => {
+                setShowSettingsModal(false);
+                handleCancelEditProvider();
+                handleCancelEditCategory();
+                setSettingsError('');
+                setSettingsSuccess('');
+                setConfirmDeleteProviderId(null);
+                setConfirmDeleteCategoryId(null);
+                setConfirmResetSettings(false);
+              }}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
+            >
+              Done
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
 
             {/* Modal Navigation Tabs */}
             <div className="flex border-b border-slate-200 bg-white px-6 pt-2 gap-4 text-xs font-semibold">
@@ -4319,7 +4352,7 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
                     </div>
 
                     <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                      <table className="w-full text-left text-xs border-collapse">
+                      <table className="smart-grid-table w-full text-left text-xs border-collapse">
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
                             <th className="py-2.5 px-3">Provider Name</th>
@@ -4538,7 +4571,7 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
                     </div>
 
                     <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-                      <table className="w-full text-left text-xs border-collapse">
+                      <table className="smart-grid-table w-full text-left text-xs border-collapse">
                         <thead>
                           <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
                             <th className="py-2.5 px-3">Category Badge & Name</th>
@@ -4627,97 +4660,53 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
                 </div>
               )}
             </div>
-
-            {/* Modal Footer */}
-            <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-              {confirmResetSettings ? (
-                <div className="flex items-center gap-2 animate-in fade-in duration-150">
-                  <span className="text-xs text-rose-600 font-medium">Reset all to defaults?</span>
-                  <Button
-                    size="sm"
-                    onClick={handleResetSettings}
-                    disabled={settingsSubmitting}
-                    className="bg-rose-600 hover:bg-rose-700 text-white text-xs py-1 px-2.5 h-auto font-medium"
-                  >
-                    {settingsSubmitting ? <RefreshCw size={11} className="animate-spin mr-1" /> : null}
-                    Yes, Reset
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setConfirmResetSettings(false)}
-                    disabled={settingsSubmitting}
-                    className="text-xs py-1 px-2.5 h-auto text-slate-600"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setConfirmResetSettings(true)}
-                  disabled={settingsSubmitting}
-                  className="gap-1.5 text-xs text-slate-600 hover:text-rose-600 hover:bg-rose-50 border-slate-200 font-medium"
-                  title="Restore initial default providers and categories"
-                >
-                  <RotateCcw size={13} />
-                  Restore Standard Defaults
-                </Button>
-              )}
-
-              <Button
-                size="sm"
-                onClick={() => {
-                  setShowSettingsModal(false);
-                  handleCancelEditProvider();
-                  handleCancelEditCategory();
-                  setSettingsError('');
-                  setSettingsSuccess('');
-                  setConfirmDeleteProviderId(null);
-                  setConfirmDeleteCategoryId(null);
-                  setConfirmResetSettings(false);
-                }}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white font-medium"
-              >
-                Done
-              </Button>
-            </div>
-          </div>
         </div>
-      )}
+      </SmartModal>
 
       {/* Import & Restore Modal */}
-      {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-emerald-100 text-emerald-700">
-                  <Upload size={20} />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-800">Import & Restore Subscriptions</h3>
-                  <p className="text-xs text-slate-500">Restore your cloud subscriptions from Excel (.xlsx/.xls), CSV, or JSON</p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowImportModal(false);
-                  setImportError('');
-                  setImportSuccess('');
-                  setImportParsedData([]);
-                }}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Modal Body */}
-            <div className="p-6 overflow-y-auto space-y-4 flex-1">
+      <SmartModal
+        open={showImportModal}
+        onClose={() => {
+          setShowImportModal(false);
+          setImportError('');
+          setImportSuccess('');
+          setImportParsedData([]);
+        }}
+        title="Import & Restore Subscriptions"
+        subtitle="Restore your cloud subscriptions from Excel (.xlsx/.xls), CSV, or JSON"
+        icon={<Upload size={18} className="text-emerald-600" />}
+        size="xl"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={() => {
+                setShowImportModal(false);
+                setImportError('');
+                setImportSuccess('');
+                setImportParsedData([]);
+              }}
+              disabled={importSubmitting}
+              className="text-slate-600"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              onClick={handleExecuteImport}
+              disabled={importSubmitting || importParsedData.length === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5"
+            >
+              {importSubmitting ? <RefreshCw size={13} className="animate-spin" /> : <Upload size={14} />}
+              Confirm & Restore {importParsedData.length > 0 ? `(${importParsedData.length})` : ''}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
               {importError && (
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-700 flex items-start gap-2">
                   <AlertCircle size={16} className="text-rose-500 shrink-0 mt-0.5" />
@@ -4830,7 +4819,7 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
                     </button>
                   </div>
                   <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg bg-white">
-                    <table className="w-full text-left text-[11px]">
+                    <table className="smart-grid-table w-full text-left text-[11px]">
                       <thead className="bg-slate-100 text-slate-600 sticky top-0">
                         <tr>
                           <th className="py-1.5 px-2">#</th>
@@ -4883,70 +4872,47 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
                     : 'Recommended: Existing subscriptions will be safely preserved, and imported records will be added to your catalog.'}
                 </p>
               </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="px-6 py-3.5 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-              <Button
-                variant="secondary"
-                size="sm"
-                type="button"
-                onClick={() => {
-                  setShowImportModal(false);
-                  setImportError('');
-                  setImportSuccess('');
-                  setImportParsedData([]);
-                }}
-                disabled={importSubmitting}
-                className="text-slate-600"
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                type="button"
-                onClick={handleExecuteImport}
-                disabled={importSubmitting || importParsedData.length === 0}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5"
-              >
-                {importSubmitting ? <RefreshCw size={13} className="animate-spin" /> : <Upload size={14} />}
-                Confirm & Restore {importParsedData.length > 0 ? `(${importParsedData.length})` : ''}
-              </Button>
-            </div>
-          </div>
         </div>
-      )}
+      </SmartModal>
 
       {/* RENEWAL MODAL */}
-      {showRenewalModal && renewalTargetItem && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[92vh] overflow-y-auto">
-            {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
-              <div className="flex items-center gap-2.5">
-                <div className="h-9 w-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
-                  <RotateCw size={18} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-800">
-                    Renew Cloud Subscription
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Extend contract term, update renewal date, and record audit log
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowRenewalModal(false)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Content */}
-            <div className="p-6 space-y-4 text-xs">
+      <SmartModal
+        open={Boolean(showRenewalModal && renewalTargetItem)}
+        onClose={() => setShowRenewalModal(false)}
+        title="Renew Cloud Subscription"
+        subtitle="Extend contract term, update renewal date, and record audit log"
+        icon={<RotateCw size={18} className="text-emerald-600" />}
+        size="xl"
+        footer={
+          <div className="flex items-center justify-between w-full">
+            <Button
+              variant="secondary"
+              size="sm"
+              type="button"
+              onClick={() => setShowRenewalModal(false)}
+              disabled={renewalSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              onClick={handleExecuteRenewal}
+              disabled={renewalSubmitting}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5 shadow-sm"
+            >
+              {renewalSubmitting ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <RotateCw size={13} />
+              )}
+              Confirm & Record Renewal
+            </Button>
+          </div>
+        }
+      >
+        {renewalTargetItem && (
+          <div className="space-y-4 text-xs">
               {renewalError && (
                 <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center gap-2">
                   <AlertCircle size={16} className="shrink-0" />
@@ -5354,74 +5320,57 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
                   </div>
                 )}
               </div>
-            </div>
+          </div>
+        )}
+      </SmartModal>
 
-            {/* Footer */}
-            <div className="p-4 px-6 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between">
+      {/* SINGLE SUBSCRIPTION RENEWAL HISTORY MODAL */}
+      <SmartModal
+        open={Boolean(showItemHistoryModal && itemHistorySub)}
+        onClose={() => {
+          setShowItemHistoryModal(false);
+          setItemHistorySub(null);
+          setItemHistoryLogs([]);
+        }}
+        title="Renewal History & Audit Logs"
+        subtitle={itemHistorySub ? `${itemHistorySub.name} • ${itemHistorySub.provider} (${itemHistorySub.site_name})` : ''}
+        icon={<History size={18} className="text-indigo-600" />}
+        size="xl"
+        footer={
+          itemHistorySub ? (
+            <div className="flex items-center justify-between w-full">
               <Button
                 variant="secondary"
                 size="sm"
-                type="button"
-                onClick={() => setShowRenewalModal(false)}
-                disabled={renewalSubmitting}
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                type="button"
-                onClick={handleExecuteRenewal}
-                disabled={renewalSubmitting}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5 shadow-sm"
-              >
-                {renewalSubmitting ? (
-                  <RefreshCw size={13} className="animate-spin" />
-                ) : (
-                  <RotateCw size={13} />
-                )}
-                Confirm & Record Renewal
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SINGLE SUBSCRIPTION RENEWAL HISTORY MODAL */}
-      {showItemHistoryModal && itemHistorySub && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            {/* Header */}
-            <div className="flex items-center justify-between p-5 border-b border-slate-100 sticky top-0 bg-white z-10">
-              <div className="flex items-center gap-2.5">
-                <div className="h-9 w-9 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
-                  <History size={18} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-800">
-                    Renewal History & Audit Logs
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {itemHistorySub.name} • {itemHistorySub.provider} ({itemHistorySub.site_name})
-                  </p>
-                </div>
-              </div>
-              <button
                 type="button"
                 onClick={() => {
                   setShowItemHistoryModal(false);
                   setItemHistorySub(null);
                   setItemHistoryLogs([]);
                 }}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
               >
-                <X size={18} />
-              </button>
+                Close
+              </Button>
+              <Button
+                size="sm"
+                type="button"
+                onClick={() => {
+                  setShowItemHistoryModal(false);
+                  handleOpenRenewModal(itemHistorySub);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5"
+              >
+                <RotateCw size={13} />
+                Renew Again
+              </Button>
             </div>
-
-            {/* Content */}
-            <div className="p-6 space-y-4 text-xs">
+          ) : undefined
+        }
+      >
+        {itemHistorySub && (
+          <div className="space-y-4 text-xs">
               {/* Summary Strip */}
-              <div className="grid grid-cols-3 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/70 text-center">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/70 text-center">
                 <div>
                   <div className="text-[11px] text-slate-400">Total Renewals</div>
                   <div className="text-base font-bold text-slate-800">{itemHistoryLogs.length}</div>
@@ -5549,38 +5498,9 @@ export const CloudSubscriptionsModule: React.FC<{ sites: any[] }> = ({ sites }) 
                   ))}
                 </div>
               )}
-            </div>
-
-            {/* Footer */}
-            <div className="p-4 px-6 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-              <Button
-                variant="secondary"
-                size="sm"
-                type="button"
-                onClick={() => {
-                  setShowItemHistoryModal(false);
-                  setItemHistorySub(null);
-                  setItemHistoryLogs([]);
-                }}
-              >
-                Close
-              </Button>
-              <Button
-                size="sm"
-                type="button"
-                onClick={() => {
-                  setShowItemHistoryModal(false);
-                  handleOpenRenewModal(itemHistorySub);
-                }}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium gap-1.5"
-              >
-                <RotateCw size={13} />
-                Renew Again
-              </Button>
-            </div>
           </div>
-        </div>
-      )}
+        )}
+      </SmartModal>
     </div>
   );
 };

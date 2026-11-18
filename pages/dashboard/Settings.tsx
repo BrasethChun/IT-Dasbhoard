@@ -5,6 +5,8 @@ import {
   Search, Lock, Mail, Key, Eye, EyeOff, Copy, Check, RefreshCw, Database 
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { SmartModal, SMART_INPUT_CLASS } from '../../components/ui/SmartModal';
+import { DensityToggle } from '../../components/ui/SmartGrid';
 import { SettingsModule } from './SettingsModule';
 import { DatabaseMigrationModule } from './DatabaseMigrationModule';
 import { useAuth } from '../../context/AuthContext';
@@ -441,63 +443,63 @@ export const Settings: React.FC = () => {
       </div>
 
       {/* Settings Navigation Tabs */}
-      <div className="flex border-b border-slate-200 mb-6 gap-2">
+      <div className="flex overflow-x-auto hide-scrollbar border-b border-slate-200 mb-6 gap-1 sm:gap-2">
         <button
           onClick={() => { setActiveTab('sites'); setSearchParams({ tab: 'sites' }); }}
-          className={`flex items-center gap-2 py-3 px-5 text-sm font-medium border-b-2 transition-all ${
+          className={`flex items-center gap-2 py-3 px-4 sm:px-5 text-sm font-medium border-b-2 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
             activeTab === 'sites'
               ? 'border-indigo-600 text-indigo-600 font-semibold'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <MapPin className="w-4 h-4" />
+          <MapPin className="w-4 h-4 shrink-0" />
           Sites & Facilities
         </button>
         <button
           onClick={() => { setActiveTab('categories'); setSearchParams({ tab: 'categories' }); }}
-          className={`flex items-center gap-2 py-3 px-5 text-sm font-medium border-b-2 transition-all ${
+          className={`flex items-center gap-2 py-3 px-4 sm:px-5 text-sm font-medium border-b-2 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
             activeTab === 'categories'
               ? 'border-indigo-600 text-indigo-600 font-semibold'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Layers className="w-4 h-4" />
+          <Layers className="w-4 h-4 shrink-0" />
           Asset Categories
         </button>
         <button
           onClick={() => { setActiveTab('users'); setSearchParams({ tab: 'users' }); }}
-          className={`flex items-center gap-2 py-3 px-5 text-sm font-medium border-b-2 transition-all ${
+          className={`flex items-center gap-2 py-3 px-4 sm:px-5 text-sm font-medium border-b-2 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
             activeTab === 'users'
               ? 'border-indigo-600 text-indigo-600 font-semibold'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Shield className="w-4 h-4" />
+          <Shield className="w-4 h-4 shrink-0" />
           User Roles & Access
         </button>
         <button
           onClick={() => { setActiveTab('database'); setSearchParams({ tab: 'database' }); }}
-          className={`flex items-center gap-2 py-3 px-5 text-sm font-medium border-b-2 transition-all ${
+          className={`flex items-center gap-2 py-3 px-4 sm:px-5 text-sm font-medium border-b-2 transition-all whitespace-nowrap shrink-0 cursor-pointer ${
             activeTab === 'database'
               ? 'border-indigo-600 text-indigo-600 font-semibold'
               : 'border-transparent text-slate-500 hover:text-slate-800'
           }`}
         >
-          <Database className="w-4 h-4 text-emerald-600" />
+          <Database className="w-4 h-4 text-emerald-600 shrink-0" />
           GoDaddy MySQL Migration
         </button>
       </div>
 
       {/* Sites Tab */}
       {activeTab === 'sites' && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 shadow-sm">
           <SettingsModule defaultTab="sites" hideTabs={true} />
         </div>
       )}
 
       {/* Asset Categories Tab */}
       {activeTab === 'categories' && (
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+        <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-6 shadow-sm">
           <SettingsModule defaultTab="asset_categories" hideTabs={true} />
         </div>
       )}
@@ -526,7 +528,7 @@ export const Settings: React.FC = () => {
           )}
 
           {/* Search & Filter Bar */}
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 md:items-center justify-between">
             <div className="relative w-full md:w-80">
               <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
               <input
@@ -537,7 +539,7 @@ export const Settings: React.FC = () => {
                 className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
               />
             </div>
-            <div className="flex items-center gap-3 w-full md:w-auto">
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 w-full md:w-auto">
               <div className="flex items-center gap-2 text-sm text-slate-600">
                 <span>Role:</span>
                 <select
@@ -551,31 +553,32 @@ export const Settings: React.FC = () => {
                   <option value="user">User</option>
                 </select>
               </div>
-              <div className="flex items-center gap-2 text-sm text-slate-600">
+              <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                 <span>Status:</span>
                 <select
                   value={statusFilter}
                   onChange={e => setStatusFilter(e.target.value)}
-                  className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="border border-slate-200 dark:border-slate-700 rounded-lg px-2.5 py-1.5 text-sm bg-white dark:bg-slate-900 outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="All">All Status</option>
                   <option value="Active">Active</option>
                   <option value="Inactive">Inactive</option>
                 </select>
               </div>
+              <DensityToggle />
             </div>
           </div>
 
           {/* Users Table */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
             {loading ? (
               <div className="p-8 text-center text-slate-500">Loading users...</div>
             ) : filteredUsers.length === 0 ? (
               <div className="p-8 text-center text-slate-400">No users match your criteria.</div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left bg-white text-sm">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600">
+              <div className="overflow-x-auto overflow-y-auto max-h-[68vh]">
+                <table className="smart-grid-table w-full text-left bg-white dark:bg-slate-900 text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-50/95 dark:bg-slate-800/95 border-b border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 backdrop-blur-xs">
                     <tr>
                       <th className="px-5 py-3.5 font-semibold">User</th>
                       <th className="px-5 py-3.5 font-semibold">Email</th>
@@ -733,426 +736,381 @@ export const Settings: React.FC = () => {
       )}
 
       {/* Edit User Modal */}
-      {editingUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
-            <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50/70">
-              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Edit className="w-4 h-4 text-indigo-600" />
-                Edit User Account
-              </h3>
-              <button 
-                onClick={() => setEditingUser(null)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X size={18} />
-              </button>
+      <SmartModal
+        open={Boolean(editingUser)}
+        onClose={() => setEditingUser(null)}
+        title="Edit User Account"
+        subtitle={editingUser ? `Account ID: ${editingUser.id.substring(0, 12)}...` : undefined}
+        icon={<Edit className="w-4 h-4" />}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" type="button" size="sm" onClick={() => setEditingUser(null)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="settings-edit-user-form" size="sm" disabled={modalSaving}>
+              {modalSaving ? 'Saving...' : 'Save User Changes'}
+            </Button>
+          </>
+        }
+      >
+        <form id="settings-edit-user-form" onSubmit={handleSaveEdit} className="flex flex-col gap-4">
+          {modalError && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-200 text-xs">
+              {modalError}
             </div>
+          )}
 
-            <form onSubmit={handleSaveEdit} className="p-6 flex flex-col gap-4">
-              {modalError && (
-                <div className="p-3 rounded-lg bg-red-50 border border-red-100 text-red-600 text-xs">
-                  {modalError}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={editFormData.full_name}
-                    onChange={e => setEditFormData({ ...editFormData, full_name: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                    placeholder="e.g. John Doe"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Email Address</label>
-                  <input
-                    type="email"
-                    required
-                    value={editFormData.email}
-                    onChange={e => setEditFormData({ ...editFormData, email: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">System Role</label>
-                  <select
-                    value={editFormData.role}
-                    onChange={e => setEditFormData({ ...editFormData, role: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  >
-                    <option value="user">User (Basic)</option>
-                    <option value="admin">Administrator</option>
-                    <option value="owner">Owner</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Account Status</label>
-                  <select
-                    value={editFormData.status}
-                    onChange={e => setEditFormData({ ...editFormData, status: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  >
-                    <option value="Active">Active (Enabled)</option>
-                    <option value="Inactive">In-Active (Disabled)</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  Reset Password <span className="text-slate-400 font-normal">(leave blank to keep current)</span>
-                </label>
-                <div className="relative">
-                  <Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
-                  <input
-                    type="password"
-                    value={editFormData.password}
-                    onChange={e => setEditFormData({ ...editFormData, password: e.target.value })}
-                    placeholder="Min 6 characters..."
-                    className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                <span className="block text-xs font-semibold text-slate-700 mb-2">Module Access Permissions</span>
-                <div className="grid grid-cols-3 gap-2">
-                  <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editFormData.can_access_welcome}
-                      onChange={e => setEditFormData({ ...editFormData, can_access_welcome: e.target.checked })}
-                      className="rounded text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>Dashboard</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editFormData.can_access_it}
-                      onChange={e => setEditFormData({ ...editFormData, can_access_it: e.target.checked })}
-                      className="rounded text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>IT Suite</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={editFormData.can_access_pro}
-                      onChange={e => setEditFormData({ ...editFormData, can_access_pro: e.target.checked })}
-                      className="rounded text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>Pro Access</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 mt-2 pt-3 border-t border-slate-100">
-                <Button 
-                  variant="secondary" 
-                  type="button" 
-                  onClick={() => setEditingUser(null)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  disabled={modalSaving} 
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
-                >
-                  {modalSaving ? 'Saving...' : 'Save User Changes'}
-                </Button>
-              </div>
-            </form>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Full Name *</label>
+              <input
+                type="text"
+                required
+                value={editFormData.full_name}
+                onChange={e => setEditFormData({ ...editFormData, full_name: e.target.value })}
+                className={SMART_INPUT_CLASS}
+                placeholder="e.g. John Doe"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Email Address *</label>
+              <input
+                type="email"
+                required
+                value={editFormData.email}
+                onChange={e => setEditFormData({ ...editFormData, email: e.target.value })}
+                className={SMART_INPUT_CLASS}
+              />
+            </div>
           </div>
-        </div>
-      )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">System Role</label>
+              <select
+                value={editFormData.role}
+                onChange={e => setEditFormData({ ...editFormData, role: e.target.value })}
+                className={SMART_INPUT_CLASS}
+              >
+                <option value="user">User (Basic)</option>
+                <option value="admin">Administrator</option>
+                <option value="owner">Owner</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Account Status</label>
+              <select
+                value={editFormData.status}
+                onChange={e => setEditFormData({ ...editFormData, status: e.target.value })}
+                className={SMART_INPUT_CLASS}
+              >
+                <option value="Active">Active (Enabled)</option>
+                <option value="Inactive">In-Active (Disabled)</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">
+              Reset Password <span className="text-slate-400 font-normal">(leave blank to keep current)</span>
+            </label>
+            <div className="relative">
+              <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+              <input
+                type="password"
+                value={editFormData.password}
+                onChange={e => setEditFormData({ ...editFormData, password: e.target.value })}
+                placeholder="Min 6 characters..."
+                className={`${SMART_INPUT_CLASS} pl-9`}
+              />
+            </div>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
+            <span className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Module Access Permissions</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-2">
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editFormData.can_access_welcome}
+                  onChange={e => setEditFormData({ ...editFormData, can_access_welcome: e.target.checked })}
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>Dashboard</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editFormData.can_access_it}
+                  onChange={e => setEditFormData({ ...editFormData, can_access_it: e.target.checked })}
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>IT Suite</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editFormData.can_access_pro}
+                  onChange={e => setEditFormData({ ...editFormData, can_access_pro: e.target.checked })}
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>Pro Access</span>
+              </label>
+            </div>
+          </div>
+        </form>
+      </SmartModal>
 
       {/* Add User Modal */}
-      {isAddUserOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-lg overflow-hidden flex flex-col">
-            <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50/70">
-              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Plus className="w-4 h-4 text-indigo-600" />
-                Add New User Account
-              </h3>
-              <button 
-                onClick={() => setIsAddUserOpen(false)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X size={18} />
-              </button>
+      <SmartModal
+        open={isAddUserOpen}
+        onClose={() => setIsAddUserOpen(false)}
+        title="Add New User Account"
+        subtitle="Provision system role and module access permissions"
+        icon={<Plus className="w-4 h-4" />}
+        size="md"
+        footer={
+          <>
+            <Button variant="secondary" type="button" size="sm" onClick={() => setIsAddUserOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="settings-add-user-form" size="sm" disabled={modalSaving}>
+              {modalSaving ? 'Creating...' : 'Create User'}
+            </Button>
+          </>
+        }
+      >
+        <form id="settings-add-user-form" onSubmit={handleCreateUser} className="flex flex-col gap-4">
+          {modalError && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-200 text-xs">
+              {modalError}
             </div>
+          )}
 
-            <form onSubmit={handleCreateUser} className="p-6 flex flex-col gap-4">
-              {modalError && (
-                <div className="p-3 rounded-lg bg-red-50 border border-red-100 text-red-600 text-xs">
-                  {modalError}
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Full Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={addFormData.full_name}
-                    onChange={e => setAddFormData({ ...addFormData, full_name: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                    placeholder="e.g. David Miller"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Email Address</label>
-                  <input
-                    type="email"
-                    required
-                    value={addFormData.email}
-                    onChange={e => setAddFormData({ ...addFormData, email: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                    placeholder="user@khemahospital.com"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">Initial Password</label>
-                  <input
-                    type="password"
-                    required
-                    value={addFormData.password}
-                    onChange={e => setAddFormData({ ...addFormData, password: e.target.value })}
-                    placeholder="Min 6 characters"
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 mb-1">System Role</label>
-                  <select
-                    value={addFormData.role}
-                    onChange={e => setAddFormData({ ...addFormData, role: e.target.value })}
-                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                  >
-                    <option value="user">User (Basic)</option>
-                    <option value="admin">Administrator</option>
-                    <option value="owner">Owner</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Initial Status</label>
-                <select
-                  value={addFormData.status}
-                  onChange={e => setAddFormData({ ...addFormData, status: e.target.value })}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-indigo-500 outline-none"
-                >
-                  <option value="Active">Active (Enabled)</option>
-                  <option value="Inactive">In-Active (Disabled)</option>
-                </select>
-              </div>
-
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                <span className="block text-xs font-semibold text-slate-700 mb-2">Module Permissions</span>
-                <div className="grid grid-cols-3 gap-2">
-                  <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={addFormData.can_access_welcome}
-                      onChange={e => setAddFormData({ ...addFormData, can_access_welcome: e.target.checked })}
-                      className="rounded text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>Dashboard</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={addFormData.can_access_it}
-                      onChange={e => setAddFormData({ ...addFormData, can_access_it: e.target.checked })}
-                      className="rounded text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>IT Suite</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={addFormData.can_access_pro}
-                      onChange={e => setAddFormData({ ...addFormData, can_access_pro: e.target.checked })}
-                      className="rounded text-indigo-600 focus:ring-indigo-500"
-                    />
-                    <span>Pro Access</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 mt-2 pt-3 border-t border-slate-100">
-                <Button 
-                  variant="secondary" 
-                  type="button" 
-                  onClick={() => setIsAddUserOpen(false)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  disabled={modalSaving} 
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
-                >
-                  {modalSaving ? 'Creating...' : 'Create User'}
-                </Button>
-              </div>
-            </form>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Full Name *</label>
+              <input
+                type="text"
+                required
+                value={addFormData.full_name}
+                onChange={e => setAddFormData({ ...addFormData, full_name: e.target.value })}
+                className={SMART_INPUT_CLASS}
+                placeholder="e.g. David Miller"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Email Address *</label>
+              <input
+                type="email"
+                required
+                value={addFormData.email}
+                onChange={e => setAddFormData({ ...addFormData, email: e.target.value })}
+                className={SMART_INPUT_CLASS}
+                placeholder="user@khemahospital.com"
+              />
+            </div>
           </div>
-        </div>
-      )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Initial Password *</label>
+              <input
+                type="password"
+                required
+                value={addFormData.password}
+                onChange={e => setAddFormData({ ...addFormData, password: e.target.value })}
+                placeholder="Min 6 characters"
+                className={SMART_INPUT_CLASS}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">System Role</label>
+              <select
+                value={addFormData.role}
+                onChange={e => setAddFormData({ ...addFormData, role: e.target.value })}
+                className={SMART_INPUT_CLASS}
+              >
+                <option value="user">User (Basic)</option>
+                <option value="admin">Administrator</option>
+                <option value="owner">Owner</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1.5">Initial Status</label>
+              <select
+                value={addFormData.status}
+                onChange={e => setAddFormData({ ...addFormData, status: e.target.value })}
+                className={SMART_INPUT_CLASS}
+              >
+                <option value="Active">Active (Enabled)</option>
+                <option value="Inactive">In-Active (Disabled)</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="p-3.5 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-200 dark:border-slate-700">
+            <span className="block text-xs font-semibold text-slate-700 dark:text-slate-200 mb-2">Module Permissions</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-2">
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={addFormData.can_access_welcome}
+                  onChange={e => setAddFormData({ ...addFormData, can_access_welcome: e.target.checked })}
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>Dashboard</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={addFormData.can_access_it}
+                  onChange={e => setAddFormData({ ...addFormData, can_access_it: e.target.checked })}
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>IT Suite</span>
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={addFormData.can_access_pro}
+                  onChange={e => setAddFormData({ ...addFormData, can_access_pro: e.target.checked })}
+                  className="rounded text-indigo-600 focus:ring-indigo-500"
+                />
+                <span>Pro Access</span>
+              </label>
+            </div>
+          </div>
+        </form>
+      </SmartModal>
 
       {/* Delete User Confirmation Modal */}
-      {deleteConfirmUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-md overflow-hidden flex flex-col p-6">
-            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mb-4">
-              <Trash2 size={24} />
-            </div>
-            <h3 className="text-lg font-bold text-slate-900 mb-1">Delete User Account</h3>
-            <p className="text-sm text-slate-500 mb-4">
-              Are you sure you want to permanently delete account <strong className="text-slate-800">{deleteConfirmUser.email}</strong>? This action cannot be undone.
-            </p>
-
-            <div className="flex justify-end gap-3">
-              <Button 
-                variant="secondary" 
-                type="button" 
-                onClick={() => setDeleteConfirmUser(null)}
-              >
-                Cancel
-              </Button>
-              <Button 
-                type="button"
-                onClick={handleConfirmDelete}
-                disabled={modalSaving}
-                className="bg-rose-600 hover:bg-rose-700 text-white shadow-sm"
-              >
-                {modalSaving ? 'Deleting...' : 'Confirm Delete'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <SmartModal
+        open={Boolean(deleteConfirmUser)}
+        onClose={() => setDeleteConfirmUser(null)}
+        title="Delete User Account"
+        subtitle="Permanent account removal"
+        icon={<Trash2 size={18} className="text-rose-600" />}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" type="button" size="sm" onClick={() => setDeleteConfirmUser(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="danger"
+              size="sm"
+              onClick={handleConfirmDelete}
+              disabled={modalSaving}
+            >
+              {modalSaving ? 'Deleting...' : 'Confirm Delete'}
+            </Button>
+          </>
+        }
+      >
+        {deleteConfirmUser && (
+          <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+            Are you sure you want to permanently delete account <strong className="text-slate-900 dark:text-slate-100">{deleteConfirmUser.email}</strong>? This action cannot be undone.
+          </p>
+        )}
+      </SmartModal>
 
       {/* Direct Reset Password Modal */}
-      {resetPasswordUser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-md overflow-hidden flex flex-col">
-            <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50/70">
-              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Key className="w-4 h-4 text-amber-500" />
-                Reset User Password
-              </h3>
-              <button 
-                onClick={() => setResetPasswordUser(null)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X size={18} />
-              </button>
+      <SmartModal
+        open={Boolean(resetPasswordUser)}
+        onClose={() => setResetPasswordUser(null)}
+        title="Reset User Password"
+        subtitle={resetPasswordUser?.email}
+        icon={<Key className="w-4 h-4 text-amber-500" />}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" type="button" size="sm" onClick={() => setResetPasswordUser(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form="settings-reset-password-form"
+              size="sm"
+              disabled={resetSaving || !newPassword}
+              className="bg-amber-600 hover:bg-amber-700 text-white gap-1.5"
+            >
+              {resetSaving ? 'Saving...' : <><Save size={14} /> Save New Password</>}
+            </Button>
+          </>
+        }
+      >
+        {resetPasswordUser && (
+          <form id="settings-reset-password-form" onSubmit={handleSaveResetPassword} className="flex flex-col gap-4">
+            <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 rounded-xl border border-amber-200/60 dark:border-amber-800 flex items-start gap-3">
+              <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50 flex items-center justify-center text-amber-700 dark:text-amber-300 font-bold text-xs shrink-0 mt-0.5">
+                {resetPasswordUser.full_name?.charAt(0) || resetPasswordUser.email.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div className="font-semibold text-slate-900 dark:text-slate-100 text-sm">{resetPasswordUser.full_name || resetPasswordUser.display_name}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">{resetPasswordUser.email}</div>
+                <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-1 font-medium">Role: {resetPasswordUser.role}</div>
+              </div>
             </div>
 
-            <form onSubmit={handleSaveResetPassword} className="p-6 flex flex-col gap-4">
-              <div className="p-3 bg-amber-50/70 rounded-xl border border-amber-200/60 flex items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 font-bold text-xs shrink-0 mt-0.5">
-                  {resetPasswordUser.full_name?.charAt(0) || resetPasswordUser.email.charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <div className="font-semibold text-slate-900 text-sm">{resetPasswordUser.full_name || resetPasswordUser.display_name}</div>
-                  <div className="text-xs text-slate-500">{resetPasswordUser.email}</div>
-                  <div className="text-[11px] text-amber-700 mt-1 font-medium">Role: {resetPasswordUser.role}</div>
-                </div>
+            {resetError && (
+              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-600 dark:text-rose-200 text-xs flex items-center gap-2">
+                <AlertCircle size={14} className="shrink-0" />
+                <span>{resetError}</span>
               </div>
+            )}
 
-              {resetError && (
-                <div className="p-3 rounded-lg bg-red-50 border border-red-100 text-red-600 text-xs flex items-center gap-2">
-                  <AlertCircle size={14} className="shrink-0" />
-                  <span>{resetError}</span>
-                </div>
-              )}
-
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-xs font-semibold text-slate-700">New Password</label>
-                  <button
-                    type="button"
-                    onClick={generateStrongPassword}
-                    className="text-xs text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1 hover:underline"
-                  >
-                    <RefreshCw size={12} /> Generate Strong
-                  </button>
-                </div>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    value={newPassword}
-                    onChange={e => { setNewPassword(e.target.value); setCopied(false); setResetError(''); }}
-                    placeholder="Enter or generate password..."
-                    className="w-full pl-3 pr-20 py-2.5 border border-slate-200 rounded-lg text-sm font-mono tracking-wide focus:ring-2 focus:ring-amber-500 outline-none"
-                  />
-                  <div className="absolute right-2 top-2 flex items-center gap-1">
-                    {newPassword && (
-                      <button
-                        type="button"
-                        onClick={handleCopyPassword}
-                        title="Copy to clipboard"
-                        className="p-1 text-slate-400 hover:text-slate-600 rounded transition-colors"
-                      >
-                        {copied ? <Check size={16} className="text-emerald-500" /> : <Copy size={16} />}
-                      </button>
-                    )}
+            <div>
+              <div className="flex justify-between items-center mb-1.5">
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">New Password *</label>
+                <button
+                  type="button"
+                  onClick={generateStrongPassword}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 font-medium flex items-center gap-1 hover:underline cursor-pointer"
+                >
+                  <RefreshCw size={12} /> Generate Strong
+                </button>
+              </div>
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  value={newPassword}
+                  onChange={e => { setNewPassword(e.target.value); setCopied(false); setResetError(''); }}
+                  placeholder="Enter or generate password..."
+                  className={`${SMART_INPUT_CLASS} pr-20 font-mono tracking-wide`}
+                />
+                <div className="absolute right-2 top-2.5 flex items-center gap-1">
+                  {newPassword && (
                     <button
                       type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      title={showPassword ? "Hide password" : "Show password"}
-                      className="p-1 text-slate-400 hover:text-slate-600 rounded transition-colors"
+                      onClick={handleCopyPassword}
+                      title="Copy to clipboard"
+                      className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded transition-colors cursor-pointer"
                     >
-                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {copied ? <Check size={16} className="text-emerald-500" /> : <Copy size={16} />}
                     </button>
-                  </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded transition-colors cursor-pointer"
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
                 </div>
-                {copied && (
-                  <span className="text-[11px] text-emerald-600 font-medium mt-1 block">Copied to clipboard!</span>
-                )}
-                <span className="text-[11px] text-slate-400 mt-1 block">Must be at least 6 characters.</span>
               </div>
-
-              <div className="flex justify-end gap-3 mt-3 pt-3 border-t border-slate-100">
-                <Button 
-                  variant="secondary" 
-                  type="button" 
-                  onClick={() => setResetPasswordUser(null)}
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  disabled={resetSaving || !newPassword} 
-                  className="bg-amber-600 hover:bg-amber-700 text-white shadow-sm flex items-center gap-1.5"
-                >
-                  {resetSaving ? 'Saving...' : <><Save size={14} /> Save New Password</>}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+              {copied && (
+                <span className="text-[11px] text-emerald-600 font-medium mt-1 block">Copied to clipboard!</span>
+              )}
+              <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 block">Must be at least 6 characters.</span>
+            </div>
+          </form>
+        )}
+      </SmartModal>
     </div>
   );
 };

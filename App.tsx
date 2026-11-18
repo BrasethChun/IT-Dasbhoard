@@ -20,11 +20,13 @@ import { InvoicesList } from './pages/dashboard/InvoicesList';
 import { MailAssistant } from './pages/dashboard/MailAssistant';
 import { RoutePath } from './types';
 import { ErrorBoundary } from './components/ui/ErrorBoundary';
+import { ThemeProvider } from './context/ThemeContext';
 
 function App() {
   return (
-    <AuthProvider>
-      <Router>
+    <ThemeProvider>
+      <AuthProvider>
+        <Router>
         <Routes>
           {/* Public Auth Routes */}
           <Route path={RoutePath.LOGIN} element={<SignIn />} />
@@ -57,8 +59,9 @@ function App() {
           {/* Fallback */}
           <Route path="*" element={<Navigate to={RoutePath.HOME} replace />} />
         </Routes>
-      </Router>
-    </AuthProvider>
+        </Router>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 

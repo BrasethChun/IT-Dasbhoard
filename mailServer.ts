@@ -7,15 +7,21 @@ import { simpleParser } from 'mailparser';
 import { GoogleGenAI } from '@google/genai';
 import cron from 'node-cron';
 
-// Initialize Gemini Client
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
+// Lazy-initialized Gemini Client (avoids startup warning when GEMINI_API_KEY is absent or loaded via dotenv)
+let aiClient: GoogleGenAI | null = null;
+function getAiClient(): GoogleGenAI {
+  if (!aiClient) {
+    aiClient = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
   }
-});
+  return aiClient;
+}
 
 export async function initMailTables(db: mysql.Pool) {
   await db.query(`
@@ -279,9 +285,14 @@ async function seedDefaultMailbox(db: mysql.Pool, userId: string, userEmail: str
 
 // Background auto-sync worker
 let autoSyncRunning = false;
-async function runAutoSync(db: mysql.Pool) {
-  if (autoSyncRunning) return;
+export async function runAutoSync(
+  db: mysql.Pool
+): Promise<{ skipped?: boolean; checked: number; synced: number; failed: number; error?: string }> {
+  if (autoSyncRunning) return { skipped: true, checked: 0, synced: 0, failed: 0 };
   autoSyncRunning = true;
+  let checked = 0;
+  let synced = 0;
+  let failed = 0;
   try {
     const [accounts]: any = await db.query(
       `SELECT * FROM mail_accounts 
@@ -290,21 +301,29 @@ async function runAutoSync(db: mysql.Pool) {
          AND (last_synced_at IS NULL OR TIMESTAMPDIFF(MINUTE, last_synced_at, NOW()) >= auto_sync_interval)`
     );
 
+    checked = Array.isArray(accounts) ? accounts.length : 0;
+
     for (const acc of accounts) {
       // If user provided a non-demo password, attempt live IMAP sync
       if (acc.password && !acc.password.startsWith('demo_')) {
+        let hadErr = false;
         await syncLiveBluehostAccount(acc, db).catch(e => {
+          hadErr = true;
+          failed++;
           console.warn(`Auto-sync failed for ${acc.email}:`, e.message);
         });
+        if (!hadErr) synced++;
       }
       await db.query('UPDATE mail_accounts SET last_synced_at = NOW() WHERE id = ?', [acc.id]);
     }
+    return { checked, synced, failed };
   } catch (err: any) {
     if (err?.code === 'ER_BAD_DB_ERROR' || err?.code === 'ER_NO_SUCH_TABLE') {
       console.warn('Auto sync check notice: database table or schema not initialized yet, skipping pass.');
     } else {
       console.error('Auto sync check error:', err?.message || err);
     }
+    return { checked, synced, failed, error: err?.message || 'Auto sync notice' };
   } finally {
     autoSyncRunning = false;
   }
@@ -331,7 +350,7 @@ async function syncLiveBluehostAccount(account: any, db: mysql.Pool) {
       const lock = await client.getMailboxLock(imapFolderName);
       try {
         const mailbox = await client.status(imapFolderName, { messages: true });
-        if (mailbox.messages && mailbox.messages > 0) {
+        if (mailbox && mailbox.messages && mailbox.messages > 0) {
           // Fetch last 30 messages per user confirmed requirement
           const fetchFrom = Math.max(1, mailbox.messages - 30);
           for await (const msg of client.fetch(`${fetchFrom}:*`, {
@@ -1035,7 +1054,7 @@ async function callGemini(params: { contents: any; systemInstruction?: string; t
   const models = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
   for (const model of models) {
     try {
-      const generatePromise = ai.models.generateContent({
+      const generatePromise = getAiClient().models.generateContent({
         model,
         contents: params.contents,
         config: {

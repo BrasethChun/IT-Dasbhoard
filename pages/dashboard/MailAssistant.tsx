@@ -8,6 +8,7 @@ import {
   ArrowUpRight
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
+import { SmartModal, SMART_INPUT_CLASS, SMART_TEXTAREA_CLASS } from '../../components/ui/SmartModal';
 import { MailMessage, MailAccount } from '../../types';
 import { apiClient } from '../../src/apiClient';
 
@@ -503,28 +504,28 @@ export const MailAssistant: React.FC = () => {
   });
 
   return (
-    <div className="h-[calc(100vh-5rem)] flex flex-col bg-[#F8FAFC] rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden animate-in fade-in duration-300">
+    <div className="min-h-[calc(100dvh-10rem)] lg:h-[calc(100dvh-5.5rem)] flex flex-col bg-[#F8FAFC] rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden animate-in fade-in duration-300">
       
       {/* Top Header Bar */}
-      <header className="h-16 px-6 border-b border-slate-200/80 bg-white flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white shadow-sm shadow-indigo-500/20">
+      <header className="min-h-14 sm:min-h-16 px-4 sm:px-6 py-3 border-b border-slate-200/80 bg-white flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center text-white shadow-sm shadow-indigo-500/20 shrink-0">
             <Mail size={18} />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-bold text-slate-900 tracking-tight">Mail Assistant</h1>
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-sky-50 text-sky-700 border border-sky-100 flex items-center gap-1">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-base font-bold text-slate-900 tracking-tight whitespace-nowrap">Mail Assistant</h1>
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-sky-50 text-sky-700 border border-sky-100 hidden sm:inline-flex items-center gap-1 whitespace-nowrap">
                 <Server size={11} /> Bluehost Mail
               </span>
             </div>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 truncate">
               {accounts.length > 0 ? accounts[0].email : 'Configured for Bluehost IMAP & SMTP'} · Syncing Inbox & Sent
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
           {syncStatusMsg && (
             <span className="text-xs font-medium text-indigo-600 animate-in fade-in slide-in-from-right-1 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">
               {syncStatusMsg}
@@ -536,7 +537,7 @@ export const MailAssistant: React.FC = () => {
             size="sm"
             onClick={handleSyncNow}
             disabled={isSyncing}
-            className="h-9 px-3 text-xs bg-white hover:bg-slate-50 text-slate-700 border-slate-200 shadow-none gap-1.5"
+            className="h-9 px-3 text-xs bg-white hover:bg-slate-50 text-slate-700 border-slate-200 shadow-none gap-1.5 whitespace-nowrap"
             title="Synchronize Inbox and Sent folders from Bluehost"
           >
             <RefreshCw size={14} className={isSyncing ? 'animate-spin text-indigo-600' : 'text-slate-500'} />
@@ -547,7 +548,7 @@ export const MailAssistant: React.FC = () => {
             variant="secondary"
             size="sm"
             onClick={() => setShowSettingsModal(true)}
-            className="h-9 px-3 text-xs bg-white hover:bg-slate-50 text-slate-700 border-slate-200 shadow-none gap-1.5"
+            className="h-9 px-3 text-xs bg-white hover:bg-slate-50 text-slate-700 border-slate-200 shadow-none gap-1.5 whitespace-nowrap"
             title="Configure Bluehost IMAP and SMTP settings"
           >
             <Settings size={14} className="text-slate-500" />
@@ -557,7 +558,7 @@ export const MailAssistant: React.FC = () => {
           <Button
             size="sm"
             onClick={handleOpenCompose}
-            className="h-9 px-3.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-sm gap-1.5"
+            className="h-9 px-3.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-sm gap-1.5 whitespace-nowrap"
           >
             <PenSquare size={14} />
             <span>Compose</span>
@@ -565,11 +566,65 @@ export const MailAssistant: React.FC = () => {
         </div>
       </header>
 
-      {/* 3-Column Body View */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Mobile & Tablet Folder Switcher (< lg) */}
+      <div className="flex lg:hidden items-center gap-1.5 overflow-x-auto px-3 py-2 border-b border-slate-200/80 bg-slate-50/80 hide-scrollbar shrink-0">
+        <button
+          type="button"
+          onClick={() => { setActiveFolder('inbox'); setSelectedMessage(null); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            activeFolder === 'inbox' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200/80'
+          }`}
+        >
+          <Inbox size={13} />
+          <span>Inbox</span>
+          {counts.inbox_unread > 0 && (
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${activeFolder === 'inbox' ? 'bg-white/20 text-white' : 'bg-indigo-600 text-white'}`}>
+              {counts.inbox_unread}
+            </span>
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveFolder('sent'); setSelectedMessage(null); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            activeFolder === 'sent' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200/80'
+          }`}
+        >
+          <Send size={13} />
+          <span>Sent</span>
+          {counts.sent_total > 0 && <span className="text-[10px] opacity-75">({counts.sent_total})</span>}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveFolder('starred'); setSelectedMessage(null); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            activeFolder === 'starred' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200/80'
+          }`}
+        >
+          <Star size={13} className={activeFolder === 'starred' ? 'fill-white' : 'text-amber-500'} />
+          <span>Starred</span>
+          {counts.starred_total > 0 && <span className="text-[10px] opacity-75">({counts.starred_total})</span>}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => { setActiveFolder('trash'); setSelectedMessage(null); }}
+          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap shrink-0 transition-colors cursor-pointer ${
+            activeFolder === 'trash' ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-600 border border-slate-200/80'
+          }`}
+        >
+          <Trash2 size={13} />
+          <span>Trash</span>
+        </button>
+      </div>
+
+      {/* 3-Column Body View (Master-Detail below lg) */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         
-        {/* COLUMN 1: Folders & System Status */}
-        <aside className="w-56 border-r border-slate-200/80 bg-white/70 p-4 flex flex-col justify-between shrink-0">
+        {/* COLUMN 1: Folders & System Status (Desktop lg+) */}
+        <aside className="hidden lg:flex w-52 xl:w-56 border-r border-slate-200/80 bg-white/70 p-4 flex-col justify-between shrink-0">
           <div className="space-y-6">
             <div>
               <span className="text-[11px] font-semibold tracking-wider uppercase text-slate-400 px-3">
@@ -678,8 +733,8 @@ export const MailAssistant: React.FC = () => {
           </div>
         </aside>
 
-        {/* COLUMN 2: Message List & Search */}
-        <section className="w-80 sm:w-96 border-r border-slate-200/80 bg-white flex flex-col shrink-0">
+        {/* COLUMN 2: Message List & Search (Full width below lg when no message selected) */}
+        <section className={`${selectedMessage ? 'hidden lg:flex' : 'flex'} w-full lg:w-80 xl:w-96 border-r border-slate-200/80 bg-white flex-col shrink-0 min-h-0`}>
           {/* Search & Filter Header */}
           <div className="p-3.5 border-b border-slate-200/80 space-y-2.5">
             <div className="relative">
@@ -690,7 +745,7 @@ export const MailAssistant: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && fetchMessages(activeFolder, searchQuery)}
-                className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="w-full pl-9 pr-3 py-2 text-sm sm:text-xs rounded-xl border border-slate-200 bg-slate-50/70 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
             </div>
             
@@ -729,7 +784,7 @@ export const MailAssistant: React.FC = () => {
                     onClick={() => handleSelectMessage(msg)}
                     className={`p-3.5 cursor-pointer transition-all flex flex-col gap-1 relative ${
                       isSelected 
-                        ? 'bg-indigo-50/70 border-l-4 border-l-indigo-600' 
+                        ? 'bg-indigo-50/80 ring-1 ring-inset ring-indigo-200' 
                         : msg.is_read 
                           ? 'hover:bg-slate-50/80 bg-white' 
                           : 'bg-slate-50/40 hover:bg-indigo-50/30'
@@ -794,17 +849,29 @@ export const MailAssistant: React.FC = () => {
         </section>
 
         {/* COLUMN 3: Reading Pane & Embedded AI Assistant */}
-        <main className="flex-1 bg-white flex flex-col overflow-y-auto">
+        <main className={`flex-1 min-w-0 bg-white ${selectedMessage ? 'flex' : 'hidden lg:flex'} flex-col overflow-y-auto`}>
           {selectedMessage ? (
-            <div className="flex-1 flex flex-col p-6 space-y-6">
+            <div className="flex-1 flex flex-col p-4 sm:p-6 space-y-5 sm:space-y-6">
               
+              {/* Back button on mobile & tablet */}
+              <div className="lg:hidden flex items-center justify-between pb-2 border-b border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSelectedMessage(null)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-semibold text-slate-700 capitalize cursor-pointer min-h-[38px]"
+                >
+                  <ArrowLeft size={14} />
+                  <span>Back to {activeFolder}</span>
+                </button>
+              </div>
+
               {/* Message Header */}
               <div className="pb-5 border-b border-slate-200/80 space-y-4">
-                <div className="flex items-start justify-between gap-4">
-                  <h2 className="text-lg font-bold text-slate-900 tracking-tight leading-snug">
+                <div className="flex items-start justify-between gap-3 sm:gap-4">
+                  <h2 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight leading-snug">
                     {selectedMessage.subject || '(No Subject)'}
                   </h2>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
                     <button
                       onClick={(e) => handleToggleStar(e, selectedMessage.id)}
                       className="p-2 rounded-lg hover:bg-slate-100 text-slate-400 hover:text-amber-500 transition-colors"
@@ -836,24 +903,24 @@ export const MailAssistant: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-indigo-700 text-sm">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-indigo-700 text-sm shrink-0">
                       {(selectedMessage.from_name || selectedMessage.from_address).charAt(0).toUpperCase()}
                     </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1.5">
                         <span className="font-semibold text-slate-900">{selectedMessage.from_name}</span>
-                        <span className="text-slate-400 text-[11px]">&lt;{selectedMessage.from_address}&gt;</span>
+                        <span className="text-slate-400 text-[11px] break-all">&lt;{selectedMessage.from_address}&gt;</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-0.5">
-                        <p className="text-[11px] text-slate-500">
+                        <p className="text-[11px] text-slate-500 truncate max-w-full">
                           <span className="font-medium text-slate-600">To:</span> {selectedMessage.to_address}
                         </p>
                         {selectedMessage.cc_address && (
-                          <div className="flex items-center gap-1 text-[11px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
-                            <span className="font-semibold text-indigo-600">Cc:</span>
-                            <span className="max-w-[320px] truncate" title={selectedMessage.cc_address}>
+                          <div className="flex items-center gap-1 text-[11px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100 max-w-full">
+                            <span className="font-semibold text-indigo-600 shrink-0">Cc:</span>
+                            <span className="max-w-[220px] sm:max-w-[320px] truncate" title={selectedMessage.cc_address}>
                               {selectedMessage.cc_address}
                             </span>
                           </div>
@@ -861,7 +928,7 @@ export const MailAssistant: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                  <span className="text-slate-400 text-[11px]">
+                  <span className="text-slate-400 text-[11px] shrink-0">
                     {new Date(selectedMessage.received_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
                   </span>
                 </div>
@@ -1252,593 +1319,567 @@ export const MailAssistant: React.FC = () => {
       </div>
 
       {/* MODAL 1: Bluehost Configuration & Signatures Modal */}
-      {showSettingsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
-            {/* Modal Header */}
-            <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50/70">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                  {settingsTab === 'server' ? <Server size={18} /> : <PenTool size={18} />}
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-800 text-sm">Mail Account & Assistant Settings</h3>
-                  <p className="text-xs text-slate-500">Configure connection credentials and professional email signatures</p>
-                </div>
-              </div>
-              <button onClick={() => setShowSettingsModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* Modal Tabs */}
-            <div className="flex border-b border-slate-200 bg-slate-50 px-6 pt-2 gap-4">
-              <button
+      <SmartModal
+        open={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        title="Mail Account & Assistant Settings"
+        subtitle="Configure connection credentials and professional email signatures"
+        icon={settingsTab === 'server' ? <Server size={18} /> : <PenTool size={18} />}
+        size="lg"
+        footer={
+          <div className="w-full flex flex-wrap items-center justify-between gap-2.5">
+            {settingsTab === 'server' ? (
+              <Button
                 type="button"
-                onClick={() => setSettingsTab('server')}
-                className={`pb-2.5 text-xs font-semibold border-b-2 flex items-center gap-1.5 transition-colors ${
-                  settingsTab === 'server'
-                    ? 'border-indigo-600 text-indigo-700'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
+                variant="secondary"
+                size="sm"
+                onClick={handleTestConnection}
+                disabled={testingConnection || !settingsForm.email}
+                className="text-xs"
               >
-                <Server size={14} />
-                <span>IMAP & SMTP Server</span>
-              </button>
-              <button
+                {testingConnection ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
+                <span>{testingConnection ? 'Probing Servers...' : 'Test Connection'}</span>
+              </Button>
+            ) : (
+              <Button
                 type="button"
-                onClick={() => setSettingsTab('signatures')}
-                className={`pb-2.5 text-xs font-semibold border-b-2 flex items-center gap-1.5 transition-colors ${
-                  settingsTab === 'signatures'
-                    ? 'border-indigo-600 text-indigo-700'
-                    : 'border-transparent text-slate-500 hover:text-slate-800'
-                }`}
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setSettingsForm(prev => ({ ...prev, compose_signature: '', reply_signature: '' }));
+                  showToast('Signatures cleared', 'info');
+                }}
+                className="text-xs"
               >
-                <PenTool size={14} />
-                <span>Email Signatures</span>
-                {(settingsForm.compose_signature || settingsForm.reply_signature) && (
-                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                )}
-              </button>
-            </div>
+                Clear Signatures
+              </Button>
+            )}
 
-            <form onSubmit={handleSaveSettings} className="p-6 space-y-4 overflow-y-auto flex-1">
-              {settingsTab === 'server' ? (
-                <>
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Email Address <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      placeholder="e.g. it-support@yourdomain.com"
-                      value={settingsForm.email}
-                      onChange={(e) => {
-                        const email = e.target.value;
-                        const domain = email.includes('@') ? email.split('@')[1] : '';
-                        setSettingsForm({
-                          ...settingsForm,
-                          email,
-                          imap_host: settingsForm.imap_host || (domain ? `mail.${domain}` : ''),
-                          smtp_host: settingsForm.smtp_host || (domain ? `mail.${domain}` : ''),
-                          username: settingsForm.username || email
-                        });
-                      }}
-                      className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Incoming Host (IMAP)
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="mail.yourdomain.com"
-                        value={settingsForm.imap_host}
-                        onChange={(e) => setSettingsForm({ ...settingsForm, imap_host: e.target.value })}
-                        className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        IMAP Port (SSL)
-                      </label>
-                      <input
-                        type="number"
-                        value={settingsForm.imap_port}
-                        onChange={(e) => setSettingsForm({ ...settingsForm, imap_port: parseInt(e.target.value) || 993 })}
-                        className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Outgoing Host (SMTP)
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="mail.yourdomain.com"
-                        value={settingsForm.smtp_host}
-                        onChange={(e) => setSettingsForm({ ...settingsForm, smtp_host: e.target.value })}
-                        className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        SMTP Port (SSL)
-                      </label>
-                      <input
-                        type="number"
-                        value={settingsForm.smtp_port}
-                        onChange={(e) => setSettingsForm({ ...settingsForm, smtp_port: parseInt(e.target.value) || 465 })}
-                        className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        Username / Account
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Same as email address"
-                        value={settingsForm.username}
-                        onChange={(e) => setSettingsForm({ ...settingsForm, username: e.target.value })}
-                        className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1">
-                        <span>Password / App Key</span>
-                        {accounts[0]?.has_password && (
-                          <span className="text-[10px] text-emerald-600 font-medium flex items-center gap-1">
-                            <CheckCircle2 size={11} /> Saved
-                          </span>
-                        )}
-                      </label>
-                      <input
-                        type="password"
-                        placeholder={accounts[0]?.has_password ? "•••••••• (leave blank to keep current)" : "Bluehost password"}
-                        value={settingsForm.password}
-                        onChange={(e) => setSettingsForm({ ...settingsForm, password: e.target.value })}
-                        className="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                      />
-                      {accounts[0]?.has_password && (
-                        <p className="text-[10px] text-slate-400 mt-1">Leave blank to retain current verified password</p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Auto-Sync Frequency (Background Polling)
-                    </label>
-                    <select
-                      value={settingsForm.auto_sync_interval}
-                      onChange={(e) => setSettingsForm({ ...settingsForm, auto_sync_interval: parseInt(e.target.value) || 15 })}
-                      className="w-full border border-slate-300 rounded-xl px-3 py-2 text-xs focus:ring-2 focus:ring-indigo-500 outline-none"
-                    >
-                      <option value={5}>Every 5 minutes</option>
-                      <option value={15}>Every 15 minutes (Recommended)</option>
-                      <option value={30}>Every 30 minutes</option>
-                      <option value={60}>Every 1 hour</option>
-                      <option value={0}>Manual Sync Only</option>
-                    </select>
-                  </div>
-
-                  {/* Connection Diagnostics Banner */}
-                  {testResult && (
-                    <div className={`p-3.5 rounded-xl border text-xs space-y-1 ${
-                      testResult.success 
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-                        : 'bg-amber-50 border-amber-200 text-amber-800'
-                    }`}>
-                      <div className="font-semibold flex items-center gap-1.5">
-                        {testResult.success ? <CheckCircle2 size={14} className="text-emerald-600" /> : <AlertCircle size={14} className="text-amber-600" />}
-                        <span>{testResult.success ? 'Connection Test Passed' : 'Connection Test Results'}</span>
-                      </div>
-                      {testResult.diagnostics.map((d, i) => (
-                        <p key={i} className="text-[11px] leading-relaxed opacity-90">{d}</p>
-                      ))}
-                    </div>
-                  )}
-                </>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowSettingsModal(false)}>
+                Cancel
+              </Button>
+              {settingsTab === 'signatures' && accounts[0]?.id ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSaveSignatures}
+                  disabled={settingsSaving}
+                  className="gap-1.5"
+                >
+                  {settingsSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  <span>Save Signatures</span>
+                </Button>
               ) : (
-                /* SIGNATURES TAB */
-                <div className="space-y-4">
-                  {/* Quick Preset Templates */}
-                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                    <span className="text-[11px] font-semibold text-slate-600 flex items-center gap-1.5">
-                      <Sparkles size={12} className="text-indigo-600" />
-                      <span>Signature Quick Presets (Click to autofill)</span>
-                    </span>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const compose = `Best regards,\nIT Operations & Infrastructure Team\nKhema Hospital & Medical Group\nInternal Hotline: Ext. 9911 | Email: ${settingsForm.email || 'it-support@khemahospital.com'}`;
-                          const reply = `Regards,\nIT Operations Team | Khema Hospital`;
-                          setSettingsForm(prev => ({ ...prev, compose_signature: compose, reply_signature: reply }));
-                          showToast('Hospital IT Support preset applied', 'info');
-                        }}
-                        className="px-2.5 py-1 text-[11px] font-medium bg-white border border-slate-200 text-slate-700 hover:border-indigo-500 hover:text-indigo-600 rounded-lg transition-all"
-                      >
-                        🏥 Hospital IT Team
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const compose = `Kind regards,\nClinical Systems & Diagnostic Technology\nKhema Global Healthcare\nDirect: +855 23 222 333 | Web: https://khemahospital.com`;
-                          const reply = `Best regards,\nClinical Systems Support`;
-                          setSettingsForm(prev => ({ ...prev, compose_signature: compose, reply_signature: reply }));
-                          showToast('Clinical Systems preset applied', 'info');
-                        }}
-                        className="px-2.5 py-1 text-[11px] font-medium bg-white border border-slate-200 text-slate-700 hover:border-indigo-500 hover:text-indigo-600 rounded-lg transition-all"
-                      >
-                        🩺 Clinical Systems
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const compose = `Thanks & regards,\nIT Department | Khema Hospital`;
-                          const reply = `Thanks,\nIT Operations`;
-                          setSettingsForm(prev => ({ ...prev, compose_signature: compose, reply_signature: reply }));
-                          showToast('Minimalist preset applied', 'info');
-                        }}
-                        className="px-2.5 py-1 text-[11px] font-medium bg-white border border-slate-200 text-slate-700 hover:border-indigo-500 hover:text-indigo-600 rounded-lg transition-all"
-                      >
-                        ⚡ Minimalist
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 1. New Compose Signature */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-semibold text-slate-700">
-                        New Compose Signature
-                      </label>
-                      <span className="text-[10px] text-slate-400">Appended when writing new emails</span>
-                    </div>
-                    <textarea
-                      rows={4}
-                      placeholder={`e.g.\nBest regards,\nIT Operations & Infrastructure Team\nKhema Hospital\nHotline: ext 9911`}
-                      value={settingsForm.compose_signature}
-                      onChange={(e) => setSettingsForm({ ...settingsForm, compose_signature: e.target.value })}
-                      className="w-full border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 outline-none font-mono resize-none leading-relaxed"
-                    />
-                  </div>
-
-                  {/* 2. Reply Signature */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-semibold text-slate-700">
-                        Reply Signature
-                      </label>
-                      <span className="text-[10px] text-slate-400">Appended when replying to incoming emails</span>
-                    </div>
-                    <textarea
-                      rows={3}
-                      placeholder={`e.g.\nThanks & regards,\nIT Support Desk`}
-                      value={settingsForm.reply_signature}
-                      onChange={(e) => setSettingsForm({ ...settingsForm, reply_signature: e.target.value })}
-                      className="w-full border border-slate-300 rounded-xl p-3 text-xs focus:ring-2 focus:ring-indigo-500 outline-none font-mono resize-none leading-relaxed"
-                    />
-                  </div>
-
-                  {/* 3. Toggle auto-reply signature */}
-                  <div className="flex items-center gap-2.5 pt-1">
-                    <input
-                      type="checkbox"
-                      id="include_reply_sig"
-                      checked={settingsForm.include_reply_signature}
-                      onChange={(e) => setSettingsForm({ ...settingsForm, include_reply_signature: e.target.checked })}
-                      className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
-                    />
-                    <label htmlFor="include_reply_sig" className="text-xs font-medium text-slate-700 cursor-pointer select-none">
-                      Automatically append reply signature when replying to an email
-                    </label>
-                  </div>
-
-                  {/* Live Signature Preview Card */}
-                  {(settingsForm.compose_signature || settingsForm.reply_signature) && (
-                    <div className="p-3.5 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-2">
-                      <div className="text-[11px] font-semibold text-indigo-900 flex items-center justify-between">
-                        <span>Live Preview (How recipients see it):</span>
-                      </div>
-                      <div className="p-3 bg-white border border-slate-200 rounded-lg text-xs space-y-2 font-sans">
-                        <div className="text-slate-400 text-[11px] italic">[Message body from composer...]</div>
-                        <div className="border-t border-slate-200 pt-2 text-slate-700 whitespace-pre-line text-xs font-sans leading-relaxed">
-                          {settingsForm.compose_signature || settingsForm.reply_signature}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                <Button type="submit" form="mail-settings-form" size="sm" disabled={settingsSaving}>
+                  {settingsSaving ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
+                  <span>Save Configuration</span>
+                </Button>
               )}
-
-              {/* Action Buttons */}
-              <div className="pt-3 flex items-center justify-between border-t border-slate-100">
-                {settingsTab === 'server' ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={handleTestConnection}
-                    disabled={testingConnection || !settingsForm.email}
-                    className="text-xs bg-slate-50 border-slate-200"
-                  >
-                    {testingConnection ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
-                    <span>{testingConnection ? 'Probing Servers...' : 'Test Connection'}</span>
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => {
-                      setSettingsForm(prev => ({ ...prev, compose_signature: '', reply_signature: '' }));
-                      showToast('Signatures cleared', 'info');
-                    }}
-                    className="text-xs text-slate-500 border-slate-200"
-                  >
-                    Clear Signatures
-                  </Button>
-                )}
-
-                <div className="flex gap-2">
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowSettingsModal(false)}>
-                    Cancel
-                  </Button>
-                  {settingsTab === 'signatures' && accounts[0]?.id ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={handleSaveSignatures}
-                      disabled={settingsSaving}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                    >
-                      {settingsSaving ? <Loader2 size={14} className="animate-spin mr-1.5" /> : <Check size={14} className="mr-1.5" />}
-                      <span>Save Signatures</span>
-                    </Button>
-                  ) : (
-                    <Button type="submit" size="sm" disabled={settingsSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                      {settingsSaving ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
-                      <span>Save Configuration</span>
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: Compose & AI Drafter Modal */}
-      {showComposeModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh]">
-            <div className="flex justify-between items-center p-5 border-b border-slate-100 bg-slate-50/60">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                  <PenSquare size={16} />
-                </div>
-                <div>
-                  <h3 className="font-bold text-slate-800 text-sm">
-                    {isReplyAll ? 'Reply All to Email' : (composeForm.replyToId ? 'Reply to Email' : 'New Email Message')}
-                  </h3>
-                  <p className="text-xs text-slate-500">Dispatching via Bluehost SMTP: {accounts[0]?.email || 'Default'}</p>
-                </div>
-              </div>
-              <button onClick={() => setShowComposeModal(false)} className="text-slate-400 hover:text-slate-600">
-                <X size={20} />
-              </button>
             </div>
+          </div>
+        }
+      >
+        {/* Modal Tabs */}
+        <div className="-mx-5 -mt-4 mb-4 flex border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/70 px-5 pt-2 gap-4">
+          <button
+            type="button"
+            onClick={() => setSettingsTab('server')}
+            className={`pb-2.5 text-xs font-semibold border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
+              settingsTab === 'server'
+                ? 'border-indigo-600 text-indigo-700 dark:text-indigo-400'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+            }`}
+          >
+            <Server size={14} />
+            <span>IMAP & SMTP Server</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSettingsTab('signatures')}
+            className={`pb-2.5 text-xs font-semibold border-b-2 flex items-center gap-1.5 transition-colors cursor-pointer ${
+              settingsTab === 'signatures'
+                ? 'border-indigo-600 text-indigo-700 dark:text-indigo-400'
+                : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+            }`}
+          >
+            <PenTool size={14} />
+            <span>Email Signatures</span>
+            {(settingsForm.compose_signature || settingsForm.reply_signature) && (
+              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            )}
+          </button>
+        </div>
 
-            <form onSubmit={handleSendEmail} className="p-6 space-y-4 overflow-y-auto flex-1 flex flex-col">
-              
-              {/* Recipient & Subject fields */}
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 border-b border-slate-100 pb-2">
-                  <span className="w-16 text-xs font-semibold text-slate-500">To:</span>
-                  <input
-                    type="email"
-                    required
-                    placeholder="recipient@example.com"
-                    value={composeForm.to}
-                    onChange={(e) => setComposeForm({ ...composeForm, to: e.target.value })}
-                    className="flex-1 text-xs outline-none bg-transparent"
-                  />
-                  {!showCcField && !composeForm.cc && (
-                    <button
-                      type="button"
-                      onClick={() => setShowCcField(true)}
-                      className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 transition-colors shrink-0"
-                    >
-                      + Cc
-                    </button>
-                  )}
-                </div>
-
-                {/* CC Recipient field */}
-                {(showCcField || Boolean(composeForm.cc)) && (
-                  <div className="flex items-center gap-3 border-b border-slate-100 pb-2 animate-in fade-in duration-150">
-                    <span className="w-16 text-xs font-semibold text-indigo-600 flex items-center gap-1">
-                      <span>Cc:</span>
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="comma-separated emails (e.g. colleague@khemahospital.com, doctor@khemahospital.com)"
-                      value={composeForm.cc}
-                      onChange={(e) => setComposeForm({ ...composeForm, cc: e.target.value })}
-                      className="flex-1 text-xs outline-none bg-transparent placeholder:text-slate-400"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setComposeForm({ ...composeForm, cc: '' });
-                        setShowCcField(false);
-                      }}
-                      className="text-slate-400 hover:text-slate-600 p-1"
-                      title="Clear & hide CC"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-3 border-b border-slate-100 pb-2">
-                  <span className="w-16 text-xs font-semibold text-slate-500">Subject:</span>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Enter email subject"
-                    value={composeForm.subject}
-                    onChange={(e) => setComposeForm({ ...composeForm, subject: e.target.value })}
-                    className="flex-1 text-xs outline-none bg-transparent font-medium"
-                  />
-                </div>
-              </div>
-
-              {/* AI Draft Generator Card */}
-              <div className="p-3.5 rounded-xl border border-indigo-100 bg-indigo-50/50 space-y-2.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-indigo-900 flex items-center gap-1.5">
-                    <Sparkles size={14} className="text-indigo-600" />
-                    <span>AI Mail Assistant (Gemini 3.8 Flash)</span>
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] text-slate-500">Tone:</span>
-                    <select
-                      value={aiTone}
-                      onChange={(e: any) => setAiTone(e.target.value)}
-                      className="text-[11px] border border-indigo-200 rounded-md bg-white px-2 py-0.5 outline-none font-medium text-indigo-800"
-                    >
-                      <option value="Professional">Professional</option>
-                      <option value="Concise">Concise</option>
-                      <option value="Direct">Direct</option>
-                      <option value="Urgent">Urgent</option>
-                      <option value="Friendly">Friendly</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Enter key bullet points (e.g. Server maintenance delayed to 3am, reboot required)..."
-                    value={aiPrompt}
-                    onChange={(e) => setAiPrompt(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleGenerateAiDraft())}
-                    className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-indigo-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={handleGenerateAiDraft}
-                    disabled={generatingAiDraft || !aiPrompt.trim()}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 shadow-none shrink-0"
-                  >
-                    {generatingAiDraft ? <Loader2 size={13} className="animate-spin mr-1" /> : <Sparkles size={13} className="mr-1" />}
-                    <span>{generatingAiDraft ? 'Drafting...' : 'Write Draft'}</span>
-                  </Button>
-                </div>
-              </div>
-
-              {/* Email Body Header & Signature Insert Action */}
-              <div className="flex items-center justify-between text-xs pt-1">
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                  Message Content
-                </span>
-                <div className="flex items-center gap-2">
-                  {composeForm.replyToId ? (
-                    settingsForm.reply_signature ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const sig = settingsForm.reply_signature;
-                          if (!composeForm.body.includes(sig)) {
-                            setComposeForm(prev => ({
-                              ...prev,
-                              body: prev.body ? `${prev.body}\n\n${sig}` : `\n\n${sig}`
-                            }));
-                            showToast('Reply signature inserted', 'info');
-                          } else {
-                            showToast('Reply signature already present in email body', 'info');
-                          }
-                        }}
-                        className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-1 hover:underline"
-                        title="Append configured reply signature"
-                      >
-                        <PenTool size={12} />
-                        <span>Insert Reply Signature</span>
-                      </button>
-                    ) : null
-                  ) : (
-                    settingsForm.compose_signature ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const sig = settingsForm.compose_signature;
-                          if (!composeForm.body.includes(sig)) {
-                            setComposeForm(prev => ({
-                              ...prev,
-                              body: prev.body ? `${prev.body}\n\n${sig}` : `\n\n${sig}`
-                            }));
-                            showToast('Compose signature inserted', 'info');
-                          } else {
-                            showToast('Compose signature already present in email body', 'info');
-                          }
-                        }}
-                        className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800 flex items-center gap-1 hover:underline"
-                        title="Append configured compose signature"
-                      >
-                        <PenTool size={12} />
-                        <span>Insert Compose Signature</span>
-                      </button>
-                    ) : null
-                  )}
-                </div>
-              </div>
-
-              {/* Email Body Textarea */}
-              <div className="flex-1 min-h-[180px] flex flex-col">
-                <textarea
+        <form id="mail-settings-form" onSubmit={handleSaveSettings} className="space-y-4">
+          {settingsTab === 'server' ? (
+            <>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Email Address <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="email"
                   required
-                  placeholder="Compose your email here, or use the AI Mail Assistant above to draft it..."
-                  value={composeForm.body}
-                  onChange={(e) => setComposeForm({ ...composeForm, body: e.target.value })}
-                  className="w-full flex-1 p-3.5 border border-slate-200 rounded-xl text-xs leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500 resize-none font-sans"
+                  placeholder="e.g. it-support@yourdomain.com"
+                  value={settingsForm.email}
+                  onChange={(e) => {
+                    const email = e.target.value;
+                    const domain = email.includes('@') ? email.split('@')[1] : '';
+                    setSettingsForm({
+                      ...settingsForm,
+                      email,
+                      imap_host: settingsForm.imap_host || (domain ? `mail.${domain}` : ''),
+                      smtp_host: settingsForm.smtp_host || (domain ? `mail.${domain}` : ''),
+                      username: settingsForm.username || email
+                    });
+                  }}
+                  className={SMART_INPUT_CLASS}
                 />
               </div>
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] text-slate-400">
-                  Sending as {accounts[0]?.email || 'Bluehost User'}
-                </span>
-                <div className="flex gap-2">
-                  <Button type="button" variant="secondary" size="sm" onClick={() => setShowComposeModal(false)}>
-                    Discard
-                  </Button>
-                  <Button type="submit" size="sm" disabled={sendingEmail} className="bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5">
-                    {sendingEmail ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                    <span>{sendingEmail ? 'Sending...' : 'Send Message'}</span>
-                  </Button>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Incoming Host (IMAP)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="mail.yourdomain.com"
+                    value={settingsForm.imap_host}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, imap_host: e.target.value })}
+                    className={SMART_INPUT_CLASS}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    IMAP Port (SSL)
+                  </label>
+                  <input
+                    type="number"
+                    value={settingsForm.imap_port}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, imap_port: parseInt(e.target.value) || 993 })}
+                    className={SMART_INPUT_CLASS}
+                  />
                 </div>
               </div>
-            </form>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Outgoing Host (SMTP)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="mail.yourdomain.com"
+                    value={settingsForm.smtp_host}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, smtp_host: e.target.value })}
+                    className={SMART_INPUT_CLASS}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    SMTP Port (SSL)
+                  </label>
+                  <input
+                    type="number"
+                    value={settingsForm.smtp_port}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, smtp_port: parseInt(e.target.value) || 465 })}
+                    className={SMART_INPUT_CLASS}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    Username / Account
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Same as email address"
+                    value={settingsForm.username}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, username: e.target.value })}
+                    className={SMART_INPUT_CLASS}
+                  />
+                </div>
+                <div>
+                  <label className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                    <span>Password / App Key</span>
+                    {accounts[0]?.has_password && (
+                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                        <CheckCircle2 size={11} /> Saved
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    type="password"
+                    placeholder={accounts[0]?.has_password ? '•••••••• (leave blank to keep current)' : 'Bluehost password'}
+                    value={settingsForm.password}
+                    onChange={(e) => setSettingsForm({ ...settingsForm, password: e.target.value })}
+                    className={SMART_INPUT_CLASS}
+                  />
+                  {accounts[0]?.has_password && (
+                    <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">Leave blank to retain current verified password</p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Auto-Sync Frequency (Background Polling)
+                </label>
+                <select
+                  value={settingsForm.auto_sync_interval}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, auto_sync_interval: parseInt(e.target.value) || 15 })}
+                  className={SMART_INPUT_CLASS}
+                >
+                  <option value={5}>Every 5 minutes</option>
+                  <option value={15}>Every 15 minutes (Recommended)</option>
+                  <option value={30}>Every 30 minutes</option>
+                  <option value={60}>Every 1 hour</option>
+                  <option value={0}>Manual Sync Only</option>
+                </select>
+              </div>
+
+              {/* Connection Diagnostics Banner */}
+              {testResult && (
+                <div className={`p-3.5 rounded-xl border text-xs space-y-1 ${
+                  testResult.success
+                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200'
+                    : 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200'
+                }`}>
+                  <div className="font-semibold flex items-center gap-1.5">
+                    {testResult.success ? <CheckCircle2 size={14} className="text-emerald-600" /> : <AlertCircle size={14} className="text-amber-600" />}
+                    <span>{testResult.success ? 'Connection Test Passed' : 'Connection Test Results'}</span>
+                  </div>
+                  {testResult.diagnostics.map((d, i) => (
+                    <p key={i} className="text-[11px] leading-relaxed opacity-90">{d}</p>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            /* SIGNATURES TAB */
+            <div className="space-y-4">
+              {/* Quick Preset Templates */}
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl space-y-2">
+                <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                  <Sparkles size={12} className="text-indigo-600 dark:text-indigo-400" />
+                  <span>Signature Quick Presets (Click to autofill)</span>
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const compose = `Best regards,\nIT Operations & Infrastructure Team\nKhema Hospital & Medical Group\nInternal Hotline: Ext. 9911 | Email: ${settingsForm.email || 'it-support@khemahospital.com'}`;
+                      const reply = `Regards,\nIT Operations Team | Khema Hospital`;
+                      setSettingsForm(prev => ({ ...prev, compose_signature: compose, reply_signature: reply }));
+                      showToast('Hospital IT Support preset applied', 'info');
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-indigo-500 hover:text-indigo-600 rounded-lg transition-all cursor-pointer"
+                  >
+                    🏥 Hospital IT Team
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const compose = `Kind regards,\nClinical Systems & Diagnostic Technology\nKhema Global Healthcare\nDirect: +855 23 222 333 | Web: https://khemahospital.com`;
+                      const reply = `Best regards,\nClinical Systems Support`;
+                      setSettingsForm(prev => ({ ...prev, compose_signature: compose, reply_signature: reply }));
+                      showToast('Clinical Systems preset applied', 'info');
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-indigo-500 hover:text-indigo-600 rounded-lg transition-all cursor-pointer"
+                  >
+                    🩺 Clinical Systems
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const compose = `Thanks & regards,\nIT Department | Khema Hospital`;
+                      const reply = `Thanks,\nIT Operations`;
+                      setSettingsForm(prev => ({ ...prev, compose_signature: compose, reply_signature: reply }));
+                      showToast('Minimalist preset applied', 'info');
+                    }}
+                    className="px-2.5 py-1 text-[11px] font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:border-indigo-500 hover:text-indigo-600 rounded-lg transition-all cursor-pointer"
+                  >
+                    ⚡ Minimalist
+                  </button>
+                </div>
+              </div>
+
+              {/* 1. New Compose Signature */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    New Compose Signature
+                  </label>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500">Appended when writing new emails</span>
+                </div>
+                <textarea
+                  rows={4}
+                  placeholder={`e.g.\nBest regards,\nIT Operations & Infrastructure Team\nKhema Hospital\nHotline: ext 9911`}
+                  value={settingsForm.compose_signature}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, compose_signature: e.target.value })}
+                  className={`${SMART_TEXTAREA_CLASS} font-mono text-xs leading-relaxed`}
+                />
+              </div>
+
+              {/* 2. Reply Signature */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                    Reply Signature
+                  </label>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500">Appended when replying to incoming emails</span>
+                </div>
+                <textarea
+                  rows={3}
+                  placeholder={`e.g.\nThanks & regards,\nIT Support Desk`}
+                  value={settingsForm.reply_signature}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, reply_signature: e.target.value })}
+                  className={`${SMART_TEXTAREA_CLASS} font-mono text-xs leading-relaxed`}
+                />
+              </div>
+
+              {/* 3. Toggle auto-reply signature */}
+              <div className="flex items-center gap-2.5 pt-1">
+                <input
+                  type="checkbox"
+                  id="include_reply_sig"
+                  checked={settingsForm.include_reply_signature}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, include_reply_signature: e.target.checked })}
+                  className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                />
+                <label htmlFor="include_reply_sig" className="text-xs font-medium text-slate-700 dark:text-slate-300 cursor-pointer select-none">
+                  Automatically append reply signature when replying to an email
+                </label>
+              </div>
+
+              {/* Live Signature Preview Card */}
+              {(settingsForm.compose_signature || settingsForm.reply_signature) && (
+                <div className="p-3.5 bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-800 rounded-xl space-y-2">
+                  <div className="text-[11px] font-semibold text-indigo-900 dark:text-indigo-200 flex items-center justify-between">
+                    <span>Live Preview (How recipients see it):</span>
+                  </div>
+                  <div className="p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs space-y-2 font-sans">
+                    <div className="text-slate-400 text-[11px] italic">[Message body from composer...]</div>
+                    <div className="border-t border-slate-200 dark:border-slate-700 pt-2 text-slate-700 dark:text-slate-200 whitespace-pre-line text-xs font-sans leading-relaxed">
+                      {settingsForm.compose_signature || settingsForm.reply_signature}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </form>
+      </SmartModal>
+
+      {/* MODAL 2: Compose & AI Drafter Modal */}
+      <SmartModal
+        open={showComposeModal}
+        onClose={() => setShowComposeModal(false)}
+        title={isReplyAll ? 'Reply All to Email' : (composeForm.replyToId ? 'Reply to Email' : 'New Email Message')}
+        subtitle={`Dispatching via Bluehost SMTP: ${accounts[0]?.email || 'Default'}`}
+        icon={<PenSquare size={16} />}
+        size="lg"
+        footer={
+          <div className="w-full flex flex-wrap items-center justify-between gap-2.5">
+            <span className="text-[11px] text-slate-400 dark:text-slate-500">
+              Sending as {accounts[0]?.email || 'Bluehost User'}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowComposeModal(false)}>
+                Discard
+              </Button>
+              <Button type="submit" form="mail-compose-form" size="sm" disabled={sendingEmail} className="gap-1.5">
+                {sendingEmail ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                <span>{sendingEmail ? 'Sending...' : 'Send Message'}</span>
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        }
+      >
+        <form id="mail-compose-form" onSubmit={handleSendEmail} className="space-y-4 flex flex-col">
+          {/* Recipient & Subject fields */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-2">
+              <span className="w-16 text-xs font-semibold text-slate-500 dark:text-slate-400">To:</span>
+              <input
+                type="email"
+                required
+                placeholder="recipient@example.com"
+                value={composeForm.to}
+                onChange={(e) => setComposeForm({ ...composeForm, to: e.target.value })}
+                className="flex-1 text-xs outline-none bg-transparent text-slate-900 dark:text-slate-100"
+              />
+              {!showCcField && !composeForm.cc && (
+                <button
+                  type="button"
+                  onClick={() => setShowCcField(true)}
+                  className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800 transition-colors shrink-0 cursor-pointer"
+                >
+                  + Cc
+                </button>
+              )}
+            </div>
+
+            {/* CC Recipient field */}
+            {(showCcField || Boolean(composeForm.cc)) && (
+              <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-2 animate-in fade-in duration-150">
+                <span className="w-16 text-xs font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1">
+                  <span>Cc:</span>
+                </span>
+                <input
+                  type="text"
+                  placeholder="comma-separated emails (e.g. colleague@khemahospital.com, doctor@khemahospital.com)"
+                  value={composeForm.cc}
+                  onChange={(e) => setComposeForm({ ...composeForm, cc: e.target.value })}
+                  className="flex-1 text-xs outline-none bg-transparent text-slate-900 dark:text-slate-100 placeholder:text-slate-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setComposeForm({ ...composeForm, cc: '' });
+                    setShowCcField(false);
+                  }}
+                  className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                  title="Clear & hide CC"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 border-b border-slate-100 dark:border-slate-800 pb-2">
+              <span className="w-16 text-xs font-semibold text-slate-500 dark:text-slate-400">Subject:</span>
+              <input
+                type="text"
+                required
+                placeholder="Enter email subject"
+                value={composeForm.subject}
+                onChange={(e) => setComposeForm({ ...composeForm, subject: e.target.value })}
+                className="flex-1 text-xs outline-none bg-transparent font-medium text-slate-900 dark:text-slate-100"
+              />
+            </div>
+          </div>
+
+          {/* AI Draft Generator Card */}
+          <div className="p-3.5 rounded-xl border border-indigo-100 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/30 space-y-2.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-indigo-900 dark:text-indigo-200 flex items-center gap-1.5">
+                <Sparkles size={14} className="text-indigo-600 dark:text-indigo-400" />
+                <span>AI Mail Assistant</span>
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">Tone:</span>
+                <select
+                  value={aiTone}
+                  onChange={(e: any) => setAiTone(e.target.value)}
+                  className="text-[11px] border border-indigo-200 dark:border-indigo-800 rounded-md bg-white dark:bg-slate-900 px-2 py-0.5 outline-none font-medium text-indigo-800 dark:text-indigo-200"
+                >
+                  <option value="Professional">Professional</option>
+                  <option value="Concise">Concise</option>
+                  <option value="Direct">Direct</option>
+                  <option value="Urgent">Urgent</option>
+                  <option value="Friendly">Friendly</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enter key bullet points (e.g. Server maintenance delayed to 3am, reboot required)..."
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleGenerateAiDraft())}
+                className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <Button
+                type="button"
+                size="sm"
+                onClick={handleGenerateAiDraft}
+                disabled={generatingAiDraft || !aiPrompt.trim()}
+                className="text-xs px-3 shadow-none shrink-0"
+              >
+                {generatingAiDraft ? <Loader2 size={13} className="animate-spin mr-1" /> : <Sparkles size={13} className="mr-1" />}
+                <span>{generatingAiDraft ? 'Drafting...' : 'Write Draft'}</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Email Body Header & Signature Insert Action */}
+          <div className="flex items-center justify-between text-xs pt-1">
+            <span className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              Message Content
+            </span>
+            <div className="flex items-center gap-2">
+              {composeForm.replyToId ? (
+                settingsForm.reply_signature ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sig = settingsForm.reply_signature;
+                      if (!composeForm.body.includes(sig)) {
+                        setComposeForm(prev => ({
+                          ...prev,
+                          body: prev.body ? `${prev.body}\n\n${sig}` : `\n\n${sig}`
+                        }));
+                        showToast('Reply signature inserted', 'info');
+                      } else {
+                        showToast('Reply signature already present in email body', 'info');
+                      }
+                    }}
+                    className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 flex items-center gap-1 hover:underline cursor-pointer"
+                    title="Append configured reply signature"
+                  >
+                    <PenTool size={12} />
+                    <span>Insert Reply Signature</span>
+                  </button>
+                ) : null
+              ) : (
+                settingsForm.compose_signature ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const sig = settingsForm.compose_signature;
+                      if (!composeForm.body.includes(sig)) {
+                        setComposeForm(prev => ({
+                          ...prev,
+                          body: prev.body ? `${prev.body}\n\n${sig}` : `\n\n${sig}`
+                        }));
+                        showToast('Compose signature inserted', 'info');
+                      } else {
+                        showToast('Compose signature already present in email body', 'info');
+                      }
+                    }}
+                    className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 flex items-center gap-1 hover:underline cursor-pointer"
+                    title="Append configured compose signature"
+                  >
+                    <PenTool size={12} />
+                    <span>Insert Compose Signature</span>
+                  </button>
+                ) : null
+              )}
+            </div>
+          </div>
+
+          {/* Email Body Textarea */}
+          <div>
+            <textarea
+              required
+              rows={9}
+              placeholder="Compose your email here, or use the AI Mail Assistant above to draft it..."
+              value={composeForm.body}
+              onChange={(e) => setComposeForm({ ...composeForm, body: e.target.value })}
+              className={`${SMART_TEXTAREA_CLASS} font-sans text-xs leading-relaxed`}
+            />
+          </div>
+        </form>
+      </SmartModal>
 
       {/* Floating Toast Notification */}
       {toast && (

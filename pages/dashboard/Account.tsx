@@ -180,34 +180,34 @@ export const Account: React.FC = () => {
   }
 
   return (
-    <div className="relative w-full max-w-4xl mx-auto pb-20 animate-in fade-in duration-700">
+    <div className="relative w-full max-w-4xl mx-auto pb-8 sm:pb-16 animate-in fade-in duration-700">
         
         {/* Background Ambient Glows */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-indigo-300/10 rounded-full blur-[120px] -z-10 mix-blend-multiply pointer-events-none" />
-        <div className="absolute bottom-0 right-[-10%] w-[800px] h-[800px] bg-fuchsia-100/20 rounded-full blur-[100px] -z-10 mix-blend-multiply pointer-events-none" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-indigo-300/10 dark:bg-indigo-500/10 rounded-full blur-[120px] -z-10 mix-blend-multiply dark:mix-blend-screen pointer-events-none" />
+        <div className="absolute bottom-0 right-[-10%] w-[800px] h-[800px] bg-fuchsia-100/20 dark:bg-sky-500/10 rounded-full blur-[100px] -z-10 mix-blend-multiply dark:mix-blend-screen pointer-events-none" />
 
         {/* Main Glass Panel */}
-        <div className="relative rounded-[40px] border border-white/60 bg-white/40 backdrop-blur-[80px] shadow-[0_40px_100px_-15px_rgba(0,0,0,0.05),0_10px_30px_-5px_rgba(0,0,0,0.02)] overflow-hidden transition-all duration-500 hover:shadow-[0_50px_120px_-20px_rgba(0,0,0,0.08)] ring-1 ring-white/50">
+        <div className="relative rounded-3xl sm:rounded-[40px] border border-white/60 dark:border-slate-800 bg-white/75 dark:bg-slate-900/85 backdrop-blur-[80px] shadow-[0_40px_100px_-15px_rgba(0,0,0,0.05),0_10px_30px_-5px_rgba(0,0,0,0.02)] dark:shadow-2xl overflow-hidden transition-all duration-500 hover:shadow-[0_50px_120px_-20px_rgba(0,0,0,0.08)] ring-1 ring-white/50 dark:ring-slate-800">
             
             {/* Top Gloss Highlight */}
-            <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white to-transparent opacity-60" />
+            <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-white dark:via-slate-700 to-transparent opacity-60" />
 
-            <form onSubmit={handleSubmit} className="divide-y divide-white/40">
+            <form onSubmit={handleSubmit} className="divide-y divide-slate-200/60 dark:divide-slate-800">
                 
                 {/* Header Section */}
-                <div className="px-10 py-12 flex flex-col items-center justify-center text-center relative overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-b from-white/40 to-transparent opacity-50 pointer-events-none" />
+                <div className="px-5 sm:px-10 py-8 sm:py-12 flex flex-col items-center justify-center text-center relative overflow-hidden">
+                    <div className="absolute inset-0 bg-gradient-to-b from-white/40 dark:from-white/5 to-transparent opacity-50 pointer-events-none" />
                     
                     {/* Avatar Group */}
                     <div className="flex flex-col items-center mb-6">
                         <div className="group relative cursor-pointer" onClick={() => document.getElementById('avatar-upload')?.click()}>
-                            <div className="h-32 w-32 rounded-full p-1 bg-white/50 backdrop-blur-xl border border-white shadow-xl transition-transform duration-500 group-hover:scale-105 relative overflow-hidden">
+                            <div className="h-32 w-32 rounded-full p-1 bg-white/70 dark:bg-slate-800/80 backdrop-blur-xl border border-white dark:border-slate-700 shadow-xl transition-transform duration-500 group-hover:scale-105 relative overflow-hidden">
                                  <StorageImage 
                                     path={avatarPath} 
                                     alt="Profile" 
                                     className="h-full w-full rounded-full object-cover" 
                                     fallback={
-                                      <div className="h-full w-full rounded-full bg-gradient-to-br from-indigo-100 to-white flex items-center justify-center text-indigo-400">
+                                      <div className="h-full w-full rounded-full bg-gradient-to-br from-indigo-100 to-white dark:from-slate-800 dark:to-slate-900 flex items-center justify-center theme-accent-text">
                                           <User size={48} />
                                       </div>
                                     }
@@ -220,7 +220,7 @@ export const Account: React.FC = () => {
                                   e.stopPropagation();
                                   document.getElementById('avatar-upload')?.click();
                                 }}
-                                className="absolute bottom-1 right-1 flex h-10 w-10 items-center justify-center rounded-full bg-white text-slate-600 shadow-lg ring-1 ring-slate-100 transition-all hover:scale-110 hover:text-indigo-600"
+                                className="absolute bottom-1 right-1 flex h-10 w-10 items-center justify-center rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-200 shadow-lg ring-1 ring-slate-200 dark:ring-slate-700 transition-all hover:scale-110 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer"
                             >
                                 <Camera size={18} />
                             </button>
@@ -237,32 +237,32 @@ export const Account: React.FC = () => {
                             type="button"
                             onClick={handleRemoveAvatar}
                             disabled={loading}
-                            className="mt-3 text-xs font-medium text-slate-500 hover:text-rose-600 transition-colors cursor-pointer disabled:opacity-50"
+                            className="mt-3 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition-colors cursor-pointer disabled:opacity-50"
                           >
                             Remove photo
                           </button>
                         )}
                     </div>
 
-                    <h1 className="text-3xl font-bold tracking-tight text-slate-900 mb-2">
+                    <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100 mb-2">
                         {formData.fullName || formData.displayName || email.split('@')[0] || 'User'}
                     </h1>
-                    <p className="text-slate-500 font-medium flex items-center gap-2 bg-white/40 px-4 py-1.5 rounded-full border border-white/40">
-                        <Mail size={14} />
-                        {email}
+                    <p className="text-slate-500 dark:text-slate-300 text-xs sm:text-sm font-medium inline-flex items-center gap-2 bg-white/60 dark:bg-slate-800/80 px-4 py-1.5 rounded-full border border-slate-200/70 dark:border-slate-700 max-w-full overflow-hidden">
+                        <Mail size={14} className="shrink-0" />
+                        <span className="truncate">{email}</span>
                     </p>
                 </div>
 
                 {/* Main Settings Grid */}
-                <div className="px-6 sm:px-12 py-12 space-y-12 bg-white/20">
+                <div className="px-5 sm:px-12 py-8 sm:py-12 space-y-10 sm:space-y-12 bg-white/30 dark:bg-slate-900/40">
                     
                     {/* Section: Profile Information */}
                     <div className="space-y-6">
                         <div className="flex items-center gap-3 mb-6">
-                             <div className="h-8 w-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 ring-1 ring-blue-100 shadow-sm">
+                             <div className="h-8 w-8 rounded-full theme-accent-soft flex items-center justify-center shadow-sm">
                                  <User size={16} strokeWidth={2.5} />
                              </div>
-                             <h3 className="text-lg font-semibold text-slate-900">Personal Information</h3>
+                             <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Personal Information</h3>
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -272,7 +272,6 @@ export const Account: React.FC = () => {
                                 value={formData.fullName} 
                                 onChange={handleChange} 
                                 placeholder="e.g. Jane Doe"
-                                className="bg-white/70 border-white/50 focus:bg-white"
                              />
                              <Input 
                                 label="Display Name" 
@@ -280,12 +279,11 @@ export const Account: React.FC = () => {
                                 value={formData.displayName} 
                                 onChange={handleChange} 
                                 placeholder="e.g. Jane"
-                                className="bg-white/70 border-white/50 focus:bg-white"
                              />
                         </div>
 
                         <div>
-                             <label className="ml-1 mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500/80">
+                             <label className="ml-1 mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                                 Timezone
                             </label>
                             <div className="relative group">
@@ -294,7 +292,7 @@ export const Account: React.FC = () => {
                                     name="timezone"
                                     value={formData.timezone}
                                     onChange={handleChange}
-                                    className="w-full appearance-none rounded-2xl border border-white/50 bg-white/70 pl-12 pr-5 py-4 text-[15px] font-medium text-slate-900 shadow-[0_2px_10px_rgba(0,0,0,0.02)] transition-all duration-300 hover:bg-white/90 hover:shadow-md focus:border-indigo-500/30 focus:bg-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
+                                    className="w-full appearance-none rounded-2xl border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-800/80 pl-12 pr-5 py-4 text-[15px] font-medium text-slate-900 dark:text-slate-100 shadow-xs transition-all duration-300 hover:bg-white dark:hover:bg-slate-800 focus:border-indigo-500/40 focus:outline-none focus:ring-4 focus:ring-indigo-500/10"
                                 >
                                     <option>UTC-8 (Pacific Time)</option>
                                     <option>UTC-7 (Asia)</option>
@@ -310,43 +308,43 @@ export const Account: React.FC = () => {
                     </div>
 
                     {/* Section: Security */}
-                    <div className="space-y-6 pt-6 border-t border-slate-200/40">
+                    <div className="space-y-6 pt-6 border-t border-slate-200/40 dark:border-slate-800">
                         <div className="flex items-center gap-3 mb-2">
-                             <div className="h-8 w-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 ring-1 ring-indigo-100 shadow-sm">
+                             <div className="h-8 w-8 rounded-full theme-accent-soft flex items-center justify-center shadow-sm">
                                  <Shield size={16} strokeWidth={2.5} />
                              </div>
-                             <h3 className="text-lg font-semibold text-slate-900">Security & Login</h3>
+                             <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Security & Login</h3>
                         </div>
 
-                        <div className="rounded-3xl border border-white/60 bg-white/50 p-6 shadow-sm">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-4">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                        <div className="rounded-3xl border border-slate-200/70 dark:border-slate-800 bg-white/60 dark:bg-slate-800/60 p-4 sm:p-6 shadow-sm">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+                                <div className="flex items-center gap-3.5 sm:gap-4">
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300">
                                         <Key size={18} />
                                     </div>
                                     <div>
-                                        <p className="text-sm font-semibold text-slate-900">Password</p>
-                                        <p className="text-xs text-slate-500">Last changed 3 months ago</p>
+                                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">Password</p>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">Last changed 3 months ago</p>
                                     </div>
                                 </div>
-                                <Button type="button" variant="outline" size="sm" onClick={handlePasswordReset}>
+                                <Button type="button" variant="outline" size="sm" onClick={handlePasswordReset} className="whitespace-nowrap self-start sm:self-auto">
                                     Change Password
                                 </Button>
                             </div>
                             
-                            <div className="my-4 h-px w-full bg-slate-200/50" />
+                            <div className="my-4 h-px w-full bg-slate-200/50 dark:bg-slate-700" />
                             
                             <div className="flex items-center justify-between opacity-60 grayscale">
                                 <div className="flex items-center gap-4">
-                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-500">
+                                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300">
                                         <Smartphone size={18} />
                                     </div>
                                     <div>
-                                        <p className="text-sm font-semibold text-slate-900">2-Factor Authentication</p>
-                                        <p className="text-xs text-slate-500">Add an extra layer of security</p>
+                                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-100">2-Factor Authentication</p>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400">Add an extra layer of security</p>
                                     </div>
                                 </div>
-                                <div className="relative inline-flex h-6 w-11 items-center rounded-full bg-slate-200">
+                                <div className="relative inline-flex h-6 w-11 items-center rounded-full bg-slate-200 dark:bg-slate-700">
                                     <span className="h-4 w-4 translate-x-1 transform rounded-full bg-white transition" />
                                 </div>
                             </div>
@@ -354,19 +352,19 @@ export const Account: React.FC = () => {
                     </div>
 
                     {/* Section: Danger Zone */}
-                    <div className="space-y-6 pt-6 border-t border-slate-200/40">
+                    <div className="space-y-6 pt-6 border-t border-slate-200/40 dark:border-slate-800">
                         <div className="flex items-center gap-3 mb-2">
-                             <div className="h-8 w-8 rounded-full bg-red-50 flex items-center justify-center text-red-600 ring-1 ring-red-100 shadow-sm">
+                             <div className="h-8 w-8 rounded-full bg-red-50 dark:bg-red-950/60 flex items-center justify-center text-red-600 dark:text-red-400 ring-1 ring-red-100 dark:ring-red-900/50 shadow-sm">
                                  <AlertTriangle size={16} strokeWidth={2.5} />
                              </div>
-                             <h3 className="text-lg font-semibold text-slate-900">Danger Zone</h3>
+                             <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">Danger Zone</h3>
                         </div>
 
-                        <div className="rounded-3xl border border-red-100 bg-red-50/30 p-6">
+                        <div className="rounded-3xl border border-red-100 dark:border-red-900/50 bg-red-50/40 dark:bg-red-950/30 p-6">
                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                                 <div>
-                                    <h4 className="text-sm font-bold text-slate-900">Delete Account</h4>
-                                    <p className="text-xs text-slate-500 mt-1 leading-relaxed max-w-sm">
+                                    <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">Delete Account</h4>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed max-w-sm">
                                         Permanently delete your account and all of your content. This action cannot be undone.
                                     </p>
                                 </div>
@@ -380,24 +378,24 @@ export const Account: React.FC = () => {
                 </div>
 
                 {/* Footer Action Bar */}
-                <div className="sticky bottom-0 z-10 flex flex-col md:flex-row items-center justify-between border-t border-white/60 bg-white/70 px-8 py-5 backdrop-blur-xl gap-4">
+                <div className="md:sticky md:bottom-0 z-10 flex flex-col sm:flex-row items-center justify-between border-t border-slate-200/70 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 px-5 sm:px-8 py-4 sm:py-5 backdrop-blur-xl gap-4">
                     <button 
                         type="button" 
                         onClick={handleSignOut}
-                        className="text-sm font-semibold text-slate-500 hover:text-red-600 transition-colors"
+                        className="text-sm font-semibold text-slate-500 dark:text-slate-400 hover:text-red-600 dark:hover:text-red-400 transition-colors cursor-pointer"
                     >
                         Sign Out
                     </button>
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-wrap items-center justify-center sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto">
                          {saveStatus && (
-                             <span className={`text-sm font-medium ${saveStatus.type === 'success' ? 'text-emerald-600' : 'text-red-600'} animate-in fade-in slide-in-from-right-4 duration-300`}>
+                             <span className={`text-sm font-medium ${saveStatus.type === 'success' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'} animate-in fade-in slide-in-from-right-4 duration-300`}>
                                  {saveStatus.message}
                              </span>
                          )}
                          <Button type="button" variant="ghost" onClick={() => navigate(RoutePath.HOME)}>
                              Cancel
                          </Button>
-                         <Button type="submit" isLoading={loading} className="shadow-[0_10px_20px_-5px_rgba(79,70,229,0.3)]">
+                         <Button type="submit" isLoading={loading} className="theme-accent-bg shadow-md">
                              <Save className="mr-2 h-4 w-4" />
                              Save Changes
                          </Button>
